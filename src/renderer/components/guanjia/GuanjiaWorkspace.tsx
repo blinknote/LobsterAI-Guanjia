@@ -11,6 +11,8 @@ export interface GuanjiaWorkspaceProps {
   todoCount?: number;
   iframeUrl?: string;
   isVisible?: boolean;
+  onStoreNameChange?: (name: string) => void;
+  onTodoCountChange?: (count: number) => void;
 }
 
 /**
@@ -34,6 +36,8 @@ export const GuanjiaWorkspace: React.FC<GuanjiaWorkspaceProps> = ({
   todoCount = 3,
   iframeUrl,
   isVisible = true,
+  onStoreNameChange,
+  onTodoCountChange,
 }) => {
   // 骨架屏加载状态
   const [isLoading, setIsLoading] = useState(true);
@@ -117,6 +121,46 @@ export const GuanjiaWorkspace: React.FC<GuanjiaWorkspaceProps> = ({
     }
     return { success: false };
   }, []);
+
+  const ipcGetContext = useCallback(async () => {
+    if (typeof window !== 'undefined') {
+      if (window.guanjiaBridge?.getWorkspaceContext) {
+        return window.guanjiaBridge.getWorkspaceContext();
+      }
+      if (window.electron?.guanjia?.getContext) {
+        return await window.electron.guanjia.getContext();
+      }
+    }
+    return null;
+  }, []);
+
+  // 加载工作区上下文并通知顶层状态更新
+  useEffect(() => {
+    if (isLoading || !isVisible) return;
+    let isCancelled = false;
+
+    const fetchContext = async () => {
+      try {
+        const ctx: any = await ipcGetContext();
+        if (isCancelled || !ctx) return;
+        const resolvedStoreName = ctx.currentShop?.name || ctx.currentUser?.shopName;
+        if (resolvedStoreName && onStoreNameChange) {
+          onStoreNameChange(resolvedStoreName);
+        }
+        if (typeof ctx.pendingCount === 'number' && onTodoCountChange) {
+          onTodoCountChange(ctx.pendingCount);
+        }
+      } catch (err) {
+        console.warn('[GuanjiaWorkspace] Failed to fetch workspace context:', err);
+      }
+    };
+
+    fetchContext();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [isLoading, isVisible, ipcGetContext, onStoreNameChange, onTodoCountChange]);
 
   // 动态获取容器 DOMRect 并调用 SetBounds 更新视图大小
   const updateBounds = useCallback(() => {

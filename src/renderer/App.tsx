@@ -2312,6 +2312,8 @@ const App: React.FC = () => {
                 onToggleAssistant={handleToggleGuanjiaAssistant}
                 storeName={guanjiaStoreName}
                 todoCount={guanjiaTodoCount}
+                onStoreNameChange={setGuanjiaStoreName}
+                onTodoCountChange={setGuanjiaTodoCount}
                 isVisible={mainView === 'guanjia'}
               />
             </div>
