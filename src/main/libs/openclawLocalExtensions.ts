@@ -1,0 +1,296 @@
+import { app } from 'electron';
+import fs from 'fs';
+import path from 'path';
+
+import { removeTreeNoFollowSync } from './removeTreeNoFollow';
+
+const LOCAL_EXTENSIONS_DIR = 'openclaw-extensions';
+const THIRD_PARTY_EXTENSIONS_DIR = 'third-party-extensions';
+
+export type OpenClawExtensionManifest = {
+  directoryId: string;
+  pluginId: string;
+  directory: string;
+  manifestPath: string;
+  source: 'bundled' | 'local';
+};
+
+const readExtensionManifest = (
+  baseDir: string,
+  directoryId: string,
+  source: OpenClawExtensionManifest['source'],
+): OpenClawExtensionManifest | null => {
+  const directory = path.join(baseDir, directoryId);
+  const manifestPath = path.join(directory, 'openclaw.plugin.json');
+  try {
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8')) as { id?: unknown };
+    const pluginId = typeof manifest.id === 'string' ? manifest.id.trim() : '';
+    if (!pluginId) {
+      return null;
+    }
+    return {
+      directoryId,
+      pluginId,
+      directory,
+      manifestPath,
+      source,
+    };
+  } catch {
+    return null;
+  }
+};
+
+const listExtensionManifests = (
+  extensionsDir: string | null,
+  source: OpenClawExtensionManifest['source'],
+): OpenClawExtensionManifest[] => {
+  if (!extensionsDir) {
+    return [];
+  }
+
+  try {
+    return fs.readdirSync(extensionsDir, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => readExtensionManifest(extensionsDir, entry.name, source))
+      .filter((entry): entry is OpenClawExtensionManifest => entry !== null);
+  } catch {
+    return [];
+  }
+};
+
+const findLocalExtensionsSourceDir = (): string | null => {
+  if (app.isPackaged) {
+    return null;
+  }
+
+  const candidates = [
+    path.join(app.getAppPath(), LOCAL_EXTENSIONS_DIR),
+    path.join(process.cwd(), LOCAL_EXTENSIONS_DIR),
+  ];
+
+  for (const candidate of candidates) {
+    try {
+      if (fs.statSync(candidate).isDirectory()) {
+        return candidate;
+      }
+    } catch {
+      // Ignore missing candidates.
+    }
+  }
+
+  return null;
+};
+
+const listRuntimeRootCandidates = (): string[] => (
+  app.isPackaged
+    ? [path.join(process.resourcesPath, 'cfmind')]
+    : [
+        path.join(app.getAppPath(), 'vendor', 'openclaw-runtime', 'current'),
+        path.join(process.cwd(), 'vendor', 'openclaw-runtime', 'current'),
+      ]
+);
+
+const firstExistingDir = (candidates: string[]): string | null => {
+  for (const candidate of candidates) {
+    try {
+      if (fs.statSync(candidate).isDirectory()) {
+        return candidate;
+      }
+    } catch {
+      // Ignore missing candidates.
+    }
+  }
+  return null;
+};
+
+export const findBundledExtensionsDir = (): string | null => (
+  firstExistingDir(listRuntimeRootCandidates().map(root => path.join(root, THIRD_PARTY_EXTENSIONS_DIR)))
+);
+
+/**
+ * Directory of OpenClaw's own runtime-bundled extensions (dist/extensions/…),
+ * as opposed to the third-party dir above which holds LobsterAI-synced local
+ * plugins. Bundled extensions surviving prune-openclaw-runtime.cjs live here.
+ */
+export const findRuntimeBundledExtensionsDir = (): string | null => (
+  firstExistingDir(listRuntimeRootCandidates().map(root => path.join(root, 'dist', 'extensions')))
+);
+
+export const hasRuntimeBundledOpenClawExtension = (extensionId: string): boolean => {
+  const dir = findRuntimeBundledExtensionsDir();
+  if (!dir) {
+    return false;
+  }
+  return fs.existsSync(path.join(dir, extensionId, 'openclaw.plugin.json'));
+};
+
+export const syncLocalOpenClawExtensionsIntoRuntime = (
+  runtimeRoot: string,
+): { sourceDir: string | null; copied: string[] } => {
+  const sourceDir = findLocalExtensionsSourceDir();
+  if (!sourceDir) {
+    return { sourceDir: null, copied: [] };
+  }
+
+  const targetExtensionsDir = path.join(runtimeRoot, THIRD_PARTY_EXTENSIONS_DIR);
+  try {
+    if (!fs.statSync(targetExtensionsDir).isDirectory()) {
+      return { sourceDir, copied: [] };
+    }
+  } catch {
+    return { sourceDir, copied: [] };
+  }
+
+  const copied: string[] = [];
+  for (const entry of fs.readdirSync(sourceDir, { withFileTypes: true })) {
+    if (!entry.isDirectory()) {
+      continue;
+    }
+    fs.cpSync(
+      path.join(sourceDir, entry.name),
+      path.join(targetExtensionsDir, entry.name),
+      { recursive: true, force: true },
+    );
+    copied.push(entry.name);
+  }
+
+  return { sourceDir, copied };
+};
+
+export const listLocalOpenClawExtensionIds = (): string[] => {
+  const sourceDir = findLocalExtensionsSourceDir();
+  if (!sourceDir) {
+    return [];
+  }
+
+  try {
+    return fs.readdirSync(sourceDir, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .filter((entry) => fs.existsSync(path.join(sourceDir, entry.name, 'openclaw.plugin.json')))
+      .map((entry) => entry.name);
+  } catch {
+    return [];
+  }
+};
+
+export const listLocalOpenClawExtensionManifests = (): OpenClawExtensionManifest[] => (
+  listExtensionManifests(findLocalExtensionsSourceDir(), 'local')
+);
+
+const listRuntimeBundledPreinstallIds = (): string[] => {
+  try {
+    const pkg = JSON.parse(fs.readFileSync(path.join(app.getAppPath(), 'package.json'), 'utf8'));
+    if (!Array.isArray(pkg.openclaw?.plugins)) return [];
+    return pkg.openclaw.plugins
+      .filter((plugin: { id?: string; npm?: string; runtimeBundled?: boolean }) => (
+        plugin.runtimeBundled === true
+        && typeof plugin.id === 'string'
+        && /^[a-z0-9][a-z0-9._-]*$/i.test(plugin.id)
+        && plugin.npm === `@openclaw/${plugin.id}`
+      ))
+      .map((plugin: { id: string }) => plugin.id);
+  } catch {
+    return [];
+  }
+};
+
+export const listBundledOpenClawExtensionIds = (): string[] => (
+  listBundledOpenClawExtensionManifests().map(manifest => manifest.directoryId)
+);
+
+export const listBundledOpenClawExtensionManifests = (): OpenClawExtensionManifest[] => {
+  const runtimeBundledIds = new Set(listRuntimeBundledPreinstallIds());
+  return [
+    ...listExtensionManifests(findRuntimeBundledExtensionsDir(), 'bundled')
+      .filter(manifest => runtimeBundledIds.has(manifest.directoryId)),
+    ...listExtensionManifests(findBundledExtensionsDir(), 'bundled')
+      .filter(manifest => !runtimeBundledIds.has(manifest.directoryId)),
+  ];
+};
+
+export const listAvailableOpenClawExtensionManifests = (): OpenClawExtensionManifest[] => [
+  ...listBundledOpenClawExtensionManifests(),
+  ...listLocalOpenClawExtensionManifests(),
+];
+
+export const resolveOpenClawExtensionPluginId = (extensionId: string): string | null => {
+  const normalized = extensionId.trim();
+  if (!normalized) {
+    return null;
+  }
+
+  const manifest = listAvailableOpenClawExtensionManifests()
+    .find((entry) => entry.directoryId === normalized || entry.pluginId === normalized);
+  return manifest?.pluginId ?? null;
+};
+
+export const hasBundledOpenClawExtension = (extensionId: string): boolean => {
+  return resolveOpenClawExtensionPluginId(extensionId) !== null;
+};
+
+/**
+ * Returns the absolute path to the third-party plugins directory.
+ *
+ * Third-party plugins (declared in package.json openclaw.plugins) are placed
+ * in a separate `extensions/` directory — NOT in `dist/extensions/` which is
+ * reserved for runtime-bundled plugins that satisfy the bundled-channel-entry
+ * contract.  The gateway discovers these via `plugins.load.paths`.
+ *
+ * The directory is located under userData so that user-installed plugins
+ * persist across application upgrades / reinstalls.
+ */
+export const findThirdPartyExtensionsDir = (): string | null => {
+  const dir = path.join(app.getPath('userData'), THIRD_PARTY_EXTENSIONS_DIR);
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+  } catch {
+    return null;
+  }
+  return dir;
+};
+
+/**
+ * Remove third-party plugins that may linger in directories scanned by the
+ * gateway's bundled-channel metadata loader.  Two locations are cleaned:
+ *
+ * 1. `dist/extensions/{id}` — legacy overlay installs placed plugins here.
+ * 2. `extensions/{id}` — prior versions of LobsterAI installed plugins here.
+ *    Because gateway-bundle.mjs runs from the package root (not dist/),
+ *    `RUNNING_FROM_BUILT_ARTIFACT` is false and `resolveBundledPluginScanDir`
+ *    falls back to `extensions/`.  Third-party plugins there fail the
+ *    bundled-channel-entry contract check and waste startup time.
+ */
+export const cleanupStaleThirdPartyPluginsFromBundledDir = (
+  runtimeRoot: string,
+  thirdPartyPluginIds: readonly string[],
+): string[] => {
+  const runtimeBundledDir = path.join(runtimeRoot, 'dist', 'extensions');
+  const staleDirs = [
+    runtimeBundledDir,
+    path.join(runtimeRoot, 'extensions'),
+  ];
+  const removed: string[] = [];
+  const runtimeBundledIds = new Set(listRuntimeBundledPreinstallIds());
+
+  for (const id of thirdPartyPluginIds) {
+    for (const baseDir of staleDirs) {
+      // Explicitly shipped official plugins (Discord) now belong in this root.
+      // Still remove their legacy source-root copy under extensions/.
+      if (baseDir === runtimeBundledDir && runtimeBundledIds.has(id)) continue;
+      const staleDir = path.join(baseDir, id);
+      try {
+        const stats = fs.lstatSync(staleDir);
+        if (stats.isDirectory() || stats.isSymbolicLink()) {
+          removeTreeNoFollowSync(staleDir);
+          removed.push(id);
+        }
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+          console.warn(`[OpenClaw] Failed to clean stale plugin directory: ${staleDir}`, error);
+        }
+      }
+    }
+  }
+
+  return removed;
+};
