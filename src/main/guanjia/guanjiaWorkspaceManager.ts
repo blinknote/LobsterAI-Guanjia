@@ -26,6 +26,7 @@ export class GuanjiaWorkspaceManager {
   private currentSsoCredentials: GuanjiaSsoCredentials | null = null;
   private auditLogs: GuanjiaFinancialAuditLog[] = [];
   private coworkStore: CoworkStore | null = null;
+  private coworkStoreGetter: (() => CoworkStore) | null = null;
 
   private constructor() {
     this.setupPartitionSession();
@@ -42,11 +43,32 @@ export class GuanjiaWorkspaceManager {
     this.coworkStore = store;
   }
 
+  public setCoworkStoreGetter(getter: () => CoworkStore): void {
+    this.coworkStoreGetter = getter;
+  }
+
+  private getStoreInstance(): CoworkStore | null {
+    if (this.coworkStore) return this.coworkStore;
+    if (this.coworkStoreGetter) {
+      try {
+        return this.coworkStoreGetter();
+      } catch (err) {
+        console.warn('[GuanjiaWorkspaceManager] Failed to get coworkStore:', err);
+      }
+    }
+    return null;
+  }
+
   /**
    * 初始化 'persist:guanjia-workspace' 独立持久化分区
    * 禁用保存密码气泡与弹窗
    */
   private setupPartitionSession(): void {
+    if (!app.isReady()) {
+      app.whenReady().then(() => this.setupPartitionSession());
+      return;
+    }
+
     const ses = session.fromPartition(GUANJIA_WORKSPACE_PARTITION);
 
     // 拦截权限请求，禁用密码凭证捕获与多余通知
@@ -321,13 +343,14 @@ export class GuanjiaWorkspaceManager {
   // 交班清场：静默清空助理会话，不弹窗，不动管家台账
   // =========================================================================
   public async clearAssistantSession(): Promise<{ success: boolean; clearedCount: number }> {
-    if (!this.coworkStore) {
+    const store = this.getStoreInstance();
+    if (!store) {
       console.warn('[GuanjiaWorkspaceManager] coworkStore not configured for clearing assistant session');
       return { success: false, clearedCount: 0 };
     }
 
     try {
-      const deletedSessionIds = this.coworkStore.clearAgentSessions(AgentId.GuanjiaAssistant);
+      const deletedSessionIds = store.clearAgentSessions(AgentId.GuanjiaAssistant);
       return {
         success: true,
         clearedCount: deletedSessionIds.length,

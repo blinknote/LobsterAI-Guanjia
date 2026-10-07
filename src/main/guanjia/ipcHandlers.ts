@@ -19,10 +19,7 @@ export function registerGuanjiaIpcHandlers(options?: RegisterGuanjiaHandlersOpti
   const modelRouter = GuanjiaModelRouter.getInstance();
 
   if (options?.getCoworkStore) {
-    const store = options.getCoworkStore();
-    if (store) {
-      workspaceManager.setCoworkStore(store);
-    }
+    workspaceManager.setCoworkStoreGetter(options.getCoworkStore);
   }
 
   // =========================================================================

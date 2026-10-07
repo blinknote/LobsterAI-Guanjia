@@ -684,6 +684,11 @@ function main() {
 
   for (const plugin of plugins) {
     const { id, npm: npmSpec, version, optional } = plugin;
+    if (optional && process.env.OPENCLAW_SKIP_OPTIONAL_PLUGINS === '1') {
+      log(`Skipping optional plugin ${id} (OPENCLAW_SKIP_OPTIONAL_PLUGINS=1).`);
+      continue;
+    }
+
     const cacheDir = path.join(pluginCacheBase, id);
     const installInfoPath = path.join(cacheDir, 'plugin-install-info.json');
 
