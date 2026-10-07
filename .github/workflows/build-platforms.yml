@@ -34,7 +34,7 @@ jobs:
     if: ${{ github.event_name == 'push' || inputs.build_macos }}
     runs-on: macos-latest
     env:
-      NODE_OPTIONS: "--max-old-space-size=6144 --stack-size=2048"
+      NODE_OPTIONS: "--max-old-space-size=6144"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
