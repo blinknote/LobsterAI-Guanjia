@@ -1,11 +1,26 @@
-import { describe, expect, it, mock, beforeAll } from 'bun:test';
+import { beforeAll, describe, expect, it, mock } from 'bun:test';
+
+const mockElectronState = ((globalThis as any).__guanjiaMockElectronState ??= {
+  cookieSet: mock(async (_cookie: any) => {}),
+  cookieRemove: mock(async (_url: string, _name: string) => {}),
+  cookieGet: mock(async () => []),
+  executeJs: mock(async (_code: string) => ({ success: true, message: 'executed' })),
+  ipcHandlers: new Map<string, (...args: any[]) => any>(),
+});
 
 const sessionMock = {
   setPermissionRequestHandler: mock((_cb) => {}),
+  cookies: {
+    set: mockElectronState.cookieSet,
+    remove: mockElectronState.cookieRemove,
+    get: mockElectronState.cookieGet,
+  },
 };
 const electronMock = {
   app: {
     isPackaged: false,
+    isReady: () => true,
+    whenReady: () => Promise.resolve(),
     getAppPath: () => process.cwd(),
     getPath: () => '/tmp',
   },
@@ -21,7 +36,7 @@ const electronMock = {
       reload: mock(() => {}),
       reloadIgnoringCache: mock(() => {}),
       on: mock(() => {}),
-      executeJavaScript: mock(async () => ({ success: true, message: 'executed' })),
+      executeJavaScript: mockElectronState.executeJs,
       navigationHistory: {
         canGoBack: () => false,
         canGoForward: () => false,
@@ -34,6 +49,17 @@ const electronMock = {
   },
   BrowserWindow: {
     getFocusedWindow: () => null,
+  },
+  ipcMain: {
+    handle: mock((channel: string, handler: any) => {
+      mockElectronState.ipcHandlers.set(channel, handler);
+    }),
+    on: mock((channel: string, handler: any) => {
+      mockElectronState.ipcHandlers.set(channel, handler);
+    }),
+    removeHandler: mock((channel: string) => {
+      mockElectronState.ipcHandlers.delete(channel);
+    }),
   },
 };
 mock.module('electron', () => electronMock);

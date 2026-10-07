@@ -126,6 +126,7 @@ export function registerGuanjiaIpcHandlers(options?: RegisterGuanjiaHandlersOpti
             employee_no: account,
             password: password,
           }),
+          signal: AbortSignal.timeout(15000),
         });
 
         if (!response.ok) {
@@ -194,8 +195,18 @@ export function registerGuanjiaIpcHandlers(options?: RegisterGuanjiaHandlersOpti
           },
           credentials,
         };
-      } catch (err) {
+      } catch (err: any) {
         console.error('[GuanjiaIpcHandlers] Login exception:', err instanceof Error ? err.message : err);
+        const isTimeout =
+          err?.name === 'TimeoutError' ||
+          err?.name === 'AbortError' ||
+          (err instanceof Error && /timeout|aborted|timed out/i.test(err.message));
+        if (isTimeout) {
+          return {
+            success: false,
+            error: '登录请求超时（超过 15 秒），请检查网络连接后重试',
+          };
+        }
         return {
           success: false,
           error: err instanceof Error ? err.message : '网络请求失败，请检查网络连接',

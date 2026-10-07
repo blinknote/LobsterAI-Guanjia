@@ -1,25 +1,36 @@
 import { beforeAll, beforeEach, describe, expect, it, mock } from 'bun:test';
 
-const cookieSetMock = mock(async (_cookie: any) => {});
-const cookieRemoveMock = mock(async (_url: string, _name: string) => {});
+const mockElectronState = ((globalThis as any).__guanjiaMockElectronState ??= {
+  cookieSet: mock(async (_cookie: any) => {}),
+  cookieRemove: mock(async (_url: string, _name: string) => {}),
+  cookieGet: mock(async () => []),
+  executeJs: mock(async (_code: string) => ({ success: true, message: 'executed' })),
+  ipcHandlers: new Map<string, (...args: any[]) => any>(),
+});
+
+const cookieSetMock = mockElectronState.cookieSet;
+const cookieRemoveMock = mockElectronState.cookieRemove;
+const executeJsMock = mockElectronState.executeJs;
+const ipcHandlers = mockElectronState.ipcHandlers;
 
 const sessionMock = {
   setPermissionRequestHandler: mock((_cb) => {}),
   cookies: {
     set: cookieSetMock,
     remove: cookieRemoveMock,
+    get: mockElectronState.cookieGet,
   },
 };
 
-const executeJsMock = mock(async (_code: string) => ({ success: true }));
-
-const ipcHandlers = new Map<string, (...args: any[]) => any>();
 const ipcMainMock = {
   handle: mock((channel: string, handler: (...args: any[]) => any) => {
     ipcHandlers.set(channel, handler);
   }),
   on: mock((channel: string, handler: (...args: any[]) => any) => {
     ipcHandlers.set(channel, handler);
+  }),
+  removeHandler: mock((channel: string) => {
+    ipcHandlers.delete(channel);
   }),
 };
 
@@ -121,6 +132,29 @@ describe('Guanjia Auth & Session Direct Injection', () => {
       const res = await loginHandler!({}, { account: 'A001', password: 'wrongpassword' });
       expect(res.success).toBe(false);
       expect(res.error).toBe('工号或密码错误');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('should abort and return graceful timeout error when fetch exceeds 15 seconds', async () => {
+    const loginHandler = ipcHandlers.get(GuanjiaIpcChannel.Login);
+    const originalFetch = globalThis.fetch;
+
+    // 模拟网络挂起超过 15 秒触发超时熔断
+    globalThis.fetch = mock(async (_url: any, options: any) => {
+      // 验证配置了 AbortSignal
+      expect(options?.signal).toBeDefined();
+      const error = new Error('The operation was aborted due to timeout');
+      error.name = 'TimeoutError';
+      throw error;
+    }) as any;
+
+    try {
+      const res = await loginHandler!({}, { account: 'A001', password: 'password123' });
+      expect(res.success).toBe(false);
+      expect(res.error).toContain('超时');
+      expect(res.error).toContain('15 秒');
     } finally {
       globalThis.fetch = originalFetch;
     }
