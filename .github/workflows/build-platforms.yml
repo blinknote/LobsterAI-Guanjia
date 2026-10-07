@@ -32,6 +32,8 @@ jobs:
   build-macos:
     if: ${{ github.event_name == 'push' || inputs.build_macos }}
     runs-on: macos-latest
+    env:
+      NODE_OPTIONS: "--max-old-space-size=6144 --stack-size=2048"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -43,6 +45,7 @@ jobs:
           key: npm-${{ runner.os }}-${{ hashFiles('package.json') }}
           restore-keys: npm-${{ runner.os }}-
       
+      - run: npm install -g pnpm
       - run: npm install
       
       # 设置 OpenClaw runtime (如果需要)
@@ -85,6 +88,7 @@ jobs:
           key: npm-${{ runner.os }}-${{ hashFiles('package.json') }}
           restore-keys: npm-${{ runner.os }}-
       
+      - run: npm install -g pnpm
       - run: npm install
       
       # Windows 需要 Python 运行时
@@ -125,6 +129,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libgtk-3-0 libnotify4 libnss3 libxss1 libxtst6 xdg-utils libatspi2.0-0 libuuid1 libsecret-1-0
       
+      - run: npm install -g pnpm
       - run: npm install
       
       - name: Build Linux
