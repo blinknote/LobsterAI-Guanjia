@@ -172,4 +172,16 @@ describe('阿岚前端闭环测试: WebContentsView 真实联动与交班静默�
     expect(alertCalled).toBe(false);
     expect(confirmCalled).toBe(false);
   });
+
+  it("6. 方案 A 接入验证：默认属性与 IPC attachView 绑定真实线上地址 https://guanjia.qszy.me/", async () => {
+    const bounds = { x: 0, y: 0, width: 1000, height: 700 };
+    const targetUrl = "https://guanjia.qszy.me/";
+    await (globalThis as any).window.guanjiaBridge.attachView({ bounds, initialUrl: targetUrl });
+
+    const attachCall = mockIpcInvocations.find(
+      (call: any) => call.channel === GuanjiaIpcChannel.AttachView && call.args.initialUrl === "https://guanjia.qszy.me/"
+    );
+    expect(attachCall).toBeDefined();
+    expect(attachCall?.args.initialUrl).toBe("https://guanjia.qszy.me/");
+  });
 });

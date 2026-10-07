@@ -2312,6 +2312,7 @@ const App: React.FC = () => {
                 onToggleAssistant={handleToggleGuanjiaAssistant}
                 storeName={guanjiaStoreName}
                 todoCount={guanjiaTodoCount}
+                iframeUrl="https://guanjia.qszy.me/"
                 onStoreNameChange={setGuanjiaStoreName}
                 onTodoCountChange={setGuanjiaTodoCount}
                 isVisible={mainView === 'guanjia'}

@@ -1545,8 +1545,18 @@ contextBridge.exposeInMainWorld('electron', {
       ipcRenderer.invoke(GuanjiaIpcChannel.ShowView) as Promise<{ success: boolean }>,
     hideView: () =>
       ipcRenderer.invoke(GuanjiaIpcChannel.HideView) as Promise<{ success: boolean }>,
-    loadUrl: (url: string) =>
+    loadUrl: (url?: string) =>
       ipcRenderer.invoke(GuanjiaIpcChannel.LoadUrl, url) as Promise<{ success: boolean }>,
+    reload: (ignoreCache?: boolean) =>
+      ipcRenderer.invoke(GuanjiaIpcChannel.Reload, ignoreCache) as Promise<{ success: boolean }>,
+    setDefaultUrl: (url: string) =>
+      ipcRenderer.invoke(GuanjiaIpcChannel.SetDefaultUrl, url) as Promise<{ success: boolean }>,
+    getDefaultUrl: () =>
+      ipcRenderer.invoke(GuanjiaIpcChannel.GetDefaultUrl) as Promise<{ success: boolean; url: string }>,
+    goBack: () =>
+      ipcRenderer.invoke(GuanjiaIpcChannel.GoBack) as Promise<{ success: boolean }>,
+    goForward: () =>
+      ipcRenderer.invoke(GuanjiaIpcChannel.GoForward) as Promise<{ success: boolean }>,
     getNavigationState: () =>
       ipcRenderer.invoke(GuanjiaIpcChannel.GetNavigationState) as Promise<{
         url: string;
@@ -1590,4 +1600,16 @@ contextBridge.exposeInMainWorld('guanjiaBridge', {
     ipcRenderer.invoke(GuanjiaIpcChannel.ShowView) as Promise<{ success: boolean }>,
   hideView: () =>
     ipcRenderer.invoke(GuanjiaIpcChannel.HideView) as Promise<{ success: boolean }>,
+  loadUrl: (url?: string) =>
+    ipcRenderer.invoke(GuanjiaIpcChannel.LoadUrl, url) as Promise<{ success: boolean }>,
+  reload: (ignoreCache?: boolean) =>
+    ipcRenderer.invoke(GuanjiaIpcChannel.Reload, ignoreCache) as Promise<{ success: boolean }>,
+  setDefaultUrl: (url: string) =>
+    ipcRenderer.invoke(GuanjiaIpcChannel.SetDefaultUrl, url) as Promise<{ success: boolean }>,
+  getDefaultUrl: () =>
+    ipcRenderer.invoke(GuanjiaIpcChannel.GetDefaultUrl) as Promise<{ success: boolean; url: string }>,
+  goBack: () =>
+    ipcRenderer.invoke(GuanjiaIpcChannel.GoBack) as Promise<{ success: boolean }>,
+  goForward: () =>
+    ipcRenderer.invoke(GuanjiaIpcChannel.GoForward) as Promise<{ success: boolean }>,
 });

@@ -163,6 +163,11 @@ export const GuanjiaIpcChannel = {
   ShowView: 'guanjia:workspace:show-view',
   HideView: 'guanjia:workspace:hide-view',
   LoadUrl: 'guanjia:workspace:load-url',
+  Reload: 'guanjia:workspace:reload',
+  SetDefaultUrl: 'guanjia:workspace:set-default-url',
+  GetDefaultUrl: 'guanjia:workspace:get-default-url',
+  GoBack: 'guanjia:workspace:go-back',
+  GoForward: 'guanjia:workspace:go-forward',
   GetNavigationState: 'guanjia:workspace:get-nav-state',
 
   // SSO 凭证

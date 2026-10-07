@@ -16,12 +16,15 @@ import {
   isFinancialAction,
 } from './types';
 
+export const DEFAULT_GUANJIA_URL = 'https://guanjia.qszy.me/';
+
 export class GuanjiaWorkspaceManager {
   private static instance: GuanjiaWorkspaceManager | null = null;
   private view: WebContentsView | null = null;
   private attachedWindow: BrowserWindow | null = null;
   private currentBounds: Rectangle = { x: 0, y: 0, width: 0, height: 0 };
   private isVisible: boolean = false;
+  private defaultUrl: string = DEFAULT_GUANJIA_URL;
 
   private currentSsoCredentials: GuanjiaSsoCredentials | null = null;
   private auditLogs: GuanjiaFinancialAuditLog[] = [];
@@ -64,8 +67,10 @@ export class GuanjiaWorkspaceManager {
    * 禁用保存密码气泡与弹窗
    */
   private setupPartitionSession(): void {
-    if (!app.isReady()) {
-      app.whenReady().then(() => this.setupPartitionSession());
+    if (app && typeof app.isReady === 'function' && !app.isReady()) {
+      if (typeof app.whenReady === 'function') {
+        app.whenReady().then(() => this.setupPartitionSession());
+      }
       return;
     }
 
@@ -130,8 +135,9 @@ export class GuanjiaWorkspaceManager {
     view.setVisible(true);
     this.isVisible = true;
 
-    if (initialUrl && view.webContents.getURL() !== initialUrl) {
-      view.webContents.loadURL(initialUrl);
+    const targetUrl = initialUrl || this.defaultUrl;
+    if (targetUrl && (view.webContents.getURL() !== targetUrl || view.webContents.getURL() === 'about:blank')) {
+      view.webContents.loadURL(targetUrl);
     }
   }
 
@@ -166,9 +172,44 @@ export class GuanjiaWorkspaceManager {
     }
   }
 
-  public loadUrl(url: string): void {
+  public setDefaultUrl(url: string): void {
+    if (url && typeof url === 'string') {
+      this.defaultUrl = url.trim();
+    }
+  }
+
+  public getDefaultUrl(): string {
+    return this.defaultUrl;
+  }
+
+  public loadUrl(url?: string): void {
     const view = this.getOrCreateView();
-    view.webContents.loadURL(url);
+    const targetUrl = url || this.defaultUrl;
+    view.webContents.loadURL(targetUrl);
+  }
+
+  public reload(ignoreCache: boolean = false): void {
+    if (this.view && !this.view.webContents.isDestroyed()) {
+      if (ignoreCache) {
+        this.view.webContents.reloadIgnoringCache();
+      } else {
+        this.view.webContents.reload();
+      }
+    } else {
+      this.loadUrl(this.defaultUrl);
+    }
+  }
+
+  public goBack(): void {
+    if (this.view && !this.view.webContents.isDestroyed() && this.view.webContents.navigationHistory.canGoBack()) {
+      this.view.webContents.navigationHistory.goBack();
+    }
+  }
+
+  public goForward(): void {
+    if (this.view && !this.view.webContents.isDestroyed() && this.view.webContents.navigationHistory.canGoForward()) {
+      this.view.webContents.navigationHistory.goForward();
+    }
   }
 
   public getNavigationState(): { url: string; title: string; canGoBack: boolean; canGoForward: boolean } {

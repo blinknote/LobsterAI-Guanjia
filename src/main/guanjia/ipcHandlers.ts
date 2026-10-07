@@ -58,8 +58,32 @@ export function registerGuanjiaIpcHandlers(options?: RegisterGuanjiaHandlersOpti
     return { success: true };
   });
 
-  ipcMain.handle(GuanjiaIpcChannel.LoadUrl, async (_event, url: string) => {
+  ipcMain.handle(GuanjiaIpcChannel.LoadUrl, async (_event, url?: string) => {
     workspaceManager.loadUrl(url);
+    return { success: true };
+  });
+
+  ipcMain.handle(GuanjiaIpcChannel.Reload, async (_event, ignoreCache?: boolean) => {
+    workspaceManager.reload(Boolean(ignoreCache));
+    return { success: true };
+  });
+
+  ipcMain.handle(GuanjiaIpcChannel.SetDefaultUrl, async (_event, url: string) => {
+    workspaceManager.setDefaultUrl(url);
+    return { success: true };
+  });
+
+  ipcMain.handle(GuanjiaIpcChannel.GetDefaultUrl, async () => {
+    return { success: true, url: workspaceManager.getDefaultUrl() };
+  });
+
+  ipcMain.handle(GuanjiaIpcChannel.GoBack, async () => {
+    workspaceManager.goBack();
+    return { success: true };
+  });
+
+  ipcMain.handle(GuanjiaIpcChannel.GoForward, async () => {
+    workspaceManager.goForward();
     return { success: true };
   });
 

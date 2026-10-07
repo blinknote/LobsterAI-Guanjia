@@ -18,11 +18,15 @@ const electronMock = {
       getURL: () => 'https://guanjia.example.com/cashier',
       getTitle: () => '收银结账 - 智慧管家',
       loadURL: mock(() => {}),
+      reload: mock(() => {}),
+      reloadIgnoringCache: mock(() => {}),
       on: mock(() => {}),
       executeJavaScript: mock(async () => ({ success: true, message: 'executed' })),
       navigationHistory: {
         canGoBack: () => false,
         canGoForward: () => false,
+        goBack: mock(() => {}),
+        goForward: mock(() => {}),
       },
     };
     setBounds = mock(() => {});
@@ -36,6 +40,7 @@ mock.module('electron', () => electronMock);
 
 let GuanjiaModelRouter: any;
 let GuanjiaWorkspaceManager: any;
+let DEFAULT_GUANJIA_URL: any;
 let GUANJIA_WORKSPACE_PARTITION: any;
 
 beforeAll(async () => {
@@ -44,6 +49,7 @@ beforeAll(async () => {
 
   const wsMod = await import('./guanjiaWorkspaceManager');
   GuanjiaWorkspaceManager = wsMod.GuanjiaWorkspaceManager;
+  DEFAULT_GUANJIA_URL = wsMod.DEFAULT_GUANJIA_URL;
 
   const typesMod = await import('./types');
   GUANJIA_WORKSPACE_PARTITION = typesMod.GUANJIA_WORKSPACE_PARTITION;
@@ -98,6 +104,39 @@ describe('Guanjia Workspace Manager & Preload Security', () => {
     expect(logs.length).toBeGreaterThan(0);
     expect(logs[0].status).toBe('intercepted');
     expect(logs[0].amount).toBe('198.00');
+  });
+
+
+  it('should have DEFAULT_GUANJIA_URL pointing to the production domain', () => {
+    expect(DEFAULT_GUANJIA_URL).toBe('https://guanjia.qszy.me/');
+  });
+
+  it('should support navigation configuration, reload and default url fallback', () => {
+    const manager = GuanjiaWorkspaceManager.getInstance();
+    expect(manager.getDefaultUrl()).toBe('https://guanjia.qszy.me/');
+
+    // 测试动态修改默认 URL
+    manager.setDefaultUrl('https://guanjia.qszy.me/dashboard');
+    expect(manager.getDefaultUrl()).toBe('https://guanjia.qszy.me/dashboard');
+
+    // 恢复默认
+    manager.setDefaultUrl(DEFAULT_GUANJIA_URL);
+    expect(manager.getDefaultUrl()).toBe('https://guanjia.qszy.me/');
+
+    // 测试 loadUrl
+    const view = manager.getOrCreateView();
+    manager.loadUrl();
+    expect(view.webContents.loadURL).toHaveBeenCalledWith('https://guanjia.qszy.me/');
+
+    manager.loadUrl('https://guanjia.qszy.me/rooms');
+    expect(view.webContents.loadURL).toHaveBeenCalledWith('https://guanjia.qszy.me/rooms');
+
+    // 测试 reload
+    manager.reload();
+    expect(view.webContents.reload).toHaveBeenCalled();
+
+    manager.reload(true);
+    expect(view.webContents.reloadIgnoringCache).toHaveBeenCalled();
   });
 
   it('should allow financial action when confirmed and record audit log', async () => {

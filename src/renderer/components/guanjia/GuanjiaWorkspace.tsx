@@ -34,13 +34,15 @@ export const GuanjiaWorkspace: React.FC<GuanjiaWorkspaceProps> = ({
   currentUser = '李店长',
   currentPageName = '收银结账',
   todoCount = 3,
-  iframeUrl,
+  iframeUrl = 'https://guanjia.qszy.me/',
   isVisible = true,
   onStoreNameChange,
   onTodoCountChange,
 }) => {
   // 骨架屏加载状态
   const [isLoading, setIsLoading] = useState(true);
+  // WebContentsView 真实视图附加状态
+  const [isViewAttached, setIsViewAttached] = useState(false);
   // 助理输入框内容
   const [assistantInput, setAssistantInput] = useState('');
   // 助理操作流记录
@@ -206,10 +208,11 @@ export const GuanjiaWorkspace: React.FC<GuanjiaWorkspaceProps> = ({
       };
 
       if (!isAttachedRef.current) {
-        ipcAttachView(bounds, iframeUrl)
+        ipcAttachView(bounds, iframeUrl || 'https://guanjia.qszy.me/')
           .then(res => {
             if (res.success) {
               isAttachedRef.current = true;
+              setIsViewAttached(true);
             }
           })
           .catch(console.error);
@@ -417,12 +420,17 @@ export const GuanjiaWorkspace: React.FC<GuanjiaWorkspaceProps> = ({
             <div
               id="guanjia-view-container"
               ref={viewContainerRef}
-              tabIndex={0}
-              aria-label="智慧管家工作区视图"
+              tabIndex={isViewAttached ? -1 : 0}
+              aria-label={isViewAttached ? "智慧管家原生工作区视图" : "智慧管家工作区视图"}
               className="relative flex h-full w-full flex-col overflow-hidden bg-background"
             >
-              {/* 兜底与内嵌看板：展示开钟、收银、技师台账与右侧操作栏 */}
-              <div className="flex h-full w-full flex-col overflow-y-auto bg-background p-4 text-foreground">
+              {/* 兜底与内嵌看板：展示开钟、收银、技师台账与右侧操作栏；真实 WebContentsView 加载后作为静默兜底，不与原生视区产生焦点与事件冲突 */}
+              <div
+                className={`flex h-full w-full flex-col overflow-y-auto bg-background p-4 text-foreground transition-opacity duration-150 ${
+                  isViewAttached ? "pointer-events-none select-none opacity-0" : "opacity-100"
+                }`}
+                aria-hidden={isViewAttached}
+              >
                 {/* 顶部营收指标条 */}
                 <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
                   <div className="rounded-lg border border-border bg-surface p-3">
@@ -454,18 +462,21 @@ export const GuanjiaWorkspace: React.FC<GuanjiaWorkspaceProps> = ({
                     <div className="flex items-center gap-2 shrink-0">
                       <button
                         type="button"
+                        tabIndex={isViewAttached ? -1 : 0}
                         className="rounded bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground shadow-xs hover:bg-primary-hover active:scale-95 transition-all"
                       >
                         快速开台
                       </button>
                       <button
                         type="button"
+                        tabIndex={isViewAttached ? -1 : 0}
                         className="rounded border border-border bg-surface-raised px-3 py-1.5 text-xs font-medium text-foreground hover:bg-surface-overlay active:scale-95 transition-all"
                       >
                         挂单管理
                       </button>
                       <button
                         type="button"
+                        tabIndex={isViewAttached ? -1 : 0}
                         onClick={handleShiftHandover}
                         aria-label="交班结账"
                         className="rounded border border-border bg-surface-raised px-3 py-1.5 text-xs font-medium text-foreground hover:bg-surface-overlay active:scale-95 transition-all"
