@@ -2289,6 +2289,24 @@ interface IElectronAPI {
     ) => () => void;
   };
     guanjia?: {
+      login: (args: { account: string; password: string }) => Promise<{
+        success: boolean;
+        data?: {
+          token: string;
+          userInfo: {
+            employee_id: string | number;
+            employee_no: string;
+            employee_name: string;
+            role: string;
+            store_code?: string;
+            store_name?: string;
+            [key: string]: unknown;
+          };
+        };
+        credentials?: any;
+        error?: string;
+      }>;
+      logout: () => Promise<{ success: boolean; error?: string }>;
       attachView: (args: { bounds: { x: number; y: number; width: number; height: number }; initialUrl?: string }) => Promise<{ success: boolean; error?: string }>;
       detachView: () => Promise<{ success: boolean }>;
       setBounds: (bounds: { x: number; y: number; width: number; height: number }) => Promise<{ success: boolean }>;
@@ -2861,6 +2879,8 @@ declare global {
   interface Window {
     electron: IElectronAPI;
     guanjiaBridge?: {
+      login?: (args: { account: string; password: string }) => Promise<{ success: boolean; data?: any; error?: string }>;
+      logout?: () => Promise<{ success: boolean; error?: string }>;
       clearAssistantSession: () => Promise<{ success: boolean; clearedCount: number }>;
       onShiftHandover?: () => Promise<{ success: boolean; clearedCount: number }>;
       attachView?: (args: { bounds: { x: number; y: number; width: number; height: number }; initialUrl?: string }) => Promise<{ success: boolean; error?: string }>;

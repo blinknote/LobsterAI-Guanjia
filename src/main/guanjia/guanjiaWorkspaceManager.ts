@@ -239,6 +239,138 @@ export class GuanjiaWorkspaceManager {
     this.currentSsoCredentials = null;
   }
 
+  /**
+   * 将凭证注入 persist:guanjia-workspace 分区的 Cookie 和当前活跃视图的 Storage
+   */
+  public async injectSessionCredentials(credentials: GuanjiaSsoCredentials): Promise<void> {
+    this.setSsoCredentials(credentials);
+
+    // 1. 在 session 中设置 Cookie
+    try {
+      const ses = session.fromPartition(GUANJIA_WORKSPACE_PARTITION);
+      const targetUrl = this.defaultUrl || DEFAULT_GUANJIA_URL;
+      let cookieUrl: string;
+      let hostname: string;
+      try {
+        const parsedUrl = new URL(targetUrl);
+        cookieUrl = parsedUrl.origin;
+        hostname = parsedUrl.hostname;
+      } catch {
+        const fallbackUrl = new URL(DEFAULT_GUANJIA_URL);
+        cookieUrl = fallbackUrl.origin;
+        hostname = fallbackUrl.hostname;
+      }
+
+      const cookieItems = [
+        { name: 'guanjia_token', value: credentials.token },
+        { name: 'token', value: credentials.token },
+        { name: 'guanjia_sso_token', value: credentials.token },
+      ];
+
+      if (ses && ses.cookies && typeof ses.cookies.set === 'function') {
+        for (const item of cookieItems) {
+          try {
+            await ses.cookies.set({
+              url: cookieUrl,
+              name: item.name,
+              value: item.value,
+              domain: hostname,
+              path: '/',
+              secure: cookieUrl.startsWith('https://'),
+              httpOnly: false,
+            });
+          } catch (e) {
+            console.warn(`[GuanjiaWorkspaceManager] Failed to set cookie ${item.name}:`, e);
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('[GuanjiaWorkspaceManager] Failed to inject cookies into session:', err);
+    }
+
+    // 2. 如果当前已经存在活跃视图，直接注入到当前页面的 Storage
+    if (this.view && !this.view.webContents.isDestroyed()) {
+      try {
+        await this.view.webContents.executeJavaScript(`
+          try {
+            if (window.localStorage) {
+              window.localStorage.setItem('guanjia_token', ${JSON.stringify(credentials.token)});
+              window.localStorage.setItem('guanjia_sso_token', ${JSON.stringify(credentials.token)});
+              window.localStorage.setItem('token', ${JSON.stringify(credentials.token)});
+              window.localStorage.setItem('guanjia_user_id', ${JSON.stringify(credentials.userId)});
+              window.localStorage.setItem('guanjia_shop_id', ${JSON.stringify(credentials.shopId)});
+              window.localStorage.setItem('guanjia_shop_name', ${JSON.stringify(credentials.shopName)});
+              window.localStorage.setItem('guanjia_user_role', ${JSON.stringify(credentials.role)});
+            }
+            if (window.sessionStorage) {
+              window.sessionStorage.setItem('guanjia_token', ${JSON.stringify(credentials.token)});
+              window.sessionStorage.setItem('token', ${JSON.stringify(credentials.token)});
+              window.sessionStorage.setItem('guanjia_sso_token', ${JSON.stringify(credentials.token)});
+            }
+          } catch (e) {}
+        `);
+      } catch (err) {
+        // 当前页面未加载或者处于空白页，忽略
+      }
+    }
+  }
+
+  /**
+   * 清除 persist:guanjia-workspace 分区的凭据、Cookies 以及 Storage
+   */
+  public async clearSessionCredentials(): Promise<void> {
+    this.clearSsoCredentials();
+
+    try {
+      const ses = session.fromPartition(GUANJIA_WORKSPACE_PARTITION);
+      const targetUrl = this.defaultUrl || DEFAULT_GUANJIA_URL;
+      let cookieUrl: string;
+      try {
+        cookieUrl = new URL(targetUrl).origin;
+      } catch {
+        cookieUrl = new URL(DEFAULT_GUANJIA_URL).origin;
+      }
+
+      if (ses && ses.cookies && typeof ses.cookies.remove === 'function') {
+        const cookieNames = ['guanjia_token', 'token', 'guanjia_sso_token'];
+        for (const name of cookieNames) {
+          try {
+            await ses.cookies.remove(cookieUrl, name);
+          } catch {
+            // 忽略
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('[GuanjiaWorkspaceManager] Failed to clear session cookies:', err);
+    }
+
+    if (this.view && !this.view.webContents.isDestroyed()) {
+      try {
+        await this.view.webContents.executeJavaScript(`
+          try {
+            if (window.localStorage) {
+              window.localStorage.removeItem('guanjia_token');
+              window.localStorage.removeItem('token');
+              window.localStorage.removeItem('guanjia_sso_token');
+              window.localStorage.removeItem('guanjia_user_id');
+              window.localStorage.removeItem('guanjia_shop_id');
+              window.localStorage.removeItem('guanjia_shop_name');
+              window.localStorage.removeItem('guanjia_user_role');
+            }
+            if (window.sessionStorage) {
+              window.sessionStorage.removeItem('guanjia_token');
+              window.sessionStorage.removeItem('token');
+              window.sessionStorage.removeItem('guanjia_sso_token');
+            }
+          } catch (e) {}
+        `);
+      } catch {
+        // 忽略
+      }
+    }
+  }
+
   // =========================================================================
   // 只读上下文提取
   // =========================================================================

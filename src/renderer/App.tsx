@@ -1,6 +1,6 @@
 import { ChatBubbleLeftRightIcon } from '@heroicons/react/24/outline';
-import React, { useCallback, useEffect, useMemo,useRef, useState } from 'react';
-import { useDispatch,useSelector } from 'react-redux';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useDispatch, useSelector } from 'react-redux';
 
 import {
   APP_UPDATE_HEARTBEAT_INTERVAL_MS,
@@ -12,10 +12,7 @@ import {
 } from '../shared/appUpdate/constants';
 import { BrowserPasskeyUiEvent } from '../shared/browserWebAccess/passkeys';
 import { OpenClawQuestion } from '../shared/cowork/openclawQuestion';
-import {
-  LibraryNavigationEvent,
-  LibrarySourceFilter,
-} from '../shared/library/constants';
+import { LibraryNavigationEvent, LibrarySourceFilter } from '../shared/library/constants';
 import type { LibrarySessionRef } from '../shared/library/types';
 import { OpenClawEnginePhase } from '../shared/openclawEngine/constants';
 import { ProviderAuthType, ProviderName, ProviderRegistry } from '../shared/providers';
@@ -148,9 +145,8 @@ const getNewUserWelcomeAfterLoginPendingAgeMs = (): number | null => {
   }
 };
 
-const hasNewUserWelcomeAfterLoginPending = (): boolean => (
-  getNewUserWelcomeAfterLoginPendingAgeMs() !== null
-);
+const hasNewUserWelcomeAfterLoginPending = (): boolean =>
+  getNewUserWelcomeAfterLoginPendingAgeMs() !== null;
 
 const consumeNewUserWelcomeAfterLoginPending = (): boolean => {
   try {
@@ -202,7 +198,7 @@ export const InitPassMode = {
   Retry: 'retry',
   Repair: 'repair',
 } as const;
-export type InitPassMode = typeof InitPassMode[keyof typeof InitPassMode];
+export type InitPassMode = (typeof InitPassMode)[keyof typeof InitPassMode];
 
 const logAppUpdateRendererLifecycle = (
   message: string,
@@ -222,8 +218,12 @@ const logAppUpdateRendererLifecycle = (
 
 const App: React.FC = () => {
   const [showSettings, setShowSettings] = useState(false);
-  const [settingsOptions, setSettingsOptions] = useState<SettingsOpenOptions & { requestId: number }>({ requestId: 0 });
-  const [mainView, setMainView] = useState<'cowork' | 'skills' | 'scheduledTasks' | 'kits' | 'mcp' | 'library' | 'guanjia'>('cowork');
+  const [settingsOptions, setSettingsOptions] = useState<
+    SettingsOpenOptions & { requestId: number }
+  >({ requestId: 0 });
+  const [mainView, setMainView] = useState<
+    'cowork' | 'skills' | 'scheduledTasks' | 'kits' | 'mcp' | 'library' | 'guanjia'
+  >('cowork');
   const [isGuanjiaAssistantOpen, setIsGuanjiaAssistantOpen] = useState(false);
   const [guanjiaStoreName, setGuanjiaStoreName] = useState('青盛堂旗舰店');
   const [guanjiaTodoCount, setGuanjiaTodoCount] = useState(3);
@@ -266,8 +266,9 @@ const App: React.FC = () => {
   const [isUserInitiatedUpdateFlowActive, setIsUserInitiatedUpdateFlowActive] = useState(false);
   const [privacyAgreed, setPrivacyAgreed] = useState<boolean | null>(null);
   const [trialTaskCreatedSignal, setTrialTaskCreatedSignal] = useState(0);
-  const [newUserOnboardingStep, setNewUserOnboardingStep] =
-    useState<NewUserOnboardingStepType>(NewUserOnboardingStep.NewTask);
+  const [newUserOnboardingStep, setNewUserOnboardingStep] = useState<NewUserOnboardingStepType>(
+    NewUserOnboardingStep.NewTask,
+  );
   const [isNewUserOnboardingDismissed, setIsNewUserOnboardingDismissed] = useState(false);
   const [newUserWelcomeAfterLoginSignal, setNewUserWelcomeAfterLoginSignal] = useState(0);
   const [enterpriseConfig, setEnterpriseConfig] = useState<{
@@ -310,12 +311,12 @@ const App: React.FC = () => {
     appUpdateState.status,
   );
   const shouldShowNewUserOnboarding =
-    privacyAgreed === false
-    && !authUser
-    && !isNewUserOnboardingDismissed
-    && hasResolvedEngineStartupOverlayState
-    && !isEngineStartupOverlayVisible
-    && !isUpdateInteractionBlocked;
+    privacyAgreed === false &&
+    !authUser &&
+    !isNewUserOnboardingDismissed &&
+    hasResolvedEngineStartupOverlayState &&
+    !isEngineStartupOverlayVisible &&
+    !isUpdateInteractionBlocked;
 
   useEffect(() => {
     if (!shouldShowNewUserOnboarding) return;
@@ -330,23 +331,26 @@ const App: React.FC = () => {
 
   useEffect(() => {
     let isCurrent = true;
-    const resolveOverlayVisible = (phase?: string | null) =>
-      phase === OpenClawEnginePhase.Starting;
+    const resolveOverlayVisible = (phase?: string | null) => phase === OpenClawEnginePhase.Starting;
 
-    coworkService.getOpenClawEngineStatus()
-      .then((status) => {
+    coworkService
+      .getOpenClawEngineStatus()
+      .then(status => {
         if (!isCurrent) return;
         setIsEngineStartupOverlayVisible(resolveOverlayVisible(status?.phase));
         setHasResolvedEngineStartupOverlayState(true);
       })
-      .catch((error) => {
-        console.debug('[App] failed to refresh OpenClaw engine status for sidebar promo timing:', error);
+      .catch(error => {
+        console.debug(
+          '[App] failed to refresh OpenClaw engine status for sidebar promo timing:',
+          error,
+        );
         if (isCurrent) {
           setHasResolvedEngineStartupOverlayState(true);
         }
       });
 
-    const unsubscribe = coworkService.onOpenClawEngineStatus((status) => {
+    const unsubscribe = coworkService.onOpenClawEngineStatus(status => {
       setIsEngineStartupOverlayVisible(resolveOverlayVisible(status.phase));
       setHasResolvedEngineStartupOverlayState(true);
     });
@@ -365,293 +369,356 @@ const App: React.FC = () => {
         }, timeoutMs);
 
         promise.then(
-          (value) => {
+          value => {
             window.clearTimeout(timer);
             resolve(value);
           },
-          (error) => {
+          error => {
             window.clearTimeout(timer);
             reject(error);
-          }
+          },
         );
       });
     },
-    []
+    [],
   );
 
   // 初始化应用
-  const applyConfigToApp = useCallback((log?: (label: string) => void) => {
-    const config = configService.getConfig();
-    applyTypographyPreferences(config);
-    const apiConfig: ApiConfig = {
-      apiKey: config.api.key,
-      baseUrl: config.api.baseUrl,
-    };
-    apiService.setConfig(apiConfig);
+  const applyConfigToApp = useCallback(
+    (log?: (label: string) => void) => {
+      const config = configService.getConfig();
+      applyTypographyPreferences(config);
+      const apiConfig: ApiConfig = {
+        apiKey: config.api.key,
+        baseUrl: config.api.baseUrl,
+      };
+      apiService.setConfig(apiConfig);
 
-    const providerModels: { id: string; name: string; provider?: string; providerKey?: string; openClawProviderId?: string; supportsImage?: boolean }[] = [];
-    if (config.providers) {
-      Object.entries(config.providers).forEach(([providerName, providerConfig]) => {
-        if (providerConfig.enabled && providerConfig.models) {
-          const openClawProviderId = ProviderRegistry.getOpenClawProviderIdForConfig(providerName, providerConfig);
-          if (providerName === ProviderName.Minimax && providerConfig.authType === ProviderAuthType.OAuth) {
-            log?.('MiniMax OAuth provider resolved to OpenClaw minimax-portal');
+      const providerModels: {
+        id: string;
+        name: string;
+        provider?: string;
+        providerKey?: string;
+        openClawProviderId?: string;
+        supportsImage?: boolean;
+      }[] = [];
+      if (config.providers) {
+        Object.entries(config.providers).forEach(([providerName, providerConfig]) => {
+          if (providerConfig.enabled && providerConfig.models) {
+            const openClawProviderId = ProviderRegistry.getOpenClawProviderIdForConfig(
+              providerName,
+              providerConfig,
+            );
+            if (
+              providerName === ProviderName.Minimax &&
+              providerConfig.authType === ProviderAuthType.OAuth
+            ) {
+              log?.('MiniMax OAuth provider resolved to OpenClaw minimax-portal');
+            }
+            providerConfig.models.forEach(
+              (model: { id: string; name: string; supportsImage?: boolean }) => {
+                providerModels.push({
+                  id: model.id,
+                  name: model.name,
+                  provider: getProviderDisplayName(providerName, providerConfig),
+                  providerKey: providerName,
+                  openClawProviderId,
+                  supportsImage: model.supportsImage ?? false,
+                });
+              },
+            );
           }
-          providerConfig.models.forEach((model: { id: string; name: string; supportsImage?: boolean }) => {
-            providerModels.push({
-              id: model.id,
-              name: model.name,
-              provider: getProviderDisplayName(providerName, providerConfig),
-              providerKey: providerName,
-              openClawProviderId,
-              supportsImage: model.supportsImage ?? false,
-            });
-          });
-        }
-      });
-    }
-    dispatch(setAvailableModels(providerModels));
-    if (providerModels.length > 0) {
-      const allModels = store.getState().model.availableModels;
-      const preferredModel = allModels.find(
-        model => model.id === config.model.defaultModel
-          && (!config.model.defaultModelProvider || model.providerKey === config.model.defaultModelProvider)
-      ) ?? allModels[0];
-      dispatch(setDefaultSelectedModel(preferredModel));
-    }
-    return providerModels;
-  }, [dispatch]);
+        });
+      }
+      dispatch(setAvailableModels(providerModels));
+      if (providerModels.length > 0) {
+        const allModels = store.getState().model.availableModels;
+        const preferredModel =
+          allModels.find(
+            model =>
+              model.id === config.model.defaultModel &&
+              (!config.model.defaultModelProvider ||
+                model.providerKey === config.model.defaultModelProvider),
+          ) ?? allModels[0];
+        dispatch(setDefaultSelectedModel(preferredModel));
+      }
+      return providerModels;
+    },
+    [dispatch],
+  );
 
   const runInitPassRef = useRef<(mode: InitPassMode) => void>(() => {});
 
-  const runInitPass = useCallback(async (mode: InitPassMode): Promise<void> => {
-    if (initPassRunningRef.current) {
-      return;
-    }
-    initPassRunningRef.current = true;
-    if (initRetryTimerRef.current !== null) {
-      window.clearTimeout(initRetryTimerRef.current);
-      initRetryTimerRef.current = null;
-    }
-
-    const t0 = performance.now();
-    const log = (level: 'info' | 'error', label: string) => {
-      const elapsed = Math.round(performance.now() - t0);
-      const msg = `initializeApp: ${label} (+${elapsed}ms)`;
-      if (level === 'error') {
-        console.error(`[App] ${msg}`);
-      } else {
-        console.info(`[App] ${msg}`);
+  const runInitPass = useCallback(
+    async (mode: InitPassMode): Promise<void> => {
+      if (initPassRunningRef.current) {
+        return;
       }
-      try { window.electron?.log?.fromRenderer?.(level, 'App', msg); } catch { /* preload may not expose this yet */ }
-    };
-    const mark = (label: string) => log('info', label);
-    const markError = (label: string) => log('error', label);
-
-    const scheduleNextPass = (nextMode: InitPassMode, delayMs: number) => {
-      initRetryTimerRef.current = window.setTimeout(() => {
+      initPassRunningRef.current = true;
+      if (initRetryTimerRef.current !== null) {
+        window.clearTimeout(initRetryTimerRef.current);
         initRetryTimerRef.current = null;
-        runInitPassRef.current(nextMode);
-      }, delayMs);
-    };
+      }
 
-    // Runs one init step; retries issue a FRESH invoke because a timed-out
-    // promise is left running (its late completion must stay harmless).
-    const runStep = async (
-      label: string,
-      run: () => Promise<unknown>,
-      opts: { attempts: number; firstTimeoutMs: number },
-    ): Promise<boolean> => {
-      for (let attempt = 1; attempt <= opts.attempts; attempt++) {
-        const timeoutMs = attempt === 1 ? opts.firstTimeoutMs : INIT_STEP_RETRY_TIMEOUT_MS;
+      const t0 = performance.now();
+      const log = (level: 'info' | 'error', label: string) => {
+        const elapsed = Math.round(performance.now() - t0);
+        const msg = `initializeApp: ${label} (+${elapsed}ms)`;
+        if (level === 'error') {
+          console.error(`[App] ${msg}`);
+        } else {
+          console.info(`[App] ${msg}`);
+        }
         try {
-          await waitWithTimeout(run(), timeoutMs, label);
-          if (attempt > 1) {
-            mark(`${label} recovered on attempt ${attempt}`);
-          }
-          return true;
-        } catch (error) {
-          const msg = error instanceof Error ? error.message : String(error);
-          markError(`${label} attempt ${attempt}/${opts.attempts} failed: ${msg}`);
+          window.electron?.log?.fromRenderer?.(level, 'App', msg);
+        } catch {
+          /* preload may not expose this yet */
         }
-      }
-      return false;
-    };
+      };
+      const mark = (label: string) => log('info', label);
+      const markError = (label: string) => log('error', label);
 
-    const finishShell = (providerModelCount: number, readyLabel: string) => {
-      if (!requiredStartupGatesReadyRef.current) {
-        throw new Error('Required privacy and enterprise startup gates are unresolved.');
-      }
-      setIsInitialized(true);
-      setInitError(null);
-      mark(readyLabel);
-      if (!hasReportedAppStartedRef.current) {
-        hasReportedAppStartedRef.current = true;
-        void reportYdAnalyzer({
-          action: LogReporterAction.AppStarted,
-          providerModelCount,
-          hasLoggedInUser: !!store.getState().auth.user?.yid,
-        });
-      }
-    };
+      const scheduleNextPass = (nextMode: InitPassMode, delayMs: number) => {
+        initRetryTimerRef.current = window.setTimeout(() => {
+          initRetryTimerRef.current = null;
+          runInitPassRef.current(nextMode);
+        }, delayMs);
+      };
 
-    try {
-      mark(`start (mode=${mode})`);
-      document.documentElement.classList.add(`platform-${window.electron.platform}`);
-
-      const initTimeoutMs =
-        window.electron.platform === 'win32'
-          ? INIT_STEP_TIMEOUT_MS_WINDOWS
-          : INIT_STEP_TIMEOUT_MS_DEFAULT;
-      const isRepair = mode === InitPassMode.Repair;
-
-      // Privacy consent and enterprise UI policy are authorization gates, not
-      // optional startup data. Resolve them before any degraded/default-config
-      // path can expose the application shell. Both calls run in parallel and
-      // use fresh IPC invokes on retry to recover from an early renderer/main
-      // handshake stall.
-      if (!requiredStartupGatesReadyRef.current) {
-        const [enterpriseReady, privacyReady] = await Promise.all([
-          runStep('enterprise.getConfig', async () => {
-            const requestId = beginLatestAsyncRequest(enterpriseGateRequestIdRef);
-            const result = await window.electron.enterprise.getConfig();
-            if (!isLatestAsyncRequest(enterpriseGateRequestIdRef, requestId)) return;
-            if (!result.success) {
-              throw new Error(result.error || 'Enterprise UI config is unavailable.');
+      // Runs one init step; retries issue a FRESH invoke because a timed-out
+      // promise is left running (its late completion must stay harmless).
+      const runStep = async (
+        label: string,
+        run: () => Promise<unknown>,
+        opts: { attempts: number; firstTimeoutMs: number },
+      ): Promise<boolean> => {
+        for (let attempt = 1; attempt <= opts.attempts; attempt++) {
+          const timeoutMs = attempt === 1 ? opts.firstTimeoutMs : INIT_STEP_RETRY_TIMEOUT_MS;
+          try {
+            await waitWithTimeout(run(), timeoutMs, label);
+            if (attempt > 1) {
+              mark(`${label} recovered on attempt ${attempt}`);
             }
-            setEnterpriseConfig(result.config);
-            setEnterpriseConfigLoaded(true);
-          }, {
-            attempts: INIT_REQUIRED_GATE_MAX_ATTEMPTS,
-            firstTimeoutMs: INIT_STEP_RETRY_TIMEOUT_MS,
-          }),
-          runStep('privacy check', async () => {
-            const requestId = beginLatestAsyncRequest(privacyGateRequestIdRef);
-            const agreed = await window.electron.store.get('privacy_agreed');
-            if (!isLatestAsyncRequest(privacyGateRequestIdRef, requestId)) return;
-            setPrivacyAgreed(agreed === true);
-          }, {
-            attempts: INIT_REQUIRED_GATE_MAX_ATTEMPTS,
-            firstTimeoutMs: INIT_STEP_RETRY_TIMEOUT_MS,
-          }),
-        ]);
-        if (!enterpriseReady || !privacyReady) {
-          throw new Error(
-            `Required startup gates unavailable (enterprise=${enterpriseReady}, privacy=${privacyReady}).`,
-          );
-        }
-        requiredStartupGatesReadyRef.current = true;
-        mark('required privacy and enterprise gates done');
-      }
-
-      mark('configService.init begin');
-      const configReady = await runStep('configService.init', () => configService.init(), {
-        attempts: isRepair ? 2 : INIT_CONFIG_MAX_ATTEMPTS,
-        firstTimeoutMs: isRepair ? INIT_STEP_RETRY_TIMEOUT_MS : initTimeoutMs,
-      });
-
-      if (!configReady) {
-        if (isRepair) {
-          if (initRepairCountRef.current < INIT_CONFIG_REPAIR_MAX) {
-            initRepairCountRef.current += 1;
-            markError(`config repair still failing — retry ${initRepairCountRef.current}/${INIT_CONFIG_REPAIR_MAX} in ${INIT_CONFIG_REPAIR_DELAY_MS}ms`);
-            scheduleNextPass(InitPassMode.Repair, INIT_CONFIG_REPAIR_DELAY_MS);
-          } else {
-            markError('config repair attempts exhausted — app keeps default config until next launch');
+            return true;
+          } catch (error) {
+            const msg = error instanceof Error ? error.message : String(error);
+            markError(`${label} attempt ${attempt}/${opts.attempts} failed: ${msg}`);
           }
+        }
+        return false;
+      };
+
+      const finishShell = (providerModelCount: number, readyLabel: string) => {
+        if (!requiredStartupGatesReadyRef.current) {
+          throw new Error('Required privacy and enterprise startup gates are unresolved.');
+        }
+        setIsInitialized(true);
+        setInitError(null);
+        mark(readyLabel);
+        if (!hasReportedAppStartedRef.current) {
+          hasReportedAppStartedRef.current = true;
+          void reportYdAnalyzer({
+            action: LogReporterAction.AppStarted,
+            providerModelCount,
+            hasLoggedInUser: !!store.getState().auth.user?.yid,
+          });
+        }
+      };
+
+      try {
+        mark(`start (mode=${mode})`);
+        document.documentElement.classList.add(`platform-${window.electron.platform}`);
+
+        const initTimeoutMs =
+          window.electron.platform === 'win32'
+            ? INIT_STEP_TIMEOUT_MS_WINDOWS
+            : INIT_STEP_TIMEOUT_MS_DEFAULT;
+        const isRepair = mode === InitPassMode.Repair;
+
+        // Privacy consent and enterprise UI policy are authorization gates, not
+        // optional startup data. Resolve them before any degraded/default-config
+        // path can expose the application shell. Both calls run in parallel and
+        // use fresh IPC invokes on retry to recover from an early renderer/main
+        // handshake stall.
+        if (!requiredStartupGatesReadyRef.current) {
+          const [enterpriseReady, privacyReady] = await Promise.all([
+            runStep(
+              'enterprise.getConfig',
+              async () => {
+                const requestId = beginLatestAsyncRequest(enterpriseGateRequestIdRef);
+                const result = await window.electron.enterprise.getConfig();
+                if (!isLatestAsyncRequest(enterpriseGateRequestIdRef, requestId)) return;
+                if (!result.success) {
+                  throw new Error(result.error || 'Enterprise UI config is unavailable.');
+                }
+                setEnterpriseConfig(result.config);
+                setEnterpriseConfigLoaded(true);
+              },
+              {
+                attempts: INIT_REQUIRED_GATE_MAX_ATTEMPTS,
+                firstTimeoutMs: INIT_STEP_RETRY_TIMEOUT_MS,
+              },
+            ),
+            runStep(
+              'privacy check',
+              async () => {
+                const requestId = beginLatestAsyncRequest(privacyGateRequestIdRef);
+                const agreed = await window.electron.store.get('privacy_agreed');
+                if (!isLatestAsyncRequest(privacyGateRequestIdRef, requestId)) return;
+                setPrivacyAgreed(agreed === true);
+              },
+              {
+                attempts: INIT_REQUIRED_GATE_MAX_ATTEMPTS,
+                firstTimeoutMs: INIT_STEP_RETRY_TIMEOUT_MS,
+              },
+            ),
+          ]);
+          if (!enterpriseReady || !privacyReady) {
+            throw new Error(
+              `Required startup gates unavailable (enterprise=${enterpriseReady}, privacy=${privacyReady}).`,
+            );
+          }
+          requiredStartupGatesReadyRef.current = true;
+          mark('required privacy and enterprise gates done');
+        }
+
+        mark('configService.init begin');
+        const configReady = await runStep('configService.init', () => configService.init(), {
+          attempts: isRepair ? 2 : INIT_CONFIG_MAX_ATTEMPTS,
+          firstTimeoutMs: isRepair ? INIT_STEP_RETRY_TIMEOUT_MS : initTimeoutMs,
+        });
+
+        if (!configReady) {
+          if (isRepair) {
+            if (initRepairCountRef.current < INIT_CONFIG_REPAIR_MAX) {
+              initRepairCountRef.current += 1;
+              markError(
+                `config repair still failing — retry ${initRepairCountRef.current}/${INIT_CONFIG_REPAIR_MAX} in ${INIT_CONFIG_REPAIR_DELAY_MS}ms`,
+              );
+              scheduleNextPass(InitPassMode.Repair, INIT_CONFIG_REPAIR_DELAY_MS);
+            } else {
+              markError(
+                'config repair attempts exhausted — app keeps default config until next launch',
+              );
+            }
+            return;
+          }
+          // Keep the application usable on defaults while a background pass
+          // repairs persisted config. Core services still initialize below so
+          // auth/listeners and scheduled tasks are never skipped.
+          markError(
+            'configService.init unavailable — starting with default config, background repair scheduled',
+          );
+          initRepairCountRef.current = 1;
+        } else {
+          mark('configService.init done');
+        }
+
+        if (isRepair) {
+          const repairedModels = applyConfigToApp(mark);
+          const repairedConfig = configService.getConfig();
+          themeService.applyPersistedSelection({
+            mode: repairedConfig.theme,
+            themeId: repairedConfig.themeId,
+          });
+          i18nService.setLanguage(repairedConfig.language, { persist: false });
+          mark(`config repaired and applied (${repairedModels.length} provider models)`);
           return;
         }
-        // Keep the application usable on defaults while a background pass
-        // repairs persisted config. Core services still initialize below so
-        // auth/listeners and scheduled tasks are never skipped.
-        markError('configService.init unavailable — starting with default config, background repair scheduled');
-        initRepairCountRef.current = 1;
-      } else {
-        mark('configService.init done');
+
+        if (!coreStartupServicesInitializedRef.current) {
+          themeService.initialize();
+          mark('themeService done');
+
+          mark('i18nService.initialize begin');
+          const i18nReady = await runStep(
+            'i18nService.initialize',
+            () => i18nService.initialize(),
+            {
+              // Keep one invocation alive after a timeout. Starting a concurrent
+              // locale initialization would let late IPC results race each other.
+              attempts: 1,
+              firstTimeoutMs: initTimeoutMs,
+            },
+          );
+          mark(
+            i18nReady
+              ? 'i18nService.initialize done'
+              : 'i18nService.initialize degraded — using persisted language hint',
+          );
+
+          // Single attempt: authService.init() re-entry tears down listeners, so a
+          // concurrent retry could stack them; its in-flight run self-completes
+          // once IPC recovers.
+          mark('authService.init begin');
+          const authReady = await runStep('authService.init', () => authService.init(), {
+            attempts: 1,
+            firstTimeoutMs: INIT_STEP_RETRY_TIMEOUT_MS,
+          });
+          mark(
+            authReady
+              ? 'authService.init done'
+              : 'authService.init pending (auth restore completes in background)',
+          );
+          coreStartupServicesInitializedRef.current = true;
+        }
+
+        const providerModels = applyConfigToApp(mark);
+        mark('model resolution done');
+
+        finishShell(
+          providerModels.length,
+          configReady ? 'shell ready' : 'shell ready (degraded: default config)',
+        );
+
+        void waitWithTimeout(scheduledTaskService.init(), 5000, 'scheduledTaskService.init').catch(
+          error => {
+            console.error('[App] initializeApp: scheduledTaskService.init failed:', error);
+          },
+        );
+
+        if (!configReady) {
+          // Schedule only after the startup pass releases its in-flight guard;
+          // otherwise a slow core-service init can consume and lose the timer.
+          scheduleNextPass(InitPassMode.Repair, INIT_CONFIG_REPAIR_DELAY_MS);
+        }
+      } catch (error) {
+        const elapsed = Math.round(performance.now() - t0);
+        const msg = error instanceof Error ? error.message : String(error);
+        const detail = `initializeApp FAILED after ${elapsed}ms (mode=${mode}): ${msg}`;
+        console.error(`[App] ${detail}`);
+        try {
+          window.electron?.log?.fromRenderer?.('error', 'App', detail);
+        } catch {
+          /* best-effort */
+        }
+        if (mode === InitPassMode.Repair) {
+          // The shell is already up in degraded mode — never replace it with the
+          // error page from a background pass.
+          return;
+        }
+        setInitError(i18nService.t('initializationError'));
+        setIsInitialized(true);
+        if (initAutoRetryCountRef.current < INIT_AUTO_RETRY_MAX) {
+          initAutoRetryCountRef.current += 1;
+          markError(
+            `scheduling automatic init retry ${initAutoRetryCountRef.current}/${INIT_AUTO_RETRY_MAX} in ${INIT_AUTO_RETRY_DELAY_MS}ms`,
+          );
+          // Retries silently behind the error page; success swaps straight into
+          // the app without flashing the loading screen.
+          scheduleNextPass(InitPassMode.Retry, INIT_AUTO_RETRY_DELAY_MS);
+        }
+      } finally {
+        initPassRunningRef.current = false;
       }
-
-      if (isRepair) {
-        const repairedModels = applyConfigToApp(mark);
-        const repairedConfig = configService.getConfig();
-        themeService.applyPersistedSelection({
-          mode: repairedConfig.theme,
-          themeId: repairedConfig.themeId,
-        });
-        i18nService.setLanguage(repairedConfig.language, { persist: false });
-        mark(`config repaired and applied (${repairedModels.length} provider models)`);
-        return;
-      }
-
-      if (!coreStartupServicesInitializedRef.current) {
-        themeService.initialize();
-        mark('themeService done');
-
-        mark('i18nService.initialize begin');
-        const i18nReady = await runStep('i18nService.initialize', () => i18nService.initialize(), {
-          // Keep one invocation alive after a timeout. Starting a concurrent
-          // locale initialization would let late IPC results race each other.
-          attempts: 1,
-          firstTimeoutMs: initTimeoutMs,
-        });
-        mark(i18nReady ? 'i18nService.initialize done' : 'i18nService.initialize degraded — using persisted language hint');
-
-        // Single attempt: authService.init() re-entry tears down listeners, so a
-        // concurrent retry could stack them; its in-flight run self-completes
-        // once IPC recovers.
-        mark('authService.init begin');
-        const authReady = await runStep('authService.init', () => authService.init(), {
-          attempts: 1,
-          firstTimeoutMs: INIT_STEP_RETRY_TIMEOUT_MS,
-        });
-        mark(authReady ? 'authService.init done' : 'authService.init pending (auth restore completes in background)');
-        coreStartupServicesInitializedRef.current = true;
-      }
-
-      const providerModels = applyConfigToApp(mark);
-      mark('model resolution done');
-
-      finishShell(
-        providerModels.length,
-        configReady ? 'shell ready' : 'shell ready (degraded: default config)',
-      );
-
-      void waitWithTimeout(scheduledTaskService.init(), 5000, 'scheduledTaskService.init').catch((error) => {
-        console.error('[App] initializeApp: scheduledTaskService.init failed:', error);
-      });
-
-      if (!configReady) {
-        // Schedule only after the startup pass releases its in-flight guard;
-        // otherwise a slow core-service init can consume and lose the timer.
-        scheduleNextPass(InitPassMode.Repair, INIT_CONFIG_REPAIR_DELAY_MS);
-      }
-
-    } catch (error) {
-      const elapsed = Math.round(performance.now() - t0);
-      const msg = error instanceof Error ? error.message : String(error);
-      const detail = `initializeApp FAILED after ${elapsed}ms (mode=${mode}): ${msg}`;
-      console.error(`[App] ${detail}`);
-      try { window.electron?.log?.fromRenderer?.('error', 'App', detail); } catch { /* best-effort */ }
-      if (mode === InitPassMode.Repair) {
-        // The shell is already up in degraded mode — never replace it with the
-        // error page from a background pass.
-        return;
-      }
-      setInitError(i18nService.t('initializationError'));
-      setIsInitialized(true);
-      if (initAutoRetryCountRef.current < INIT_AUTO_RETRY_MAX) {
-        initAutoRetryCountRef.current += 1;
-        markError(`scheduling automatic init retry ${initAutoRetryCountRef.current}/${INIT_AUTO_RETRY_MAX} in ${INIT_AUTO_RETRY_DELAY_MS}ms`);
-        // Retries silently behind the error page; success swaps straight into
-        // the app without flashing the loading screen.
-        scheduleNextPass(InitPassMode.Retry, INIT_AUTO_RETRY_DELAY_MS);
-      }
-    } finally {
-      initPassRunningRef.current = false;
-    }
-  }, [applyConfigToApp, waitWithTimeout]);
+    },
+    [applyConfigToApp, waitWithTimeout],
+  );
 
   useEffect(() => {
-    runInitPassRef.current = (mode: InitPassMode) => { void runInitPass(mode); };
+    runInitPassRef.current = (mode: InitPassMode) => {
+      void runInitPass(mode);
+    };
   }, [runInitPass]);
 
   const handleInitRetry = useCallback(() => {
@@ -672,15 +739,18 @@ const App: React.FC = () => {
     void runInitPass(InitPassMode.Startup);
   }, [runInitPass]);
 
-  useEffect(() => () => {
-    if (initRetryTimerRef.current !== null) {
-      window.clearTimeout(initRetryTimerRef.current);
-    }
-  }, []);
+  useEffect(
+    () => () => {
+      if (initRetryTimerRef.current !== null) {
+        window.clearTimeout(initRetryTimerRef.current);
+      }
+    },
+    [],
+  );
 
   useEffect(() => {
     const unsubscribe = i18nService.subscribe(() => {
-      forceLanguageRefresh((prev) => prev + 1);
+      forceLanguageRefresh(prev => prev + 1);
     });
     return () => {
       unsubscribe();
@@ -732,8 +802,8 @@ const App: React.FC = () => {
     if (!isInitialized || !defaultSelectedModel?.id) return;
     const config = configService.getConfig();
     if (
-      config.model.defaultModel === defaultSelectedModel.id
-      && (config.model.defaultModelProvider ?? '') === (defaultSelectedModel.providerKey ?? '')
+      config.model.defaultModel === defaultSelectedModel.id &&
+      (config.model.defaultModelProvider ?? '') === (defaultSelectedModel.providerKey ?? '')
     ) {
       return;
     }
@@ -747,7 +817,7 @@ const App: React.FC = () => {
   }, [isInitialized, defaultSelectedModel?.id, defaultSelectedModel?.providerKey]);
 
   const handleShowSettings = useCallback((options?: SettingsOpenOptions) => {
-    setSettingsOptions((current) => ({
+    setSettingsOptions(current => ({
       initialTab: options?.initialTab,
       notice: options?.notice,
       noticeI18nKey: options?.noticeI18nKey,
@@ -795,16 +865,21 @@ const App: React.FC = () => {
     };
   }, []);
 
-  const handleOpenLibrarySession = useCallback((session: LibrarySessionRef) => {
-    setMainView('cowork');
-    void coworkService.loadSession(session.sessionId).then(loaded => {
-      if (!loaded || !session.sessionArtifactId) return;
-      dispatch(openArtifactPreviewTab({
-        sessionId: session.sessionId,
-        artifactId: session.sessionArtifactId,
-      }));
-    });
-  }, [dispatch]);
+  const handleOpenLibrarySession = useCallback(
+    (session: LibrarySessionRef) => {
+      setMainView('cowork');
+      void coworkService.loadSession(session.sessionId).then(loaded => {
+        if (!loaded || !session.sessionArtifactId) return;
+        dispatch(
+          openArtifactPreviewTab({
+            sessionId: session.sessionId,
+            artifactId: session.sessionArtifactId,
+          }),
+        );
+      });
+    },
+    [dispatch],
+  );
 
   const handleShowKits = useCallback(() => {
     setMainView('kits');
@@ -828,8 +903,8 @@ const App: React.FC = () => {
       guanjiaFocusRegionRef.current === 'main'
         ? 'topbar'
         : guanjiaFocusRegionRef.current === 'topbar'
-        ? 'sidebar'
-        : 'main';
+          ? 'sidebar'
+          : 'main';
     guanjiaFocusRegionRef.current = nextRegion;
 
     if (nextRegion === 'main') {
@@ -857,57 +932,78 @@ const App: React.FC = () => {
     }
   }, [mainView]);
 
-  const handleSkillsConnectorsSectionChange = useCallback((section: SkillsConnectorsSection) => {
-    if (section === SkillsConnectorsSection.Connectors) {
-      handleShowMcp();
-    } else {
-      handleShowSkills();
-    }
-  }, [handleShowMcp, handleShowSkills]);
+  const handleSkillsConnectorsSectionChange = useCallback(
+    (section: SkillsConnectorsSection) => {
+      if (section === SkillsConnectorsSection.Connectors) {
+        handleShowMcp();
+      } else {
+        handleShowSkills();
+      }
+    },
+    [handleShowMcp, handleShowSkills],
+  );
 
-  const openHomeWithKit = useCallback((kitId: string, text?: string) => {
-    dispatch(setActiveKitIds([kitId]));
-    coworkService.clearSession({ restoreAgentSkills: true });
-    dispatch(clearSelection());
-    if (text !== undefined) {
-      dispatch(setDraftCollaborationMode({
-        draftKey: '__home__',
-        mode: CoworkCollaborationMode.Default,
-      }));
-      // Set the draft prompt before switching view, so that when CoworkPromptInput
-      // mounts/updates with draftKey='__home__', it picks up the text.
-      dispatch(setDraftPrompt({ sessionId: '__home__', draft: text }));
-    }
-    dispatch(setDraftKitIds({ draftKey: '__home__', kitIds: [kitId] }));
-    setMainView('cowork');
-    window.setTimeout(() => {
-      window.dispatchEvent(new CustomEvent(CoworkUiEvent.FocusInput, {
-        // Without text, keep any existing home draft and just focus with the kit selected
-        detail: text !== undefined ? { resetCollaborationMode: true, text } : { clear: false },
-      }));
-    }, 0);
-  }, [dispatch]);
+  const openHomeWithKit = useCallback(
+    (kitId: string, text?: string) => {
+      dispatch(setActiveKitIds([kitId]));
+      coworkService.clearSession({ restoreAgentSkills: true });
+      dispatch(clearSelection());
+      if (text !== undefined) {
+        dispatch(
+          setDraftCollaborationMode({
+            draftKey: '__home__',
+            mode: CoworkCollaborationMode.Default,
+          }),
+        );
+        // Set the draft prompt before switching view, so that when CoworkPromptInput
+        // mounts/updates with draftKey='__home__', it picks up the text.
+        dispatch(setDraftPrompt({ sessionId: '__home__', draft: text }));
+      }
+      dispatch(setDraftKitIds({ draftKey: '__home__', kitIds: [kitId] }));
+      setMainView('cowork');
+      window.setTimeout(() => {
+        window.dispatchEvent(
+          new CustomEvent(CoworkUiEvent.FocusInput, {
+            // Without text, keep any existing home draft and just focus with the kit selected
+            detail: text !== undefined ? { resetCollaborationMode: true, text } : { clear: false },
+          }),
+        );
+      }, 0);
+    },
+    [dispatch],
+  );
 
-  const handleKitTryAsking = useCallback((text: string, kitId: string) => {
-    openHomeWithKit(kitId, text);
-  }, [openHomeWithKit]);
+  const handleKitTryAsking = useCallback(
+    (text: string, kitId: string) => {
+      openHomeWithKit(kitId, text);
+    },
+    [openHomeWithKit],
+  );
 
-  const handleKitUse = useCallback((kitId: string) => {
-    openHomeWithKit(kitId);
-  }, [openHomeWithKit]);
+  const handleKitUse = useCallback(
+    (kitId: string) => {
+      openHomeWithKit(kitId);
+    },
+    [openHomeWithKit],
+  );
 
-  const handleSkillUse = useCallback((skillId: string) => {
-    dispatch(setActiveSkillIds([skillId]));
-    coworkService.clearSession({ restoreAgentSkills: true });
-    dispatch(clearSelection());
-    dispatch(setDraftSkillIds({ draftKey: '__home__', skillIds: [skillId] }));
-    setMainView('cowork');
-    window.setTimeout(() => {
-      window.dispatchEvent(new CustomEvent(CoworkUiEvent.FocusInput, {
-        detail: { clear: false },
-      }));
-    }, 0);
-  }, [dispatch]);
+  const handleSkillUse = useCallback(
+    (skillId: string) => {
+      dispatch(setActiveSkillIds([skillId]));
+      coworkService.clearSession({ restoreAgentSkills: true });
+      dispatch(clearSelection());
+      dispatch(setDraftSkillIds({ draftKey: '__home__', skillIds: [skillId] }));
+      setMainView('cowork');
+      window.setTimeout(() => {
+        window.dispatchEvent(
+          new CustomEvent(CoworkUiEvent.FocusInput, {
+            detail: { clear: false },
+          }),
+        );
+      }, 0);
+    },
+    [dispatch],
+  );
 
   const handleToggleSidebar = useCallback(() => {
     const nextCollapsed = !isSidebarCollapsed;
@@ -925,7 +1021,7 @@ const App: React.FC = () => {
       activeView: mainView,
       isCollapsed: isSidebarCollapsed,
     });
-    setIsSidebarCollapsed((prev) => !prev);
+    setIsSidebarCollapsed(prev => !prev);
   }, [isSidebarCollapsed, mainView]);
 
   const handleToggleTaskFilter = useCallback(() => {
@@ -956,10 +1052,11 @@ const App: React.FC = () => {
       activeView: mainView,
       isCollapsed: isSidebarCollapsed,
     });
-    window.dispatchEvent(new CustomEvent<CoworkTaskSearchRequestEventDetail>(
-      CoworkUiEvent.ShortcutSearch,
-      { detail: { source: CoworkTaskSearchRequestSource.WindowsTitleBar } },
-    ));
+    window.dispatchEvent(
+      new CustomEvent<CoworkTaskSearchRequestEventDetail>(CoworkUiEvent.ShortcutSearch, {
+        detail: { source: CoworkTaskSearchRequestSource.WindowsTitleBar },
+      }),
+    );
   }, [isSidebarCollapsed, mainView]);
 
   const handleNewChat = useCallback(() => {
@@ -968,15 +1065,19 @@ const App: React.FC = () => {
     const shouldClearInput = mainView === 'cowork' && !currentSessionId;
     coworkService.clearSession({ restoreAgentSkills: true });
     dispatch(clearSelection());
-    dispatch(setDraftCollaborationMode({
-      draftKey: '__home__',
-      mode: CoworkCollaborationMode.Default,
-    }));
+    dispatch(
+      setDraftCollaborationMode({
+        draftKey: '__home__',
+        mode: CoworkCollaborationMode.Default,
+      }),
+    );
     setMainView('cowork');
     window.setTimeout(() => {
-      window.dispatchEvent(new CustomEvent(CoworkUiEvent.FocusInput, {
-        detail: { clear: shouldClearInput, resetCollaborationMode: true },
-      }));
+      window.dispatchEvent(
+        new CustomEvent(CoworkUiEvent.FocusInput, {
+          detail: { clear: shouldClearInput, resetCollaborationMode: true },
+        }),
+      );
     }, 0);
   }, [dispatch, mainView, currentSessionId]);
 
@@ -984,10 +1085,12 @@ const App: React.FC = () => {
     dispatch(setDraftPrompt({ sessionId: '__home__', draft: i18nService.t('skillCreatorPrompt') }));
     coworkService.clearSession();
     dispatch(clearSelection());
-    dispatch(setDraftCollaborationMode({
-      draftKey: '__home__',
-      mode: CoworkCollaborationMode.Default,
-    }));
+    dispatch(
+      setDraftCollaborationMode({
+        draftKey: '__home__',
+        mode: CoworkCollaborationMode.Default,
+      }),
+    );
     setMainView('cowork');
   }, [dispatch]);
 
@@ -999,10 +1102,13 @@ const App: React.FC = () => {
       window.clearTimeout(toastTimerRef.current);
     }
     // Toasts carrying an action button stay longer so the user can reach it.
-    toastTimerRef.current = window.setTimeout(() => {
-      setToastMessage(null);
-      toastTimerRef.current = null;
-    }, detail.actionLabel && detail.onAction ? 6000 : 2200);
+    toastTimerRef.current = window.setTimeout(
+      () => {
+        setToastMessage(null);
+        toastTimerRef.current = null;
+      },
+      detail.actionLabel && detail.onAction ? 6000 : 2200,
+    );
   }, []);
 
   const startUserInitiatedUpdateFlow = useCallback((reason: string) => {
@@ -1048,7 +1154,7 @@ const App: React.FC = () => {
 
     void loadInitialUpdateState();
 
-    const unsubscribe = window.electron.appUpdate.onStateChanged((state) => {
+    const unsubscribe = window.electron.appUpdate.onStateChanged(state => {
       setAppUpdateState(state);
 
       // Downloads finish silently into the sidebar card; the interaction lock
@@ -1065,8 +1171,8 @@ const App: React.FC = () => {
   }, [showToast, stopUserInitiatedUpdateFlow]);
 
   const handleShowLogin = useCallback(() => {
-    showToast(i18nService.t('featureInDevelopment'));
-  }, [showToast]);
+    window.dispatchEvent(new CustomEvent('guanjia:open-login'));
+  }, []);
 
   const runUpdateCheck = useCallback(async (): Promise<boolean> => {
     try {
@@ -1102,9 +1208,7 @@ const App: React.FC = () => {
 
     setShowUpdateInstallConfirm(false);
     setShowUpdateModal(false);
-    startUserInitiatedUpdateFlow(
-      `install-ready version=${updateInfo.latestVersion}`,
-    );
+    startUserInitiatedUpdateFlow(`install-ready version=${updateInfo.latestVersion}`);
     try {
       const installResult = await window.electron.appUpdate.installReady();
       if (!installResult.success) {
@@ -1166,16 +1270,16 @@ const App: React.FC = () => {
       return;
     }
 
-    if (appUpdateState.status === AppUpdateStatus.Error || appUpdateState.status === AppUpdateStatus.Available) {
+    if (
+      appUpdateState.status === AppUpdateStatus.Error ||
+      appUpdateState.status === AppUpdateStatus.Available
+    ) {
       // The download runs silently in the background; the sidebar card comes
       // back as "ready" once the installer has been verified.
       setShowUpdateModal(false);
       try {
         const retryResult = await window.electron.appUpdate.retryDownload();
-        if (
-          !retryResult.success
-          || retryResult.state.status !== AppUpdateStatus.Downloading
-        ) {
+        if (!retryResult.success || retryResult.state.status !== AppUpdateStatus.Downloading) {
           logAppUpdateRendererLifecycle(
             `background download did not start state=${retryResult.state.status}`,
             'warn',
@@ -1213,66 +1317,79 @@ const App: React.FC = () => {
   // Release the first-launch gate once login completes in an external auth flow.
   useEffect(() => {
     if (privacyAgreed === false && authUser) {
-      void acceptPrivacyAgreement().catch((error) => {
-        console.warn('[Onboarding] failed to persist privacy agreement after login callback:', error);
+      void acceptPrivacyAgreement().catch(error => {
+        console.warn(
+          '[Onboarding] failed to persist privacy agreement after login callback:',
+          error,
+        );
       });
     }
   }, [privacyAgreed, authUser, acceptPrivacyAgreement]);
 
-  const finishNewUserOnboarding = useCallback((source: NewUserOnboardingCompletionSource) => {
-    console.log(`[Onboarding] completing new user onboarding source=${source}`);
-    setIsNewUserOnboardingDismissed(true);
-    if (privacyAgreed === false) {
-      void acceptPrivacyAgreement()
-        .then(() => {
-          console.log(`[Onboarding] privacy agreement accepted from onboarding source=${source}`);
-        })
-        .catch((error) => {
-          console.warn(
-            `[Onboarding] failed to persist privacy agreement from onboarding source=${source}:`,
-            error,
-          );
-        });
-    }
-  }, [acceptPrivacyAgreement, privacyAgreed]);
+  const finishNewUserOnboarding = useCallback(
+    (source: NewUserOnboardingCompletionSource) => {
+      console.log(`[Onboarding] completing new user onboarding source=${source}`);
+      setIsNewUserOnboardingDismissed(true);
+      if (privacyAgreed === false) {
+        void acceptPrivacyAgreement()
+          .then(() => {
+            console.log(`[Onboarding] privacy agreement accepted from onboarding source=${source}`);
+          })
+          .catch(error => {
+            console.warn(
+              `[Onboarding] failed to persist privacy agreement from onboarding source=${source}:`,
+              error,
+            );
+          });
+      }
+    },
+    [acceptPrivacyAgreement, privacyAgreed],
+  );
 
-  const openNewUserWelcomeTask = useCallback((source: string) => {
-    setMainView('cowork');
-    console.log(`[Onboarding] opening new user welcome task source=${source}`);
-    void coworkService.seedNewUserWelcomeTask()
-      .then((result) => {
-        if (!result.session) {
+  const openNewUserWelcomeTask = useCallback(
+    (source: string) => {
+      setMainView('cowork');
+      console.log(`[Onboarding] opening new user welcome task source=${source}`);
+      void coworkService
+        .seedNewUserWelcomeTask()
+        .then(result => {
+          if (!result.session) {
+            console.warn(
+              `[Onboarding] new user welcome task seed returned no session source=${source}: ` +
+                `${result.error ?? 'unknown error'}`,
+            );
+            reportOnboardingAction('welcome_task_open_result', {
+              source,
+              result: 'failed',
+              errorCode: result.error ? 'seed_failed' : 'unknown',
+            });
+            showToast(i18nService.t('newUserWelcomeTaskCreateFailed'));
+            return;
+          }
+          console.log(
+            `[Onboarding] new user welcome task opened source=${source} session=${result.session.id}`,
+          );
+          reportOnboardingAction('welcome_task_open_result', {
+            source,
+            result: 'success',
+            created: result.created === true,
+          });
+        })
+        .catch(error => {
           console.warn(
-            `[Onboarding] new user welcome task seed returned no session source=${source}: `
-            + `${result.error ?? 'unknown error'}`,
+            `[Onboarding] failed to open new user welcome task source=${source}:`,
+            error,
           );
           reportOnboardingAction('welcome_task_open_result', {
             source,
             result: 'failed',
-            errorCode: result.error ? 'seed_failed' : 'unknown',
+            errorCode: getOnboardingErrorCode(error),
           });
           showToast(i18nService.t('newUserWelcomeTaskCreateFailed'));
-          return;
-        }
-        console.log(
-          `[Onboarding] new user welcome task opened source=${source} session=${result.session.id}`,
-        );
-        reportOnboardingAction('welcome_task_open_result', {
-          source,
-          result: 'success',
-          created: result.created === true,
         });
-      })
-      .catch((error) => {
-        console.warn(`[Onboarding] failed to open new user welcome task source=${source}:`, error);
-        reportOnboardingAction('welcome_task_open_result', {
-          source,
-          result: 'failed',
-          errorCode: getOnboardingErrorCode(error),
-        });
-        showToast(i18nService.t('newUserWelcomeTaskCreateFailed'));
-      });
-  }, [showToast]);
+    },
+    [showToast],
+  );
 
   useEffect(() => {
     const unsubscribe = window.electron.auth.onCallback(() => {
@@ -1305,8 +1422,8 @@ const App: React.FC = () => {
       pendingNewUserWelcomeAfterLoginSawStartupRef.current = true;
       if (!pendingNewUserWelcomeAfterLoginWaitingLoggedRef.current) {
         console.log(
-          '[Onboarding] login callback detected; waiting for OpenClaw startup before opening '
-          + `new user welcome task phase=${snapshotPhase ?? 'unknown'}`,
+          '[Onboarding] login callback detected; waiting for OpenClaw startup before opening ' +
+            `new user welcome task phase=${snapshotPhase ?? 'unknown'}`,
         );
         reportOnboardingAction('login_success_wait_gateway', {
           source: 'new_user_onboarding',
@@ -1323,8 +1440,8 @@ const App: React.FC = () => {
 
     if (!pendingNewUserWelcomeAfterLoginWaitingLoggedRef.current) {
       console.log(
-        '[Onboarding] login callback detected; delaying new user welcome task open for '
-        + `gateway restart grace delay=${delayMs}ms phase=${snapshotPhase ?? 'unknown'}`,
+        '[Onboarding] login callback detected; delaying new user welcome task open for ' +
+          `gateway restart grace delay=${delayMs}ms phase=${snapshotPhase ?? 'unknown'}`,
       );
       pendingNewUserWelcomeAfterLoginWaitingLoggedRef.current = true;
     }
@@ -1333,7 +1450,7 @@ const App: React.FC = () => {
       const latestPhase = coworkService.getOpenClawEngineStatusSnapshot()?.phase ?? null;
       if (latestPhase === OpenClawEnginePhase.Starting) {
         pendingNewUserWelcomeAfterLoginSawStartupRef.current = true;
-        setNewUserWelcomeAfterLoginSignal((value) => value + 1);
+        setNewUserWelcomeAfterLoginSignal(value => value + 1);
         return;
       }
 
@@ -1344,8 +1461,8 @@ const App: React.FC = () => {
       }
 
       console.log(
-        '[Onboarding] OpenClaw startup settled; opening pending new user welcome task '
-        + `phase=${latestPhase ?? 'unknown'} sawStartup=${pendingNewUserWelcomeAfterLoginSawStartupRef.current}`,
+        '[Onboarding] OpenClaw startup settled; opening pending new user welcome task ' +
+          `phase=${latestPhase ?? 'unknown'} sawStartup=${pendingNewUserWelcomeAfterLoginSawStartupRef.current}`,
       );
       reportOnboardingAction('login_success_gateway_settled', {
         source: 'new_user_onboarding',
@@ -1386,8 +1503,8 @@ const App: React.FC = () => {
       clearReturnTimer();
       const delayMs = NEW_USER_WELCOME_UNAUTHENTICATED_RETURN_DELAY_MS;
       console.log(
-        '[Onboarding] app returned during new user login handoff; verifying auth state '
-        + `source=${source} delay=${delayMs}ms pendingAge=${Math.round(pendingAgeMs)}ms`,
+        '[Onboarding] app returned during new user login handoff; verifying auth state ' +
+          `source=${source} delay=${delayMs}ms pendingAge=${Math.round(pendingAgeMs)}ms`,
       );
 
       returnTimer = window.setTimeout(() => {
@@ -1396,10 +1513,13 @@ const App: React.FC = () => {
         if (store.getState().auth.isLoggedIn) return;
 
         const lastCallbackAgeMs = Date.now() - pendingNewUserWelcomeAuthCallbackAtRef.current;
-        if (lastCallbackAgeMs >= 0 && lastCallbackAgeMs < NEW_USER_WELCOME_AUTH_CALLBACK_SUPPRESSION_MS) {
+        if (
+          lastCallbackAgeMs >= 0 &&
+          lastCallbackAgeMs < NEW_USER_WELCOME_AUTH_CALLBACK_SUPPRESSION_MS
+        ) {
           console.log(
-            '[Onboarding] auth callback recently observed; waiting for login exchange before '
-            + `opening fallback welcome task callbackAge=${lastCallbackAgeMs}ms`,
+            '[Onboarding] auth callback recently observed; waiting for login exchange before ' +
+              `opening fallback welcome task callbackAge=${lastCallbackAgeMs}ms`,
           );
           return;
         }
@@ -1407,8 +1527,8 @@ const App: React.FC = () => {
         if (!consumeNewUserWelcomeAfterLoginPending()) return;
 
         console.log(
-          '[Onboarding] login handoff returned without authenticated callback; opening '
-          + `new user welcome task source=${source}`,
+          '[Onboarding] login handoff returned without authenticated callback; opening ' +
+            `new user welcome task source=${source}`,
         );
         reportOnboardingAction('login_return_without_auth', {
           source,
@@ -1421,7 +1541,7 @@ const App: React.FC = () => {
       }, delayMs);
     };
 
-    const unsubscribeWindowState = window.electron.window.onStateChanged((state) => {
+    const unsubscribeWindowState = window.electron.window.onStateChanged(state => {
       if (!state.isFocused) return;
       scheduleUnauthenticatedReturnOpen('start_experience_window_focus_without_login');
     });
@@ -1480,70 +1600,49 @@ const App: React.FC = () => {
       step: newUserOnboardingStep,
     });
     setNewUserWelcomeAfterLoginPending();
-    setNewUserWelcomeAfterLoginSignal((value) => value + 1);
-    await authService.login()
-      .then((result) => {
-        if (!result.success) {
-          console.warn(
-            `[Onboarding] login handoff from new user onboarding failed: ${result.error ?? 'unknown error'}`,
-          );
-          reportOnboardingAction('login_redirect_result', {
-            source: 'new_user_onboarding',
-            result: 'failed',
-            errorCode: result.error ? 'login_redirect_failed' : 'unknown',
-          });
-          consumeNewUserWelcomeAfterLoginPending();
-          showToast(i18nService.t('welcomeLoginFailed'));
-          return;
-        }
-        console.log('[Onboarding] login handoff from new user onboarding succeeded');
-        reportOnboardingAction('login_redirect_result', {
-          source: 'new_user_onboarding',
-          result: 'success',
-        });
-        finishNewUserOnboarding('start_experience');
-        setNewUserWelcomeAfterLoginSignal((value) => value + 1);
-      })
-      .catch((error) => {
-        console.warn('[Onboarding] failed to start login from new user onboarding:', error);
-        reportOnboardingAction('login_redirect_result', {
-          source: 'new_user_onboarding',
-          result: 'failed',
-          errorCode: getOnboardingErrorCode(error),
-        });
-        consumeNewUserWelcomeAfterLoginPending();
-        showToast(i18nService.t('welcomeLoginFailed'));
-      })
-      .finally(() => {
-        newUserLoginPendingRef.current = false;
+    setNewUserWelcomeAfterLoginSignal(value => value + 1);
+    try {
+      finishNewUserOnboarding('start_experience');
+      window.dispatchEvent(new CustomEvent('guanjia:open-login'));
+      reportOnboardingAction('login_redirect_result', {
+        source: 'new_user_onboarding',
+        result: 'success',
       });
-  }, [finishNewUserOnboarding, newUserOnboardingStep, showToast]);
+    } catch (error) {
+      console.warn('[Onboarding] failed to open guanjia login:', error);
+    } finally {
+      newUserLoginPendingRef.current = false;
+    }
+  }, [finishNewUserOnboarding, newUserOnboardingStep]);
 
-  const handlePermissionResponse = useCallback(async (result: CoworkPermissionResult) => {
-    if (!pendingPermission) return false;
-    return coworkService.respondToPermission(pendingPermission.requestId, result);
-  }, [pendingPermission]);
+  const handlePermissionResponse = useCallback(
+    async (result: CoworkPermissionResult) => {
+      if (!pendingPermission) return false;
+      return coworkService.respondToPermission(pendingPermission.requestId, result);
+    },
+    [pendingPermission],
+  );
 
   const handleMinimizePermission = useCallback(() => {
     if (!pendingPermission) return;
-    setMinimizedPermissionIds((previous) => (
+    setMinimizedPermissionIds(previous =>
       previous.includes(pendingPermission.requestId)
         ? previous
-        : [...previous, pendingPermission.requestId]
-    ));
+        : [...previous, pendingPermission.requestId],
+    );
   }, [pendingPermission]);
 
   const handleRestorePermission = useCallback(() => {
     if (!pendingPermission) return;
-    setMinimizedPermissionIds((previous) => (
-      previous.filter((requestId) => requestId !== pendingPermission.requestId)
-    ));
+    setMinimizedPermissionIds(previous =>
+      previous.filter(requestId => requestId !== pendingPermission.requestId),
+    );
   }, [pendingPermission]);
 
   useEffect(() => {
-    const activeRequestIds = new Set(pendingPermissions.map((permission) => permission.requestId));
-    setMinimizedPermissionIds((previous) => {
-      const next = previous.filter((requestId) => activeRequestIds.has(requestId));
+    const activeRequestIds = new Set(pendingPermissions.map(permission => permission.requestId));
+    setMinimizedPermissionIds(previous => {
+      const next = previous.filter(requestId => activeRequestIds.has(requestId));
       return next.length === previous.length ? previous : next;
     });
   }, [pendingPermissions]);
@@ -1557,20 +1656,32 @@ const App: React.FC = () => {
     });
 
     if (config.providers) {
-      const allModels: { id: string; name: string; provider?: string; providerKey?: string; openClawProviderId?: string; supportsImage?: boolean }[] = [];
+      const allModels: {
+        id: string;
+        name: string;
+        provider?: string;
+        providerKey?: string;
+        openClawProviderId?: string;
+        supportsImage?: boolean;
+      }[] = [];
       Object.entries(config.providers).forEach(([providerName, providerConfig]) => {
         if (providerConfig.enabled && providerConfig.models) {
-          const openClawProviderId = ProviderRegistry.getOpenClawProviderIdForConfig(providerName, providerConfig);
-          providerConfig.models.forEach((model: { id: string; name: string; supportsImage?: boolean }) => {
-            allModels.push({
-              id: model.id,
-              name: model.name,
-              provider: getProviderDisplayName(providerName, providerConfig),
-              providerKey: providerName,
-              openClawProviderId,
-              supportsImage: model.supportsImage ?? false,
-            });
-          });
+          const openClawProviderId = ProviderRegistry.getOpenClawProviderIdForConfig(
+            providerName,
+            providerConfig,
+          );
+          providerConfig.models.forEach(
+            (model: { id: string; name: string; supportsImage?: boolean }) => {
+              allModels.push({
+                id: model.id,
+                name: model.name,
+                provider: getProviderDisplayName(providerName, providerConfig),
+                providerKey: providerName,
+                openClawProviderId,
+                supportsImage: model.supportsImage ?? false,
+              });
+            },
+          );
         }
       });
       dispatch(setAvailableModels(allModels));
@@ -1600,10 +1711,11 @@ const App: React.FC = () => {
   const isCoworkSearchEligibleEditorActive = () => {
     const activeElement = document.activeElement;
     if (!(activeElement instanceof HTMLElement)) return false;
-    return Boolean(activeElement.closest([
-      '[data-skin-prompt-input="true"]',
-      '[data-cowork-conversation-search="true"]',
-    ].join(',')));
+    return Boolean(
+      activeElement.closest(
+        ['[data-skin-prompt-input="true"]', '[data-cowork-conversation-search="true"]'].join(','),
+      ),
+    );
   };
 
   useEffect(() => {
@@ -1658,10 +1770,11 @@ const App: React.FC = () => {
           window.dispatchEvent(new CustomEvent(CoworkUiEvent.ShortcutConversationSearch));
         } else if (shortcutTarget === ConversationSearchShortcutTarget.History) {
           event.preventDefault();
-          window.dispatchEvent(new CustomEvent<CoworkTaskSearchRequestEventDetail>(
-            CoworkUiEvent.ShortcutSearch,
-            { detail: { source: CoworkTaskSearchRequestSource.KeyboardShortcut } },
-          ));
+          window.dispatchEvent(
+            new CustomEvent<CoworkTaskSearchRequestEventDetail>(CoworkUiEvent.ShortcutSearch, {
+              detail: { source: CoworkTaskSearchRequestSource.KeyboardShortcut },
+            }),
+          );
         }
         return;
       }
@@ -1684,7 +1797,9 @@ const App: React.FC = () => {
         return;
       }
 
-      const settingsTabShortcut = SETTINGS_TAB_SHORTCUT_ACTIONS.find(({ action }) => matchesAction(action));
+      const settingsTabShortcut = SETTINGS_TAB_SHORTCUT_ACTIONS.find(({ action }) =>
+        matchesAction(action),
+      );
       if (settingsTabShortcut) {
         event.preventDefault();
         handleShowSettings({ initialTab: settingsTabShortcut.initialTab });
@@ -1695,9 +1810,11 @@ const App: React.FC = () => {
         event.preventDefault();
         setMainView('cowork');
         window.setTimeout(() => {
-          window.dispatchEvent(new CustomEvent(CoworkUiEvent.FocusInput, {
-            detail: { clear: false },
-          }));
+          window.dispatchEvent(
+            new CustomEvent(CoworkUiEvent.FocusInput, {
+              detail: { clear: false },
+            }),
+          );
         }, 0);
         return;
       }
@@ -1731,9 +1848,11 @@ const App: React.FC = () => {
         event.preventDefault();
         setMainView('cowork');
         setIsSidebarCollapsed(false);
-        window.dispatchEvent(new CustomEvent(CoworkUiEvent.ShortcutSwitchAgent, {
-          detail: { direction: CoworkShortcutDirection.Previous },
-        }));
+        window.dispatchEvent(
+          new CustomEvent(CoworkUiEvent.ShortcutSwitchAgent, {
+            detail: { direction: CoworkShortcutDirection.Previous },
+          }),
+        );
         return;
       }
 
@@ -1741,9 +1860,11 @@ const App: React.FC = () => {
         event.preventDefault();
         setMainView('cowork');
         setIsSidebarCollapsed(false);
-        window.dispatchEvent(new CustomEvent(CoworkUiEvent.ShortcutSwitchAgent, {
-          detail: { direction: CoworkShortcutDirection.Next },
-        }));
+        window.dispatchEvent(
+          new CustomEvent(CoworkUiEvent.ShortcutSwitchAgent, {
+            detail: { direction: CoworkShortcutDirection.Next },
+          }),
+        );
         return;
       }
 
@@ -1763,14 +1884,18 @@ const App: React.FC = () => {
         return;
       }
 
-      const taskSlotIndex = AGENT_TASK_SLOT_SHORTCUT_ACTIONS.findIndex(action => matchesAction(action));
+      const taskSlotIndex = AGENT_TASK_SLOT_SHORTCUT_ACTIONS.findIndex(action =>
+        matchesAction(action),
+      );
       if (taskSlotIndex >= 0) {
         event.preventDefault();
         setMainView('cowork');
         setIsSidebarCollapsed(false);
-        window.dispatchEvent(new CustomEvent(CoworkUiEvent.ShortcutOpenAgentTaskSlot, {
-          detail: { slot: taskSlotIndex + 1 },
-        }));
+        window.dispatchEvent(
+          new CustomEvent(CoworkUiEvent.ShortcutOpenAgentTaskSlot, {
+            detail: { slot: taskSlotIndex + 1 },
+          }),
+        );
         return;
       }
 
@@ -1867,10 +1992,12 @@ const App: React.FC = () => {
 
       coworkService.clearSession({ restoreAgentSkills: true });
       dispatch(clearSelection());
-      dispatch(setDraftCollaborationMode({
-        draftKey: '__home__',
-        mode: CoworkCollaborationMode.Default,
-      }));
+      dispatch(
+        setDraftCollaborationMode({
+          draftKey: '__home__',
+          mode: CoworkCollaborationMode.Default,
+        }),
+      );
       dispatch(setDraftPrompt({ sessionId: '__home__', draft: text }));
       dispatch(clearDraftAttachments('__home__'));
       dispatch(clearDraftSelectedTextSnippets('__home__'));
@@ -1901,7 +2028,8 @@ const App: React.FC = () => {
   useEffect(() => {
     const openBrowserSettings = () => handleShowSettings({ initialTab: 'browserWebAccess' });
     window.addEventListener(BrowserPasskeyUiEvent.OpenBrowserSettings, openBrowserSettings);
-    return () => window.removeEventListener(BrowserPasskeyUiEvent.OpenBrowserSettings, openBrowserSettings);
+    return () =>
+      window.removeEventListener(BrowserPasskeyUiEvent.OpenBrowserSettings, openBrowserSettings);
   }, [handleShowSettings]);
 
   // 监听托盘菜单打开设置的 IPC 事件
@@ -1933,7 +2061,8 @@ const App: React.FC = () => {
   // Tell the main process which session is currently visible so desktop
   // notifications for that session can be suppressed and cleared.
   useEffect(() => {
-    const visibleSessionId = mainView === 'cowork' && !showSettings ? currentSessionId ?? null : null;
+    const visibleSessionId =
+      mainView === 'cowork' && !showSettings ? (currentSessionId ?? null) : null;
     void window.electron.cowork.setActiveSession?.(visibleSessionId)?.catch?.((error: unknown) => {
       console.debug('[App] failed to report active session:', error);
     });
@@ -1959,7 +2088,9 @@ const App: React.FC = () => {
         return;
       }
       lastCheckTime = now;
-      console.log(`[App] auto update check triggered, reason=${reason}, at=${new Date(now).toISOString()}`);
+      console.log(
+        `[App] auto update check triggered, reason=${reason}, at=${new Date(now).toISOString()}`,
+      );
       const ok = await runUpdateCheck();
       // 失败的检查不占用 2 小时轮询窗口：释放门槛让 30 分钟心跳、
       // 窗口重新可见或网络恢复时能尽快重试。
@@ -2045,22 +2176,25 @@ const App: React.FC = () => {
         hidden={isPendingPermissionMinimized}
       />
     );
-  }, [pendingPermission, handlePermissionResponse, handleMinimizePermission, isPendingPermissionMinimized]);
+  }, [
+    pendingPermission,
+    handlePermissionResponse,
+    handleMinimizePermission,
+    isPendingPermissionMinimized,
+  ]);
 
-  const isOverlayActive = showSettings
-    || showUpdateModal
-    || showUpdateInstallConfirm
-    || isPermissionModalOpen
-    || isUpdateInteractionBlocked
-    || shouldShowNewUserOnboarding;
+  const isOverlayActive =
+    showSettings ||
+    showUpdateModal ||
+    showUpdateInstallConfirm ||
+    isPermissionModalOpen ||
+    isUpdateInteractionBlocked ||
+    shouldShowNewUserOnboarding;
   // Downloads stay silent: the badge and sidebar card only appear once the
   // installer is ready or the update needs the user's attention.
   const shouldShowUpdateNotice = shouldShowAppUpdateNotice(appUpdateState);
   const updateBadge = shouldShowUpdateNotice ? (
-    <AppUpdateBadge
-      updateState={appUpdateState}
-      onClick={handleOpenUpdateModal}
-    />
+    <AppUpdateBadge updateState={appUpdateState} onClick={handleOpenUpdateModal} />
   ) : null;
   const updateCard = shouldShowUpdateNotice ? (
     <AppUpdateCard
@@ -2079,13 +2213,18 @@ const App: React.FC = () => {
       isSidebarCollapsed={isSidebarCollapsed}
       sidebarWidth={sidebarWidth}
       onToggleSidebar={canUseWindowsTopBarActions ? handleToggleSidebar : undefined}
-      onSearch={canUseWindowsTopBarActions && !isSidebarCollapsed
-        ? handleOpenTaskSearch
-        : undefined}
+      onSearch={
+        canUseWindowsTopBarActions && !isSidebarCollapsed ? handleOpenTaskSearch : undefined
+      }
       onNewChat={canUseWindowsCollapsedTopBarActions ? handleNewChat : undefined}
       sidebarToggleLabel={isSidebarCollapsed ? i18nService.t('expand') : i18nService.t('collapse')}
       searchLabel={i18nService.t('search')}
-      showFilterIcon={SIDEBAR_TASK_FILTER_ENABLED && canUseWindowsTopBarActions && !isSidebarCollapsed && mainView === 'cowork'}
+      showFilterIcon={
+        SIDEBAR_TASK_FILTER_ENABLED &&
+        canUseWindowsTopBarActions &&
+        !isSidebarCollapsed &&
+        mainView === 'cowork'
+      }
       filterLabel={i18nService.t('sidebarFilter')}
       isFilterActive={isTaskFilterActive}
       hasFilterNotice={hasUnreadCompletedTasks}
@@ -2164,224 +2303,234 @@ const App: React.FC = () => {
         enabled
         className="h-screen overflow-hidden flex flex-col bg-surface-raised"
       >
-      {toastMessage && (
-        <Toast
-          message={toastMessage.message}
-          actionLabel={toastMessage.actionLabel}
-          onAction={toastMessage.onAction}
-          closeLabel={i18nService.t('close')}
-          onClose={() => setToastMessage(null)}
+        {toastMessage && (
+          <Toast
+            message={toastMessage.message}
+            actionLabel={toastMessage.actionLabel}
+            onAction={toastMessage.onAction}
+            closeLabel={i18nService.t('close')}
+            onClose={() => setToastMessage(null)}
+          />
+        )}
+        <SubscriptionTrialCampaign
+          privacyAgreed={privacyAgreed}
+          taskCreatedSignal={trialTaskCreatedSignal}
+          enabled={
+            privacyAgreed === true &&
+            !isOverlayActive &&
+            hasResolvedEngineStartupOverlayState &&
+            !isEngineStartupOverlayVisible
+          }
         />
-      )}
-      <SubscriptionTrialCampaign
-        privacyAgreed={privacyAgreed}
-        taskCreatedSignal={trialTaskCreatedSignal}
-        enabled={privacyAgreed === true && !isOverlayActive && hasResolvedEngineStartupOverlayState && !isEngineStartupOverlayVisible}
-      />
-      <StartupCreditCampaign
-        enabled={privacyAgreed === true && !isEnterpriseAccount}
-      />
-      {windowsStandaloneTitleBar}
-      <div
-        className="relative flex flex-1 min-h-0 overflow-hidden"
-        aria-busy={isUpdateInteractionBlocked}
-      >
-        <Sidebar
-          onShowLogin={handleShowLogin}
-          onShowSettings={handleShowSettings}
-          activeView={mainView}
-          onShowSkills={handleShowSkills}
-          onShowCowork={handleShowCowork}
-          onShowScheduledTasks={handleShowScheduledTasks}
-          onShowKits={handleShowKits}
-          onShowLibrary={handleShowLibrary}
-          onShowGuanjia={handleShowGuanjia}
-          onOpenGuanjiaAssistant={handleOpenGuanjiaAssistant}
-          guanjiaStoreName={guanjiaStoreName}
-          guanjiaTodoCount={guanjiaTodoCount}
-          onNewChat={handleNewChat}
-          isCollapsed={isSidebarCollapsed}
-          onToggleCollapse={handleToggleSidebar}
-          isTaskFilterActive={isTaskFilterActive}
-          hasUnreadCompletedTasks={hasUnreadCompletedTasks}
-          onToggleTaskFilter={handleToggleTaskFilter}
-          onTaskFilterSummaryChange={setHasUnreadCompletedTasks}
-          onWidthChange={setSidebarWidth}
-          updateNotice={!isSidebarCollapsed && !isUpdateInteractionBlocked ? updateCard : null}
-          hideAdBanner={isUpdateCardExpanded}
-          hideLogin={enterpriseConfig?.ui?.login === 'hide'}
-          isEngineStartupOverlayVisible={isEngineStartupOverlayVisible}
-        />
-        <div className={`flex-1 min-w-0 transition-[padding] duration-200 ease-out ${isSidebarCollapsed ? 'pl-1.5' : ''}`}>
+        <StartupCreditCampaign enabled={privacyAgreed === true && !isEnterpriseAccount} />
+        {windowsStandaloneTitleBar}
+        <div
+          className="relative flex flex-1 min-h-0 overflow-hidden"
+          aria-busy={isUpdateInteractionBlocked}
+        >
+          <Sidebar
+            onShowLogin={handleShowLogin}
+            onShowSettings={handleShowSettings}
+            activeView={mainView}
+            onShowSkills={handleShowSkills}
+            onShowCowork={handleShowCowork}
+            onShowScheduledTasks={handleShowScheduledTasks}
+            onShowKits={handleShowKits}
+            onShowLibrary={handleShowLibrary}
+            onShowGuanjia={handleShowGuanjia}
+            onOpenGuanjiaAssistant={handleOpenGuanjiaAssistant}
+            guanjiaStoreName={authUser?.shopName || guanjiaStoreName}
+            guanjiaTodoCount={guanjiaTodoCount}
+            onNewChat={handleNewChat}
+            isCollapsed={isSidebarCollapsed}
+            onToggleCollapse={handleToggleSidebar}
+            isTaskFilterActive={isTaskFilterActive}
+            hasUnreadCompletedTasks={hasUnreadCompletedTasks}
+            onToggleTaskFilter={handleToggleTaskFilter}
+            onTaskFilterSummaryChange={setHasUnreadCompletedTasks}
+            onWidthChange={setSidebarWidth}
+            updateNotice={!isSidebarCollapsed && !isUpdateInteractionBlocked ? updateCard : null}
+            hideAdBanner={isUpdateCardExpanded}
+            hideLogin={enterpriseConfig?.ui?.login === 'hide'}
+            isEngineStartupOverlayVisible={isEngineStartupOverlayVisible}
+          />
           <div
-            data-skin-cowork-frame={mainView === 'cowork' ? 'true' : undefined}
-            data-skin-management-frame={mainView !== 'cowork' ? 'true' : undefined}
-            className="relative h-full min-h-0 rounded-xl border border-border bg-background overflow-hidden"
+            className={`flex-1 min-w-0 transition-[padding] duration-200 ease-out ${isSidebarCollapsed ? 'pl-1.5' : ''}`}
           >
-            {mainView !== 'cowork' && (
-              <SkinBackdrop variant={SkinBackdropVariant.Management} />
-            )}
-            <EngineStartupOverlay />
-            {/* Keep-alive 保活容器：使用 CSS hidden 控制显隐，切走不卸载各视图及 iframe，保持输入草稿与滚动位置 */}
             <div
-              className={`h-full w-full ${mainView === 'cowork' ? '' : 'hidden'}`}
-              aria-hidden={mainView !== 'cowork'}
+              data-skin-cowork-frame={mainView === 'cowork' ? 'true' : undefined}
+              data-skin-management-frame={mainView !== 'cowork' ? 'true' : undefined}
+              className="relative h-full min-h-0 rounded-xl border border-border bg-background overflow-hidden"
             >
-              <CoworkView
-                onRequestAppSettings={handleShowSettings}
-                onShowSkills={handleShowSkills}
-                onShowKits={handleShowKits}
-                isSidebarCollapsed={isSidebarCollapsed}
-                onToggleSidebar={handleToggleSidebar}
-                onNewChat={handleNewChat}
-                updateBadge={collapsedHeaderUpdateBadge}
-                minimizedPermission={isPendingPermissionMinimized ? pendingPermission : null}
-                onRestorePermission={handleRestorePermission}
-                onRespondToPermission={handlePermissionResponse}
-              />
-            </div>
+              {mainView !== 'cowork' && <SkinBackdrop variant={SkinBackdropVariant.Management} />}
+              <EngineStartupOverlay />
+              {/* Keep-alive 保活容器：使用 CSS hidden 控制显隐，切走不卸载各视图及 iframe，保持输入草稿与滚动位置 */}
+              <div
+                className={`h-full w-full ${mainView === 'cowork' ? '' : 'hidden'}`}
+                aria-hidden={mainView !== 'cowork'}
+              >
+                <CoworkView
+                  onRequestAppSettings={handleShowSettings}
+                  onShowSkills={handleShowSkills}
+                  onShowKits={handleShowKits}
+                  isSidebarCollapsed={isSidebarCollapsed}
+                  onToggleSidebar={handleToggleSidebar}
+                  onNewChat={handleNewChat}
+                  updateBadge={collapsedHeaderUpdateBadge}
+                  minimizedPermission={isPendingPermissionMinimized ? pendingPermission : null}
+                  onRestorePermission={handleRestorePermission}
+                  onRespondToPermission={handlePermissionResponse}
+                />
+              </div>
 
-            <div
-              className={`h-full w-full ${mainView === 'skills' || mainView === 'mcp' ? '' : 'hidden'}`}
-              aria-hidden={mainView !== 'skills' && mainView !== 'mcp'}
-            >
-              <SkillsAndConnectorsView
-                activeSection={mainView === 'mcp' ? SkillsConnectorsSection.Connectors : SkillsConnectorsSection.Skills}
-                onSectionChange={handleSkillsConnectorsSectionChange}
-                isSidebarCollapsed={isSidebarCollapsed}
-                onToggleSidebar={handleToggleSidebar}
-                onNewChat={handleNewChat}
-                onCreateSkillByChat={handleCreateSkillByChat}
-                onUseSkill={handleSkillUse}
-                updateBadge={collapsedHeaderUpdateBadge}
-                skillsReadOnly={enterpriseConfig?.ui?.skills === 'readonly'}
-              />
-            </div>
+              <div
+                className={`h-full w-full ${mainView === 'skills' || mainView === 'mcp' ? '' : 'hidden'}`}
+                aria-hidden={mainView !== 'skills' && mainView !== 'mcp'}
+              >
+                <SkillsAndConnectorsView
+                  activeSection={
+                    mainView === 'mcp'
+                      ? SkillsConnectorsSection.Connectors
+                      : SkillsConnectorsSection.Skills
+                  }
+                  onSectionChange={handleSkillsConnectorsSectionChange}
+                  isSidebarCollapsed={isSidebarCollapsed}
+                  onToggleSidebar={handleToggleSidebar}
+                  onNewChat={handleNewChat}
+                  onCreateSkillByChat={handleCreateSkillByChat}
+                  onUseSkill={handleSkillUse}
+                  updateBadge={collapsedHeaderUpdateBadge}
+                  skillsReadOnly={enterpriseConfig?.ui?.skills === 'readonly'}
+                />
+              </div>
 
-            <div
-              className={`h-full w-full ${mainView === 'scheduledTasks' ? '' : 'hidden'}`}
-              aria-hidden={mainView !== 'scheduledTasks'}
-            >
-              <ScheduledTasksView
-                isSidebarCollapsed={isSidebarCollapsed}
-                onToggleSidebar={handleToggleSidebar}
-                onNewChat={handleNewChat}
-                updateBadge={collapsedHeaderUpdateBadge}
-              />
-            </div>
+              <div
+                className={`h-full w-full ${mainView === 'scheduledTasks' ? '' : 'hidden'}`}
+                aria-hidden={mainView !== 'scheduledTasks'}
+              >
+                <ScheduledTasksView
+                  isSidebarCollapsed={isSidebarCollapsed}
+                  onToggleSidebar={handleToggleSidebar}
+                  onNewChat={handleNewChat}
+                  updateBadge={collapsedHeaderUpdateBadge}
+                />
+              </div>
 
-            <div
-              className={`h-full w-full ${mainView === 'kits' ? '' : 'hidden'}`}
-              aria-hidden={mainView !== 'kits'}
-            >
-              <KitsView
-                isSidebarCollapsed={isSidebarCollapsed}
-                onToggleSidebar={handleToggleSidebar}
-                onNewChat={handleNewChat}
-                updateBadge={collapsedHeaderUpdateBadge}
-                onTryAsking={handleKitTryAsking}
-                onUseKit={handleKitUse}
-              />
-            </div>
+              <div
+                className={`h-full w-full ${mainView === 'kits' ? '' : 'hidden'}`}
+                aria-hidden={mainView !== 'kits'}
+              >
+                <KitsView
+                  isSidebarCollapsed={isSidebarCollapsed}
+                  onToggleSidebar={handleToggleSidebar}
+                  onNewChat={handleNewChat}
+                  updateBadge={collapsedHeaderUpdateBadge}
+                  onTryAsking={handleKitTryAsking}
+                  onUseKit={handleKitUse}
+                />
+              </div>
 
-            <div
-              className={`h-full w-full ${mainView === 'library' ? '' : 'hidden'}`}
-              aria-hidden={mainView !== 'library'}
-            >
-              <LibraryView
-                isAuthenticated={Boolean(authUser)}
-                isSidebarCollapsed={isSidebarCollapsed}
-                onToggleSidebar={handleToggleSidebar}
-                onOpenSession={handleOpenLibrarySession}
-                sitesHidden={enterpriseConfig?.ui?.sites === 'hide'}
-                sitesReadOnly={enterpriseConfig?.ui?.sites === 'readonly'}
-                updateBadge={collapsedHeaderUpdateBadge}
-                requestedSource={libraryNavigationRequest.source}
-                navigationRequestId={libraryNavigationRequest.requestId}
-              />
-            </div>
+              <div
+                className={`h-full w-full ${mainView === 'library' ? '' : 'hidden'}`}
+                aria-hidden={mainView !== 'library'}
+              >
+                <LibraryView
+                  isAuthenticated={Boolean(authUser)}
+                  isSidebarCollapsed={isSidebarCollapsed}
+                  onToggleSidebar={handleToggleSidebar}
+                  onOpenSession={handleOpenLibrarySession}
+                  sitesHidden={enterpriseConfig?.ui?.sites === 'hide'}
+                  sitesReadOnly={enterpriseConfig?.ui?.sites === 'readonly'}
+                  updateBadge={collapsedHeaderUpdateBadge}
+                  requestedSource={libraryNavigationRequest.source}
+                  navigationRequestId={libraryNavigationRequest.requestId}
+                />
+              </div>
 
-            <div
-              className={`h-full w-full ${mainView === 'guanjia' ? '' : 'hidden'}`}
-              aria-hidden={mainView !== 'guanjia'}
-            >
-              <GuanjiaWorkspace
-                isSidebarCollapsed={isSidebarCollapsed}
-                onToggleSidebar={handleToggleSidebar}
-                isAssistantOpen={isGuanjiaAssistantOpen}
-                onToggleAssistant={handleToggleGuanjiaAssistant}
-                storeName={guanjiaStoreName}
-                todoCount={guanjiaTodoCount}
-                iframeUrl="https://guanjia.qszy.me/"
-                onStoreNameChange={setGuanjiaStoreName}
-                onTodoCountChange={setGuanjiaTodoCount}
-                isVisible={mainView === 'guanjia'}
-              />
+              <div
+                className={`h-full w-full ${mainView === 'guanjia' ? '' : 'hidden'}`}
+                aria-hidden={mainView !== 'guanjia'}
+              >
+                <GuanjiaWorkspace
+                  isSidebarCollapsed={isSidebarCollapsed}
+                  onToggleSidebar={handleToggleSidebar}
+                  isAssistantOpen={isGuanjiaAssistantOpen}
+                  onToggleAssistant={handleToggleGuanjiaAssistant}
+                  storeName={authUser?.shopName || guanjiaStoreName}
+                  currentUser={authUser?.nickname || '李店长'}
+                  todoCount={guanjiaTodoCount}
+                  iframeUrl="https://guanjia.qszy.me/"
+                  onStoreNameChange={setGuanjiaStoreName}
+                  onTodoCountChange={setGuanjiaTodoCount}
+                  isVisible={mainView === 'guanjia'}
+                />
+              </div>
             </div>
           </div>
+          {/* 快捷键循环焦点无障碍语音播报容器 */}
+          <div
+            role="status"
+            aria-live="polite"
+            aria-atomic="true"
+            className="sr-only pointer-events-none absolute -left-[9999px]"
+          >
+            {ariaLiveAnnouncement}
+          </div>
+          {isUpdateInteractionBlocked && (
+            <AppUpdateInteractionOverlay>
+              <AppUpdateBlockingPanel updateState={appUpdateState} />
+            </AppUpdateInteractionOverlay>
+          )}
+          {shouldShowNewUserOnboarding && (
+            <FirstRunLoginIntroduction onStartExperience={handleNewUserOnboardingStartExperience}>
+              <NewUserOnboardingOverlay
+                step={newUserOnboardingStep}
+                onNext={handleNewUserOnboardingNext}
+                onSkip={handleNewUserOnboardingSkip}
+                onStartExperience={handleNewUserOnboardingStartExperience}
+              />
+            </FirstRunLoginIntroduction>
+          )}
         </div>
-        {/* 快捷键循环焦点无障碍语音播报容器 */}
-        <div
-          role="status"
-          aria-live="polite"
-          aria-atomic="true"
-          className="sr-only pointer-events-none absolute -left-[9999px]"
-        >
-          {ariaLiveAnnouncement}
-        </div>
-        {isUpdateInteractionBlocked && (
-          <AppUpdateInteractionOverlay>
-            <AppUpdateBlockingPanel updateState={appUpdateState} />
-          </AppUpdateInteractionOverlay>
-        )}
-        {shouldShowNewUserOnboarding && (
-          <FirstRunLoginIntroduction onStartExperience={handleNewUserOnboardingStartExperience}>
-            <NewUserOnboardingOverlay
-              step={newUserOnboardingStep}
-              onNext={handleNewUserOnboardingNext}
-              onSkip={handleNewUserOnboardingSkip}
-              onStartExperience={handleNewUserOnboardingStartExperience}
-            />
-          </FirstRunLoginIntroduction>
-        )}
-      </div>
 
-      <EngineFailureOverlay
-        onRequestAppSettings={handleShowSettings}
-        suspended={showSettings || showUpdateModal || showUpdateInstallConfirm || isPermissionModalOpen}
-      />
+        <EngineFailureOverlay
+          onRequestAppSettings={handleShowSettings}
+          suspended={
+            showSettings || showUpdateModal || showUpdateInstallConfirm || isPermissionModalOpen
+          }
+        />
 
-      {/* 设置窗口显示在所有主内容之上，但不影响主界面的交互 */}
-      {showSettings && (
-        <Settings
-          onClose={handleCloseSettings}
-          onStartAiSkin={handleStartAiSkinFromSettings}
-          initialTab={settingsOptions.initialTab}
-          initialTabRequestId={settingsOptions.requestId}
-          notice={settingsOptions.notice}
-          onUpdateFound={handleUpdateFound}
-          enterpriseConfig={enterpriseConfig}
-        />
-      )}
-      {showUpdateModal && updateInfo && (
-        <AppUpdateModal
-          updateState={appUpdateState}
-          onCancel={() => {
-            if (appUpdateState.status !== AppUpdateStatus.Installing) {
-              setShowUpdateModal(false);
-            }
-          }}
-          onConfirm={handleConfirmUpdate}
-          onRetry={handleRetryUpdate}
-        />
-      )}
-      {showUpdateInstallConfirm && (
-        <AppUpdateInstallConfirmDialog
-          onCancel={() => setShowUpdateInstallConfirm(false)}
-          onConfirm={() => void installReadyUpdate()}
-        />
-      )}
-      {permissionModal}
+        {/* 设置窗口显示在所有主内容之上，但不影响主界面的交互 */}
+        {showSettings && (
+          <Settings
+            onClose={handleCloseSettings}
+            onStartAiSkin={handleStartAiSkinFromSettings}
+            initialTab={settingsOptions.initialTab}
+            initialTabRequestId={settingsOptions.requestId}
+            notice={settingsOptions.notice}
+            onUpdateFound={handleUpdateFound}
+            enterpriseConfig={enterpriseConfig}
+          />
+        )}
+        {showUpdateModal && updateInfo && (
+          <AppUpdateModal
+            updateState={appUpdateState}
+            onCancel={() => {
+              if (appUpdateState.status !== AppUpdateStatus.Installing) {
+                setShowUpdateModal(false);
+              }
+            }}
+            onConfirm={handleConfirmUpdate}
+            onRetry={handleRetryUpdate}
+          />
+        )}
+        {showUpdateInstallConfirm && (
+          <AppUpdateInstallConfirmDialog
+            onCancel={() => setShowUpdateInstallConfirm(false)}
+            onConfirm={() => void installReadyUpdate()}
+          />
+        )}
+        {permissionModal}
       </SkinPresentationScope>
     </SkinProvider>
   );

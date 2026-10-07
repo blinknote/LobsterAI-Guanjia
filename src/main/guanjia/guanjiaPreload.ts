@@ -44,6 +44,7 @@ if (cachedSsoCredentials && cachedSsoCredentials.token) {
     const applyStorageCredentials = () => {
       try {
         if (window.localStorage && cachedSsoCredentials) {
+          window.localStorage.setItem('guanjia_token', cachedSsoCredentials.token);
           window.localStorage.setItem('guanjia_sso_token', cachedSsoCredentials.token);
           window.localStorage.setItem('token', cachedSsoCredentials.token);
           window.localStorage.setItem('guanjia_user_id', cachedSsoCredentials.userId);
@@ -52,6 +53,7 @@ if (cachedSsoCredentials && cachedSsoCredentials.token) {
           window.localStorage.setItem('guanjia_user_role', cachedSsoCredentials.role);
         }
         if (window.sessionStorage && cachedSsoCredentials) {
+          window.sessionStorage.setItem('guanjia_token', cachedSsoCredentials.token);
           window.sessionStorage.setItem('token', cachedSsoCredentials.token);
           window.sessionStorage.setItem('guanjia_sso_token', cachedSsoCredentials.token);
         }
@@ -59,6 +61,9 @@ if (cachedSsoCredentials && cachedSsoCredentials.token) {
         // storage 可能因策略暂时受限
       }
     };
+
+    // document-start 立即尝试写入
+    applyStorageCredentials();
 
     if (document.readyState === 'loading') {
       document.addEventListener('DOMContentLoaded', applyStorageCredentials, { once: true });
@@ -125,7 +130,9 @@ const injectMainWorldPasswordShield = () => {
             t.appendChild(script);
             script.remove();
           }
-        } catch (_) {}
+        } catch (_) {
+          // ignore
+        }
       }, { once: true });
     }
   } catch {

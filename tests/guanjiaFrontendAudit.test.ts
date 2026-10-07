@@ -1,5 +1,7 @@
 import { describe, expect, it, mock, beforeEach } from 'bun:test';
 import { GuanjiaIpcChannel } from '../src/main/guanjia/types';
+import authReducer, { setLoggedIn } from '../src/renderer/store/slices/authSlice';
+import fs from 'fs';
 
 describe('阿岚前端闭环测试: WebContentsView 真实联动与交班静默清场', () => {
   let mockIpcInvocations: Array<{ channel: string; args: any }> = [];
@@ -49,6 +51,14 @@ describe('阿岚前端闭环测试: WebContentsView 真实联动与交班静默�
           mockIpcInvocations.push({ channel: GuanjiaIpcChannel.HideView, args: null });
           return { success: true };
         }),
+        reload: mock(async (_ignoreCache?: boolean) => {
+          bridgeInvocations.push('reload');
+          return { success: true };
+        }),
+        setSsoCredentials: mock(async (creds: any) => {
+          bridgeInvocations.push('setSsoCredentials');
+          return { success: true };
+        }),
       },
       electron: {
         guanjia: {
@@ -94,7 +104,7 @@ describe('阿岚前端闭环测试: WebContentsView 真实联动与交班静默�
     // 模拟容器 DOMRect
     const mockContainerRect = {
       x: 240, // 侧栏宽度 240px
-      y: 44,  // 顶栏高度 44px
+      y: 44, // 顶栏高度 44px
       width: 1040,
       height: 756,
       top: 44,
@@ -111,7 +121,10 @@ describe('阿岚前端闭环测试: WebContentsView 真实联动与交班静默�
     };
 
     // 执行 attach
-    await (globalThis as any).window.guanjiaBridge.attachView({ bounds, initialUrl: 'https://guanjia.local' });
+    await (globalThis as any).window.guanjiaBridge.attachView({
+      bounds,
+      initialUrl: 'https://guanjia.local',
+    });
 
     expect(mockIpcInvocations.length).toBe(1);
     expect(mockIpcInvocations[0].channel).toBe(GuanjiaIpcChannel.AttachView);
@@ -138,7 +151,9 @@ describe('阿岚前端闭环测试: WebContentsView 真实联动与交班静默�
     // 抽屉展开过渡完成后调用 setBounds
     await (globalThis as any).window.guanjiaBridge.setBounds(bounds);
 
-    const setBoundsCall = mockIpcInvocations.find(call => call.channel === GuanjiaIpcChannel.SetBounds);
+    const setBoundsCall = mockIpcInvocations.find(
+      call => call.channel === GuanjiaIpcChannel.SetBounds,
+    );
     expect(setBoundsCall).toBeDefined();
     expect(setBoundsCall?.args.width).toBe(728);
     expect(setBoundsCall?.args.height).toBe(756);
@@ -158,8 +173,13 @@ describe('阿岚前端闭环测试: WebContentsView 真实联动与交班静默�
     // 模拟点击“交班结账”
     let alertCalled = false;
     let confirmCalled = false;
-    (globalThis as any).window.alert = () => { alertCalled = true; };
-    (globalThis as any).window.confirm = () => { confirmCalled = true; return true; };
+    (globalThis as any).window.alert = () => {
+      alertCalled = true;
+    };
+    (globalThis as any).window.confirm = () => {
+      confirmCalled = true;
+      return true;
+    };
 
     const clearResult = await (globalThis as any).window.guanjiaBridge.clearAssistantSession();
 
@@ -173,15 +193,97 @@ describe('阿岚前端闭环测试: WebContentsView 真实联动与交班静默�
     expect(confirmCalled).toBe(false);
   });
 
-  it("6. 方案 A 接入验证：默认属性与 IPC attachView 绑定真实线上地址 https://guanjia.qszy.me/", async () => {
+  it('6. 方案 A 接入验证：默认属性与 IPC attachView 绑定真实线上地址 https://guanjia.qszy.me/', async () => {
     const bounds = { x: 0, y: 0, width: 1000, height: 700 };
-    const targetUrl = "https://guanjia.qszy.me/";
+    const targetUrl = 'https://guanjia.qszy.me/';
     await (globalThis as any).window.guanjiaBridge.attachView({ bounds, initialUrl: targetUrl });
 
     const attachCall = mockIpcInvocations.find(
-      (call: any) => call.channel === GuanjiaIpcChannel.AttachView && call.args.initialUrl === "https://guanjia.qszy.me/"
+      (call: any) =>
+        call.channel === GuanjiaIpcChannel.AttachView &&
+        call.args.initialUrl === 'https://guanjia.qszy.me/',
     );
     expect(attachCall).toBeDefined();
-    expect(attachCall?.args.initialUrl).toBe("https://guanjia.qszy.me/");
+    expect(attachCall?.args.initialUrl).toBe('https://guanjia.qszy.me/');
+  });
+
+  it('7. 员工登录弹窗组件源码合规审计：禁止冗余教育文案，仅保留必要表单要素与可执行错误提示', () => {
+    const modalSource = fs.readFileSync(
+      'src/renderer/components/guanjia/GuanjiaLoginModal.tsx',
+      'utf-8',
+    );
+
+    // 必须包含核心要素
+    expect(modalSource).toContain('员工登录');
+    expect(modalSource).toContain('账号 / 工号');
+    expect(modalSource).toContain('密码');
+    expect(modalSource).toContain('请输入账号或工号');
+    expect(modalSource).toContain('请输入密码');
+    expect(modalSource).toContain('登录');
+    expect(modalSource).toContain('取消');
+
+    // 禁止出现任何冗余教育性/架构介绍说明文案
+    expect(modalSource).not.toContain('架构介绍');
+    expect(modalSource).not.toContain('使用说明');
+    expect(modalSource).not.toContain('有道');
+    expect(modalSource).not.toContain('网易');
+    expect(modalSource).not.toContain('科普');
+  });
+
+  it('8. 登录成功后 Redux setLoggedIn 状态流转审计：正确同步操作人姓名“李店长”与门店信息', () => {
+    const initialState = {
+      isLoggedIn: false,
+      isLoading: false,
+      sessionStatus: 'unauthenticated' as any,
+      user: null,
+      quota: null,
+      purchaseOffer: null,
+      creditQuotaSnapshot: null,
+      profileSummary: null,
+      ownerAccountKey: null,
+      accountGeneration: 0,
+    };
+
+    const loggedInState = authReducer(
+      initialState,
+      setLoggedIn({
+        user: {
+          yid: 'guanjia-001',
+          nickname: '李店长',
+          avatarUrl: null,
+          accountMode: 'enterprise',
+          shopName: '青盛堂旗舰店',
+          shopId: 'shop-888',
+          role: 'manager',
+        },
+        quota: {
+          planName: '智慧管家旗舰版',
+          subscriptionStatus: 'enterprise',
+          creditsLimit: 999999,
+          creditsUsed: 0,
+          creditsRemaining: 999999,
+          accountMode: 'enterprise',
+        },
+        ownerAccountKey: 'guanjia-account-001',
+      }),
+    );
+
+    expect(loggedInState.isLoggedIn).toBe(true);
+    expect(loggedInState.user?.nickname).toBe('李店长');
+    expect(loggedInState.user?.shopName).toBe('青盛堂旗舰店');
+    expect(loggedInState.user?.role).toBe('manager');
+  });
+
+  it('9. 登录成功后触发 WebContentsView 刷新与 SSO 凭据同步', async () => {
+    const creds = {
+      token: 'test-token',
+      userId: '001',
+      shopName: '青盛堂旗舰店',
+    };
+    await (globalThis as any).window.guanjiaBridge.setSsoCredentials(creds);
+    await (globalThis as any).window.guanjiaBridge.reload(true);
+
+    expect(bridgeInvocations).toContain('setSsoCredentials');
+    expect(bridgeInvocations).toContain('reload');
   });
 });

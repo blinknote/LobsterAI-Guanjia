@@ -1,11 +1,5 @@
 import { ArrowPathIcon, ChevronRightIcon } from '@heroicons/react/24/outline';
-import React, {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSelector } from 'react-redux';
 
 import inviteCreditsIconUrl from '../assets/icons/invite-credits.svg';
@@ -40,6 +34,7 @@ import { ACCOUNT_MENU_COMPACT_CTA_CLASS_NAME } from './accountMenuStyles';
 import CreditsFinalRewardModal from './CreditsFinalRewardModal';
 import { DailyCheckInAccountMenuEntry } from './DailyCheckInActivity';
 import { getDailyCheckInAuthScopeKey } from './dailyCheckInActivityState';
+import GuanjiaLoginModal from './guanjia/GuanjiaLoginModal';
 import UserAvatarIcon from './icons/UserAvatarIcon';
 import {
   type StartupCreditCampaignEntry,
@@ -85,10 +80,7 @@ const reportAccountMenuAction = (
   });
 };
 
-const writeAccountMenuRendererLog = (
-  level: 'debug' | 'warn',
-  message: string,
-): void => {
+const writeAccountMenuRendererLog = (level: 'debug' | 'warn', message: string): void => {
   try {
     window.electron?.log?.fromRenderer?.(level, 'LoginButton', message);
   } catch (error) {
@@ -132,10 +124,12 @@ const getFinalRewardText = (reward: FreeCreditsReward | undefined) => {
   const presentation = reward?.presentation;
   return {
     creditsText,
-    title: (isEn ? presentation?.titleEn : presentation?.titleZh)
-      || i18nService.t('authFinalRewardAlt').replace('{credits}', creditsText),
-    actionText: (isEn ? presentation?.actionTextEn : presentation?.actionTextZh)
-      || i18nService.t('authFinalRewardAction').replace('{credits}', creditsText),
+    title:
+      (isEn ? presentation?.titleEn : presentation?.titleZh) ||
+      i18nService.t('authFinalRewardAlt').replace('{credits}', creditsText),
+    actionText:
+      (isEn ? presentation?.actionTextEn : presentation?.actionTextZh) ||
+      i18nService.t('authFinalRewardAction').replace('{credits}', creditsText),
   };
 };
 
@@ -221,7 +215,11 @@ const AccountPlanAction: React.FC<AccountPlanActionProps> = ({
       ) : (
         <span className="flex min-w-0 flex-1 items-center gap-1.5">
           <span
-            className={expiryText ? 'max-w-[64px] shrink-0 truncate font-medium' : 'min-w-0 flex-1 truncate font-medium'}
+            className={
+              expiryText
+                ? 'max-w-[64px] shrink-0 truncate font-medium'
+                : 'min-w-0 flex-1 truncate font-medium'
+            }
             title={label}
           >
             {label}
@@ -514,9 +512,7 @@ const UserMenu: React.FC<UserMenuProps> = ({
       </>
     );
   } else if (summaryLoading) {
-    creditsTrailingContent = (
-      <ArrowPathIcon className="h-3.5 w-3.5 animate-spin text-secondary" />
-    );
+    creditsTrailingContent = <ArrowPathIcon className="h-3.5 w-3.5 animate-spin text-secondary" />;
   } else {
     creditsTrailingContent = (
       <>
@@ -535,18 +531,16 @@ const UserMenu: React.FC<UserMenuProps> = ({
   });
   const accountPlan = getAccountPlanPresentation(creditItems, isEn);
   const visibleAccountPlan = user?.accountMode === 'enterprise' ? null : accountPlan;
-  const shouldShowPlanLearnAction = (
-    user?.accountMode !== 'enterprise'
-    && profileSummary !== null
-    && visibleAccountPlan === null
-  );
+  const shouldShowPlanLearnAction =
+    user?.accountMode !== 'enterprise' && profileSummary !== null && visibleAccountPlan === null;
   const availableResetCount = profileSummary?.availableResetCount ?? 0;
   const availablePromoSubscriptionCount = profileSummary?.availablePromoSubscriptionCount ?? 0;
-  const campaignActionLabel = availableResetCount > 0
-    ? i18nService.t('authCreditsResetActionCount').replace('{count}', String(availableResetCount))
-    : availablePromoSubscriptionCount > 0
-      ? i18nService.t('authPromoSubscriptionAction')
-      : null;
+  const campaignActionLabel =
+    availableResetCount > 0
+      ? i18nService.t('authCreditsResetActionCount').replace('{count}', String(availableResetCount))
+      : availablePromoSubscriptionCount > 0
+        ? i18nService.t('authPromoSubscriptionAction')
+        : null;
   const finalRewards = getFinalRewards(profileSummary?.creditsResetCampaign);
 
   return (
@@ -554,8 +548,11 @@ const UserMenu: React.FC<UserMenuProps> = ({
       {/* Account info */}
       <div className="border-b border-border px-4 py-3">
         <div className="truncate text-sm font-medium text-foreground">
-          {accountName}
+          {user?.nickname || accountName}
         </div>
+        {user?.shopName && (
+          <div className="mt-0.5 truncate text-xs text-secondary">{user.shopName}</div>
+        )}
       </div>
 
       {/* Account destinations */}
@@ -577,22 +574,20 @@ const UserMenu: React.FC<UserMenuProps> = ({
           />
         )}
         <DailyCheckInAccountMenuEntry
-          enabled={startupCreditEntry.resolved
-            && !startupCreditEntry.available}
+          enabled={startupCreditEntry.resolved && !startupCreditEntry.available}
           initialSnapshot={dailyCheckInSnapshot}
           loadOnMount={false}
-          suppressed={!startupCreditEntry.resolved
-            || startupCreditEntry.available}
+          suppressed={!startupCreditEntry.resolved || startupCreditEntry.available}
         />
         <AccountMenuAction
           icon={<PointsStackIcon />}
           label={i18nService.t('authCreditsRemaining')}
           title={creditsUnavailable ? i18nService.t('authCreditsUnavailableRetry') : undefined}
-          trailing={(
+          trailing={
             <span className="ml-auto flex shrink-0 items-center gap-1 text-xs font-medium text-foreground">
               {creditsTrailingContent}
             </span>
-          )}
+          }
           onClick={handleCreditsDetail}
         />
         <AccountMenuAction
@@ -621,7 +616,12 @@ const UserMenu: React.FC<UserMenuProps> = ({
           return (
             <AccountMenuAction
               key={`${reward.campaignCode}:${reward.claimDeadline}`}
-              icon={<PortalMenuIcon src={reward.presentation?.iconUrl || soccerBallIconUrl} darkInvert />}
+              icon={
+                <PortalMenuIcon
+                  src={reward.presentation?.iconUrl || soccerBallIconUrl}
+                  darkInvert
+                />
+              }
               label={rewardText.actionText}
               onClick={() => handleFinalReward(reward)}
             />
@@ -660,22 +660,17 @@ const LoginButton: React.FC<LoginButtonProps> = ({
   contentLeftOffset = 0,
   loggedOutVariant = 'default',
 }) => {
-  const {
-    accountGeneration,
-    isLoggedIn,
-    isLoading,
-    ownerAccountKey,
-    profileSummary,
-    user,
-  } = useSelector((state: RootState) => state.auth);
+  const { accountGeneration, isLoggedIn, isLoading, ownerAccountKey, profileSummary, user } =
+    useSelector((state: RootState) => state.auth);
   const enterpriseAccountContext = useSelector(selectEnterpriseAccountContext);
   const startupCreditEntry = useStartupCreditCampaignEntry();
   const [showMenu, setShowMenu] = useState(false);
   const [menuOpening, setMenuOpening] = useState(false);
-  const [menuStartupCreditEntry, setMenuStartupCreditEntry] = useState<StartupCreditCampaignEntry>(
-    startupCreditEntry,
-  );
-  const [menuDailyCheckInSnapshot, setMenuDailyCheckInSnapshot] = useState<DailyCheckInSnapshot | null>(null);
+  const [menuStartupCreditEntry, setMenuStartupCreditEntry] =
+    useState<StartupCreditCampaignEntry>(startupCreditEntry);
+  const [showLoginModal, setShowLoginModal] = useState(false);
+  const [menuDailyCheckInSnapshot, setMenuDailyCheckInSnapshot] =
+    useState<DailyCheckInSnapshot | null>(null);
   const [selectedFinalRewardCode, setSelectedFinalRewardCode] = useState<string | null>(null);
   const [finalRewardLoading, setFinalRewardLoading] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -687,9 +682,7 @@ const LoginButton: React.FC<LoginButtonProps> = ({
     () => getFinalRewards(profileSummary?.creditsResetCampaign),
     [profileSummary?.creditsResetCampaign],
   );
-  const finalReward = finalRewards.find(
-    reward => reward.campaignCode === selectedFinalRewardCode,
-  );
+  const finalReward = finalRewards.find(reward => reward.campaignCode === selectedFinalRewardCode);
   const finalRewardText = getFinalRewardText(finalReward);
   const finalRewardOpen = finalReward !== undefined;
 
@@ -704,14 +697,27 @@ const LoginButton: React.FC<LoginButtonProps> = ({
   }, []);
 
   useEffect(() => {
+    const handleOpenLogin = () => {
+      setShowLoginModal(true);
+    };
+    window.addEventListener('guanjia:open-login', handleOpenLogin);
+    window.addEventListener('app:open-login', handleOpenLogin);
+    return () => {
+      window.removeEventListener('guanjia:open-login', handleOpenLogin);
+      window.removeEventListener('app:open-login', handleOpenLogin);
+    };
+  }, []);
+
+  useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       const target = event.target;
-      const isEnterpriseAccountFlyout = target instanceof Element
-        && target.closest('[data-enterprise-account-flyout="true"]') !== null;
+      const isEnterpriseAccountFlyout =
+        target instanceof Element &&
+        target.closest('[data-enterprise-account-flyout="true"]') !== null;
       if (
-        containerRef.current
-        && !containerRef.current.contains(target as Node)
-        && !isEnterpriseAccountFlyout
+        containerRef.current &&
+        !containerRef.current.contains(target as Node) &&
+        !isEnterpriseAccountFlyout
       ) {
         setShowMenu(false);
       }
@@ -769,9 +775,10 @@ const LoginButton: React.FC<LoginButtonProps> = ({
       const requestId = ++menuOpenRequestRef.current;
       const requestAccountScope = authAccountScope;
       const selectedStartupCreditEntry = startupCreditEntry;
-      const shouldLoadDailyCheckIn = !enterpriseAccountContext
-        && selectedStartupCreditEntry.resolved
-        && !selectedStartupCreditEntry.available;
+      const shouldLoadDailyCheckIn =
+        !enterpriseAccountContext &&
+        selectedStartupCreditEntry.resolved &&
+        !selectedStartupCreditEntry.available;
       setMenuOpening(true);
       setMenuStartupCreditEntry(selectedStartupCreditEntry);
       setMenuDailyCheckInSnapshot(null);
@@ -793,16 +800,19 @@ const LoginButton: React.FC<LoginButtonProps> = ({
           }
         }
       } catch (error) {
-        console.warn('[LoginButton] failed to preload daily check-in before opening account menu:', error);
+        console.warn(
+          '[LoginButton] failed to preload daily check-in before opening account menu:',
+          error,
+        );
         writeAccountMenuRendererLog(
           'warn',
           'failed to preload daily check-in before opening account menu',
         );
       } finally {
         if (
-          mountedRef.current
-          && menuOpenRequestRef.current === requestId
-          && authAccountScopeRef.current === requestAccountScope
+          mountedRef.current &&
+          menuOpenRequestRef.current === requestId &&
+          authAccountScopeRef.current === requestAccountScope
         ) {
           setMenuDailyCheckInSnapshot(dailyCheckInSnapshot);
           setShowMenu(true);
@@ -811,22 +821,8 @@ const LoginButton: React.FC<LoginButtonProps> = ({
       }
       return;
     }
-    const loginVariant = useSidebarPromoLogin ? 'sidebar_promo' : 'default';
-    writeAccountMenuRendererLog('debug', `login requested variant=${loginVariant}`);
-    try {
-      await authService.login();
-      reportAccountMenuAction('login', {
-        isLoggedIn: false,
-        result: 'success',
-      });
-    } catch (error) {
-      writeAccountMenuRendererLog('warn', `login request failed variant=${loginVariant}`);
-      reportAccountMenuAction('login', {
-        isLoggedIn: false,
-        result: 'failed',
-      });
-      throw error;
-    }
+    // 拦截原有 authService.login() 外跳，改为唤起原生智慧管家员工登录弹窗
+    setShowLoginModal(true);
   };
 
   const closeFinalReward = () => {
@@ -840,16 +836,22 @@ const LoginButton: React.FC<LoginButtonProps> = ({
     try {
       const claimed = await authService.claimCreditsFinalReward(finalReward.campaignCode);
       setSelectedFinalRewardCode(null);
-      window.dispatchEvent(new CustomEvent('app:showToast', {
-        detail: i18nService.t('authFinalRewardClaimSuccess')
-          .replace('{credits}', formatCredits(claimed.creditsGranted))
-          .replace('{date}', formatRewardExpiry(claimed.expiresAt)),
-      }));
+      window.dispatchEvent(
+        new CustomEvent('app:showToast', {
+          detail: i18nService
+            .t('authFinalRewardClaimSuccess')
+            .replace('{credits}', formatCredits(claimed.creditsGranted))
+            .replace('{date}', formatRewardExpiry(claimed.expiresAt)),
+        }),
+      );
     } catch (error) {
       await authService.fetchProfileSummary();
-      window.dispatchEvent(new CustomEvent('app:showToast', {
-        detail: error instanceof Error ? error.message : i18nService.t('authFinalRewardClaimFailed'),
-      }));
+      window.dispatchEvent(
+        new CustomEvent('app:showToast', {
+          detail:
+            error instanceof Error ? error.message : i18nService.t('authFinalRewardClaimFailed'),
+        }),
+      );
     } finally {
       setFinalRewardLoading(false);
     }
@@ -875,36 +877,41 @@ const LoginButton: React.FC<LoginButtonProps> = ({
             ) : (
               <UserAvatarIcon className="h-4 w-4 shrink-0" />
             )}
-            <span className="truncate max-w-[80px]">{i18nService.t('myAccount')}</span>
+            <span
+              className="truncate max-w-[90px]"
+              title={
+                user?.shopName
+                  ? `${user.nickname || i18nService.t('myAccount')} · ${user.shopName}`
+                  : user?.nickname || i18nService.t('myAccount')
+              }
+            >
+              {user?.nickname || i18nService.t('myAccount')}
+            </span>
           </>
+        ) : useSidebarPromoLogin ? (
+          i18nService.t('sidebarLoginNow')
         ) : (
-          useSidebarPromoLogin ? (
-            i18nService.t('sidebarLoginNow')
-          ) : (
-            <>
-              <UserAvatarIcon className="h-4 w-4 shrink-0" />
-              {i18nService.t('login')}
-            </>
-          )
+          <>
+            <UserAvatarIcon className="h-4 w-4 shrink-0" />
+            {i18nService.t('login')}
+          </>
         )}
       </button>
-      {showMenu && isLoggedIn && (
-        enterpriseAccountContext
-          ? (
-            <EnterpriseAccountMenu
-              context={enterpriseAccountContext}
-              onClose={() => setShowMenu(false)}
-            />
-          )
-          : (
-            <UserMenu
-              dailyCheckInSnapshot={menuDailyCheckInSnapshot}
-              onClose={() => setShowMenu(false)}
-              onOpenFinalReward={setSelectedFinalRewardCode}
-              startupCreditEntry={menuStartupCreditEntry}
-            />
-          )
-      )}
+      {showMenu &&
+        isLoggedIn &&
+        (enterpriseAccountContext ? (
+          <EnterpriseAccountMenu
+            context={enterpriseAccountContext}
+            onClose={() => setShowMenu(false)}
+          />
+        ) : (
+          <UserMenu
+            dailyCheckInSnapshot={menuDailyCheckInSnapshot}
+            onClose={() => setShowMenu(false)}
+            onOpenFinalReward={setSelectedFinalRewardCode}
+            startupCreditEntry={menuStartupCreditEntry}
+          />
+        ))}
       <CreditsFinalRewardModal
         open={finalRewardOpen}
         loading={finalRewardLoading}
@@ -917,6 +924,7 @@ const LoginButton: React.FC<LoginButtonProps> = ({
         onClose={closeFinalReward}
         onClaim={() => void claimFinalReward()}
       />
+      <GuanjiaLoginModal isOpen={showLoginModal} onClose={() => setShowLoginModal(false)} />
     </div>
   );
 };

@@ -1535,6 +1535,26 @@ contextBridge.exposeInMainWorld('electron', {
     },
   },
   guanjia: {
+    login: (args: { account: string; password: string }) =>
+      ipcRenderer.invoke(GuanjiaIpcChannel.Login, args) as Promise<{
+        success: boolean;
+        data?: {
+          token: string;
+          userInfo: {
+            employee_id: string | number;
+            employee_no: string;
+            employee_name: string;
+            role: string;
+            store_code?: string;
+            store_name?: string;
+            [key: string]: unknown;
+          };
+        };
+        credentials?: unknown;
+        error?: string;
+      }>,
+    logout: () =>
+      ipcRenderer.invoke(GuanjiaIpcChannel.Logout) as Promise<{ success: boolean; error?: string }>,
     attachView: (args: { bounds: { x: number; y: number; width: number; height: number }; initialUrl?: string }) =>
       ipcRenderer.invoke(GuanjiaIpcChannel.AttachView, args) as Promise<{ success: boolean; error?: string }>,
     detachView: () =>
@@ -1580,6 +1600,10 @@ contextBridge.exposeInMainWorld('electron', {
 
 // 暴露智慧管家 Bridge 供宿主与管家交互使用
 contextBridge.exposeInMainWorld('guanjiaBridge', {
+  login: (args: { account: string; password: string }) =>
+    ipcRenderer.invoke(GuanjiaIpcChannel.Login, args),
+  logout: () =>
+    ipcRenderer.invoke(GuanjiaIpcChannel.Logout),
   clearAssistantSession: () =>
     ipcRenderer.invoke(GuanjiaIpcChannel.ClearAssistantSession) as Promise<{
       success: boolean;

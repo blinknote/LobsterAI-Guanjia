@@ -18,6 +18,31 @@ export interface GuanjiaSsoCredentials {
   expiredAt?: number;
 }
 
+export interface GuanjiaLoginPayload {
+  account: string;
+  password: string;
+}
+
+export interface GuanjiaLoginUserInfo {
+  employee_id: string | number;
+  employee_no: string;
+  employee_name: string;
+  role: string;
+  store_code?: string;
+  store_name?: string;
+  [key: string]: unknown;
+}
+
+export interface GuanjiaLoginResult {
+  success: boolean;
+  data?: {
+    token: string;
+    userInfo: GuanjiaLoginUserInfo;
+  };
+  credentials?: GuanjiaSsoCredentials;
+  error?: string;
+}
+
 export interface GuanjiaWorkspaceContext {
   currentUrl: string;
   pathname: string;
@@ -187,4 +212,8 @@ export const GuanjiaIpcChannel = {
   GetCreditBalance: 'guanjia:model:get-balance',
   RouteAndInvokeModel: 'guanjia:model:route-and-invoke',
   GetLedgerRecords: 'guanjia:model:get-ledger',
+
+  // 真实账号密码认证与会话
+  Login: 'guanjia:auth:login',
+  Logout: 'guanjia:auth:logout',
 } as const;

@@ -184,6 +184,20 @@ export const GuanjiaWorkspace: React.FC<GuanjiaWorkspaceProps> = ({
     }
   }, [isVisible, ipcSetBounds]);
 
+  // 监听登录就绪事件：自动刷新上下文与就绪 WebContentsView
+  useEffect(() => {
+    const handleWorkspaceReady = () => {
+      if (isVisible) {
+        updateBounds();
+        ipcShowView().catch(console.error);
+      }
+    };
+    window.addEventListener('guanjia:workspace-ready', handleWorkspaceReady);
+    return () => {
+      window.removeEventListener('guanjia:workspace-ready', handleWorkspaceReady);
+    };
+  }, [isVisible, updateBounds, ipcShowView]);
+
   // WebContentsView 真实联动：挂载、显隐与切走现场保持
   useEffect(() => {
     if (isLoading) return;

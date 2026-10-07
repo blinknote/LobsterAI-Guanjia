@@ -6,6 +6,8 @@ import { GuanjiaWorkspaceManager } from './guanjiaWorkspaceManager';
 import {
   GuanjiaActionRequest,
   GuanjiaIpcChannel,
+  GuanjiaLoginPayload,
+  GuanjiaLoginResult,
   GuanjiaSsoCredentials,
 } from './types';
 
@@ -89,6 +91,131 @@ export function registerGuanjiaIpcHandlers(options?: RegisterGuanjiaHandlersOpti
 
   ipcMain.handle(GuanjiaIpcChannel.GetNavigationState, async () => {
     return workspaceManager.getNavigationState();
+  });
+
+  // =========================================================================
+  // 真实账号密码认证与会话凭据直达
+  // =========================================================================
+  ipcMain.handle(
+    GuanjiaIpcChannel.Login,
+    async (
+      _event,
+      args: { account?: string; password?: string; [key: string]: unknown },
+    ): Promise<GuanjiaLoginResult> => {
+      // 1. 外部输入校验
+      if (!args || typeof args !== 'object') {
+        return { success: false, error: '请求参数无效' };
+      }
+      const account = typeof args.account === 'string' ? args.account.trim() : '';
+      const password = typeof args.password === 'string' ? args.password : '';
+      if (!account || !password) {
+        return { success: false, error: '账号和密码不能为空' };
+      }
+
+      try {
+        // 2. 服务端调用 /api/c/login 校验
+        const baseUrl = workspaceManager.getDefaultUrl() || 'https://guanjia.qszy.me/';
+        const loginUrl = new URL('/api/c/login', baseUrl).toString();
+
+        const response = await fetch(loginUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            employee_no: account,
+            password: password,
+          }),
+        });
+
+        if (!response.ok) {
+          let errorMsg = `登录失败 (HTTP ${response.status})`;
+          try {
+            const errData = (await response.json()) as any;
+            if (errData && (errData.message || errData.error || errData.msg)) {
+              errorMsg = errData.message || errData.error || errData.msg;
+            }
+          } catch {
+            // 忽略非 json
+          }
+          return { success: false, error: errorMsg };
+        }
+
+        const resData = (await response.json()) as any;
+        if (!resData || (!resData.success && resData.code !== 200 && resData.code !== 0)) {
+          return {
+            success: false,
+            error: resData?.message || resData?.msg || resData?.error || '登录失败，请核对账号与密码',
+          };
+        }
+
+        const data = resData.data || resData;
+        const token = data.token;
+        if (!token || typeof token !== 'string') {
+          return { success: false, error: resData.message || '登录失败：服务端未返回有效令牌' };
+        }
+
+        const userInfo = data.userInfo || data.user || {};
+        const employeeId = String(userInfo.employee_id ?? userInfo.id ?? userInfo.userId ?? '');
+        const employeeNo = String(userInfo.employee_no ?? userInfo.username ?? account);
+        const employeeName = String(userInfo.employee_name ?? userInfo.realName ?? userInfo.name ?? employeeNo);
+        const role = String(userInfo.role ?? 'frontdesk');
+        const storeCode = String(userInfo.store_code ?? userInfo.shop_id ?? userInfo.shopId ?? '');
+        const storeName = String(userInfo.store_name ?? userInfo.shop_name ?? userInfo.shopName ?? '');
+
+        // 3. 构造 GuanjiaSsoCredentials
+        const credentials: GuanjiaSsoCredentials = {
+          token,
+          userId: employeeId,
+          username: employeeNo,
+          realName: employeeName,
+          role,
+          shopId: storeCode,
+          shopName: storeName,
+        };
+
+        // 4. 调用 GuanjiaWorkspaceManager.getInstance().setSsoCredentials(...) 并注入会话凭据
+        workspaceManager.setSsoCredentials(credentials);
+        await workspaceManager.injectSessionCredentials(credentials);
+
+        return {
+          success: true,
+          data: {
+            token,
+            userInfo: {
+              employee_id: employeeId,
+              employee_no: employeeNo,
+              employee_name: employeeName,
+              role,
+              store_code: storeCode,
+              store_name: storeName,
+              ...userInfo,
+            },
+          },
+          credentials,
+        };
+      } catch (err) {
+        console.error('[GuanjiaIpcHandlers] Login exception:', err instanceof Error ? err.message : err);
+        return {
+          success: false,
+          error: err instanceof Error ? err.message : '网络请求失败，请检查网络连接',
+        };
+      }
+    },
+  );
+
+  ipcMain.handle(GuanjiaIpcChannel.Logout, async (): Promise<{ success: boolean; error?: string }> => {
+    try {
+      workspaceManager.clearSsoCredentials();
+      await workspaceManager.clearSessionCredentials();
+      return { success: true };
+    } catch (err) {
+      console.error('[GuanjiaIpcHandlers] Logout exception:', err instanceof Error ? err.message : err);
+      return {
+        success: false,
+        error: err instanceof Error ? err.message : '登出失败',
+      };
+    }
   });
 
   // =========================================================================
