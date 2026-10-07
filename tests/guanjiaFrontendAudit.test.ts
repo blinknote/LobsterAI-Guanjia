@@ -286,4 +286,41 @@ describe('阿岚前端闭环测试: WebContentsView 真实联动与交班静默�
     expect(bridgeInvocations).toContain('setSsoCredentials');
     expect(bridgeInvocations).toContain('reload');
   });
+
+  it('10. 缺陷 1 闭环审计：禁止生成假 Token，禁止重复调用 setSsoCredentials 破坏会话', () => {
+    const modalSource = fs.readFileSync(
+      'src/renderer/components/guanjia/GuanjiaLoginModal.tsx',
+      'utf-8',
+    );
+
+    // 严禁存在自行生成的随机假 Token
+    expect(modalSource).not.toContain('guanjia_sso_token_${Date.now()}');
+    expect(modalSource).not.toContain('Math.random()');
+
+    // 前端严禁再次调用 setSsoCredentials 覆盖主进程注入的凭据
+    expect(modalSource).not.toMatch(/guanjiaApi\??\.setSsoCredentials/);
+  });
+
+  it('11. 缺陷 2 闭环审计：服务端真实 userInfo 优先，严禁无条件硬编码覆盖', () => {
+    const modalSource = fs.readFileSync(
+      'src/renderer/components/guanjia/GuanjiaLoginModal.tsx',
+      'utf-8',
+    );
+
+    // 确认提取了服务端的真实字段
+    expect(modalSource).toContain('realName = uInfo.employee_name || uInfo.realName || uInfo.name');
+    expect(modalSource).toContain('shopName = uInfo.store_name || uInfo.shop_name || uInfo.shopName');
+    expect(modalSource).toContain('realName = realName || fallbackRealName');
+    expect(modalSource).toContain('role = role || fallbackRole');
+  });
+
+  it('12. 缺陷 3 闭环审计：登录异常时必须 setErrorMsg 并立即 return 阻断，严禁假装成功', () => {
+    const modalSource = fs.readFileSync(
+      'src/renderer/components/guanjia/GuanjiaLoginModal.tsx',
+      'utf-8',
+    );
+
+    // catch 块中必须有 setErrorMsg / setErrorMessage 与 return 阻断
+    expect(modalSource).toMatch(/catch\s*\([^)]*\)\s*\{[\s\S]*?setErrorMessage[\s\S]*?return;/);
+  });
 });

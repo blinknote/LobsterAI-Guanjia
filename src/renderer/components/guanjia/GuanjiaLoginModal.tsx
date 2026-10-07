@@ -73,13 +73,33 @@ export const GuanjiaLoginModal: React.FC<GuanjiaLoginModalProps> = ({
       try {
         const guanjiaApi = (window as any).guanjiaBridge || (window as any).electron?.guanjia;
 
-        // 解析角色与真实操作人姓名
+        // 默认兜底员工信息（仅当服务端未返回对应字段时使用）
         const lowerUsername = trimmedUsername.toLowerCase();
-        let role = 'manager';
-        let realName = '李店长';
-        let shopName = '青盛堂旗舰店';
-        const shopId = 'shop-888';
-        let userId = trimmedUsername;
+        let fallbackRole = 'manager';
+        let fallbackRealName = '李店长';
+        const fallbackShopName = '青盛堂旗舰店';
+        const fallbackShopId = 'shop-888';
+        const fallbackUserId = trimmedUsername;
+
+        if (
+          lowerUsername.includes('cashier') ||
+          lowerUsername.includes('frontdesk') ||
+          lowerUsername === '002' ||
+          trimmedUsername.includes('前台')
+        ) {
+          fallbackRole = 'frontdesk';
+          fallbackRealName = '李前台';
+        } else if (/[\u4e00-\u9fa5]/.test(trimmedUsername)) {
+          fallbackRealName = trimmedUsername;
+          fallbackRole = trimmedUsername.includes('店长') ? 'manager' : 'frontdesk';
+        }
+
+        let role = '';
+        let realName = '';
+        let shopName = '';
+        let shopId = '';
+        let userId = '';
+        let token = '';
 
         // 优先调用主进程真实账号密码认证
         if (guanjiaApi?.login) {
@@ -93,38 +113,31 @@ export const GuanjiaLoginModal: React.FC<GuanjiaLoginModalProps> = ({
               setIsSubmitting(false);
               return;
             }
-            if (res && res.success && res.data?.userInfo) {
-              const uInfo = res.data.userInfo;
-              realName = uInfo.employee_name || uInfo.realName || realName;
-              role = uInfo.role || role;
-              if (uInfo.store_name) {
-                shopName = uInfo.store_name;
+            if (res && res.success) {
+              const uInfo = res.data?.userInfo || res.credentials;
+              if (uInfo) {
+                realName = uInfo.employee_name || uInfo.realName || uInfo.name || '';
+                role = uInfo.role || '';
+                shopName = uInfo.store_name || uInfo.shop_name || uInfo.shopName || '';
+                shopId = uInfo.store_code || uInfo.shop_id || uInfo.shopId || '';
+                userId = String(uInfo.employee_id ?? uInfo.id ?? uInfo.userId ?? '');
               }
-              userId = String(uInfo.employee_id ?? uInfo.id ?? userId);
+              token = res.data?.token || res.credentials?.token || '';
             }
           } catch (err: any) {
-            console.warn('[GuanjiaLoginModal] Backend login call exception:', err);
+            console.error('[GuanjiaLoginModal] Backend login call exception:', err);
+            setErrorMessage(err?.message || '网络请求失败，请检查网络连接');
+            setIsSubmitting(false);
+            return;
           }
         }
 
-        // 根据账号或中文姓名匹配对应身份
-        if (
-          lowerUsername.includes('cashier') ||
-          lowerUsername.includes('frontdesk') ||
-          lowerUsername === '002' ||
-          trimmedUsername.includes('前台')
-        ) {
-          role = 'frontdesk';
-          realName = '李前台';
-        } else if (/[\u4e00-\u9fa5]/.test(trimmedUsername)) {
-          // 用户输入了具体中文姓名或称谓（如“张主管”、“李店长”）
-          realName = trimmedUsername;
-          role = trimmedUsername.includes('店长') ? 'manager' : 'frontdesk';
-        } else {
-          // 默认店长账号
-          realName = '李店长';
-          role = 'manager';
-        }
+        // 优先使用服务端真实返回，仅在服务端未返回对应字段时使用兜底缺省值
+        realName = realName || fallbackRealName;
+        role = role || fallbackRole;
+        shopName = shopName || fallbackShopName;
+        shopId = shopId || fallbackShopId;
+        userId = userId || fallbackUserId;
 
         // 1. 同步 Redux 状态
         dispatch(
@@ -150,8 +163,7 @@ export const GuanjiaLoginModal: React.FC<GuanjiaLoginModalProps> = ({
           }),
         );
 
-        // 2. 构造 SSO 免密凭据并同步至主进程
-        const token = `guanjia_sso_token_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+        // 2. 构造 SSO 凭据对象 (使用后端真实返回的 Token，严禁自行生成随机假 Token，主进程登录时已自动注入会话，不再重复调用 setSsoCredentials)
         const ssoCredentials = {
           token,
           userId,
@@ -160,12 +172,7 @@ export const GuanjiaLoginModal: React.FC<GuanjiaLoginModalProps> = ({
           role,
           shopId,
           shopName,
-          expiredAt: Date.now() + 7 * 86400000,
         };
-
-        if (guanjiaApi?.setSsoCredentials) {
-          await guanjiaApi.setSsoCredentials(ssoCredentials);
-        }
 
         // 3. 触发管家工作区 WebContentsView 刷新与自动就绪
         if (guanjiaApi?.reload) {
