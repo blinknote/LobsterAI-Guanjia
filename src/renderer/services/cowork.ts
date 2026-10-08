@@ -5,6 +5,7 @@ import {
   CoworkSystemMessageKind,
 } from '../../common/coworkSystemMessages';
 import type { OpenClawSessionPatch } from '../../common/openclawSession';
+import { AgentId } from '../../shared/agent/constants';
 import {
   type CoworkBtwAbortRequest,
   CoworkBtwStatus,
@@ -91,6 +92,8 @@ import {
   getPreservedMessageWindow,
   shouldReloadCurrentSessionForChange,
 } from './coworkSessionRefreshPolicy';
+import { GuanjiaMessageMetadataKey, guanjiaNativeService } from './guanjiaNativeService';
+import { guanjiaSessionService } from './guanjiaSession';
 import { i18nService } from './i18n';
 import { restoreNativeQuestionPermissions } from './nativeQuestionRecovery';
 import { reportOnboardingAction } from './onboardingAnalytics';
@@ -160,6 +163,41 @@ const restoreCurrentAgentDefaultSkills = (): void => {
 };
 
 class CoworkService {
+  private readonly guanjiaSessionGenerations = new Map<string, number>();
+  private readonly knownGuanjiaSessions = new Set<string>();
+
+  private isGuanjiaSession(sessionId: string): boolean {
+    const state = store.getState().cowork;
+    return this.knownGuanjiaSessions.has(sessionId)
+      || state.sessions.some(session => session.id === sessionId && session.agentId === AgentId.GuanjiaAssistant)
+      || (state.currentSession?.id === sessionId && state.currentSession.agentId === AgentId.GuanjiaAssistant);
+  }
+
+  private acceptsSessionEvent(sessionId: string): boolean {
+    if (!this.isGuanjiaSession(sessionId)) return true;
+    const snapshot = guanjiaSessionService.getSnapshot();
+    return snapshot.status === 'authenticated'
+      && this.guanjiaSessionGenerations.get(sessionId) === snapshot.generation;
+  }
+
+  private async authorizeGuanjiaSession(sessionId: string): Promise<boolean> {
+    this.knownGuanjiaSessions.add(sessionId);
+    const before = guanjiaSessionService.getSnapshot();
+    if (before.status !== 'authenticated' || !before.user || !before.store) return false;
+    const result = await guanjiaNativeService.get(sessionId);
+    const current = guanjiaSessionService.getSnapshot();
+    const scope = result.session;
+    if (!result.success || !scope || scope.sessionId !== sessionId
+      || scope.agentId !== AgentId.GuanjiaAssistant
+      || current.status !== 'authenticated' || current.generation !== before.generation
+      || scope.generation !== current.generation
+      || String(scope.tenantId) !== String(current.user?.tenantId)
+      || String(scope.userId) !== String(current.user?.id)
+      || String(scope.storeId) !== String(current.store?.id)) return false;
+    this.guanjiaSessionGenerations.set(sessionId, current.generation);
+    return true;
+  }
+
   private streamListenerCleanups: Array<() => void> = [];
   private initialized = false;
   private openClawStatus: OpenClawEngineStatus | null = null;
@@ -276,6 +314,7 @@ class CoworkService {
 
     // Message listener - also check if session exists (for IM-created sessions)
     const messageCleanup = cowork.onStreamMessage(async ({ sessionId, message, beforeMessageId }) => {
+      if (!this.acceptsSessionEvent(sessionId)) return;
       // Debug: log user messages to check if imageAttachments are preserved
       if (message.type === 'user') {
         const meta = message.metadata as Record<string, unknown> | undefined;
@@ -302,9 +341,14 @@ class CoworkService {
         console.log('[CoworkService] onStreamMessage: after loadSessions, sessionExists=', nowExists, 'totalSessions=', newState.sessions.length);
       }
 
+      if (this.isGuanjiaSession(sessionId) && !this.acceptsSessionEvent(sessionId)) {
+        if (!await this.authorizeGuanjiaSession(sessionId)) return;
+      }
+      if (!this.acceptsSessionEvent(sessionId)) return;
+
       // A new user turn means this session is actively running again
       // (especially important for IM-triggered turns that do not call continueSession from renderer).
-      if (message.type === 'user' || message.type === 'assistant' || message.type === 'tool_use' || message.type === 'tool_result') {
+      if (!this.isGuanjiaSession(sessionId) && (message.type === 'user' || message.type === 'assistant' || message.type === 'tool_use' || message.type === 'tool_result')) {
         store.dispatch(updateSessionStatus({ sessionId, status: 'running' }));
         this.queuedFollowUpCoordinator.handleSessionRunning(sessionId);
       }
@@ -317,8 +361,9 @@ class CoworkService {
 
     // Message update listener (for streaming content updates)
     const messageUpdateCleanup = cowork.onStreamMessageUpdate(({ sessionId, messageId, content, metadata }) => {
+      if (!this.acceptsSessionEvent(sessionId)) return;
       const session = store.getState().cowork.sessions.find(s => s.id === sessionId);
-      if (metadata?.isFinal !== true && session?.status !== 'completed') {
+      if (!this.isGuanjiaSession(sessionId) && metadata?.isFinal !== true && session?.status !== 'completed') {
         store.dispatch(updateSessionStatus({ sessionId, status: 'running' }));
         this.queuedFollowUpCoordinator.handleSessionRunning(sessionId);
       }
@@ -333,8 +378,9 @@ class CoworkService {
     this.streamListenerCleanups.push(messageUpdateCleanup);
 
     const mediaStatusPollCleanup = cowork.onMediaStatusPollUpdate?.(({ sessionId, toolCallId, details }) => {
+      if (!this.acceptsSessionEvent(sessionId)) return;
       const session = store.getState().cowork.sessions.find(s => s.id === sessionId);
-      if (session?.status !== 'completed') {
+      if (!this.isGuanjiaSession(sessionId) && session?.status !== 'completed') {
         store.dispatch(updateSessionStatus({ sessionId, status: 'running' }));
         this.queuedFollowUpCoordinator.handleSessionRunning(sessionId);
       }
@@ -345,6 +391,7 @@ class CoworkService {
     }
 
     const sessionStatusCleanup = cowork.onStreamSessionStatus?.(({ sessionId, status }) => {
+      if (!this.acceptsSessionEvent(sessionId)) return;
       const coworkState = store.getState().cowork;
       const previousStatus = coworkState.sessions.find(session => session.id === sessionId)?.status
         ?? (coworkState.currentSession?.id === sessionId ? coworkState.currentSession.status : undefined);
@@ -371,7 +418,7 @@ class CoworkService {
     }
 
     const contextUsageCleanup = cowork.onStreamContextUsage?.(({ usage }) => {
-      if (usage) {
+      if (usage && this.acceptsSessionEvent(usage.sessionId)) {
         this.handleContextUsageUpdate(usage, true);
       }
     });
@@ -380,6 +427,7 @@ class CoworkService {
     }
 
     const goalCleanup = cowork.onStreamGoal?.(({ sessionId, goal }) => {
+      if (!this.acceptsSessionEvent(sessionId)) return;
       const normalizedGoal = normalizeCoworkGoal(goal);
       console.debug(
         `[CoworkGoal] stream update received for session ${sessionId}: status=${normalizedGoal?.status ?? 'none'}, hasGoal=${normalizedGoal ? 'yes' : 'no'}.`,
@@ -391,6 +439,7 @@ class CoworkService {
     }
 
     const btwResultCleanup = cowork.onStreamBtwResult?.(({ sessionId, result }) => {
+      if (!this.acceptsSessionEvent(sessionId)) return;
       const existing = store.getState().cowork.btwThreadsBySessionId[sessionId]
         ?.entries.find(entry => entry.runId === result.runId);
       if (
@@ -418,6 +467,7 @@ class CoworkService {
     }
 
     const contextMaintenanceCleanup = cowork.onStreamContextMaintenance?.(({ sessionId, active }) => {
+      if (!this.acceptsSessionEvent(sessionId)) return;
       console.log(`[CoworkService] received context maintenance ${active ? 'start' : 'end'} for session ${sessionId}.`);
       store.dispatch(setContextMaintenance({ sessionId, active }));
     });
@@ -427,6 +477,7 @@ class CoworkService {
 
     // Permission request listener
     const permissionCleanup = cowork.onStreamPermission(({ sessionId, request }) => {
+      if (!this.acceptsSessionEvent(sessionId) || this.isGuanjiaSession(sessionId)) return;
       store.dispatch(enqueuePendingPermission({
         sessionId,
         toolName: request.toolName,
@@ -443,11 +494,13 @@ class CoworkService {
     });
     this.streamListenerCleanups.push(permissionDismissCleanup);
     this.streamListenerCleanups.push(restoreNativeQuestionPermissions(cowork, (request) => {
+      if (!this.acceptsSessionEvent(request.sessionId) || this.isGuanjiaSession(request.sessionId)) return;
       store.dispatch(enqueuePendingPermission(request));
     }));
 
     // Complete listener
     const completeCleanup = cowork.onStreamComplete(({ sessionId }) => {
+      if (!this.acceptsSessionEvent(sessionId)) return;
       store.dispatch(updateSessionStatus({ sessionId, status: 'completed' }));
       this.setCurrentSessionStreaming(sessionId, false, 'stream_complete');
       this.scheduleFinalContextUsageRefresh(sessionId, true);
@@ -457,6 +510,7 @@ class CoworkService {
 
     // Error listener
     const errorCleanup = cowork.onStreamError(({ sessionId, error }) => {
+      if (!this.acceptsSessionEvent(sessionId)) return;
       if (this.isStillRunningError(error)) {
         store.dispatch(updateSessionStatus({ sessionId, status: 'running' }));
         this.setCurrentSessionStreaming(sessionId, true, 'stream_error_still_running');
@@ -535,6 +589,45 @@ class CoworkService {
       });
     });
     this.streamListenerCleanups.push(sessionsChangedCleanup);
+
+    // Scope change listener: clear Guanjia messages/pending/stream on account/store/generation changes
+    let lastGuanjiaGeneration = guanjiaSessionService.getSnapshot().generation;
+    let lastGuanjiaStatus = guanjiaSessionService.getSnapshot().status;
+    let lastGuanjiaStoreId = guanjiaSessionService.getSnapshot().store?.id;
+    let lastGuanjiaUserId = guanjiaSessionService.getSnapshot().user?.id;
+
+    const unsubGuanjia = guanjiaSessionService.subscribe(() => {
+      const snap = guanjiaSessionService.getSnapshot();
+      const generationChanged = snap.generation !== lastGuanjiaGeneration;
+      const statusChanged = snap.status !== lastGuanjiaStatus;
+      const storeChanged = snap.store?.id !== lastGuanjiaStoreId;
+      const userChanged = snap.user?.id !== lastGuanjiaUserId;
+
+      lastGuanjiaGeneration = snap.generation;
+      lastGuanjiaStatus = snap.status;
+      lastGuanjiaStoreId = snap.store?.id;
+      lastGuanjiaUserId = snap.user?.id;
+
+      if (generationChanged || storeChanged || userChanged || (statusChanged && snap.status !== 'authenticated')) {
+        this.guanjiaSessionGenerations.clear();
+        this.latestLoadSessionsRequestId += 1;
+        this.latestLoadSessionRequestId += 1;
+        const state = store.getState();
+        state.cowork.pendingPermissions.forEach(permission => {
+          if (this.isGuanjiaSession(permission.sessionId)) {
+            store.dispatch(dequeuePendingPermission({ requestId: permission.requestId }));
+          }
+        });
+        const currentSession = state.cowork.currentSession;
+        const isCurrentGuanjia = currentSession?.agentId === AgentId.GuanjiaAssistant;
+        if (isCurrentGuanjia) {
+          store.dispatch(setStreaming(false));
+          store.dispatch(clearCurrentSession());
+          void this.loadSessions();
+        }
+      }
+    });
+    this.streamListenerCleanups.push(unsubGuanjia);
   }
 
   private isStillRunningError(error: string): boolean {
@@ -800,14 +893,21 @@ class CoworkService {
 
   async loadSessions(agentId?: string): Promise<void> {
     const requestId = ++this.latestLoadSessionsRequestId;
-    const result = await window.electron?.cowork?.listSessions({ limit: COWORK_SESSION_PAGE_SIZE, offset: 0, agentId });
+    const generation = guanjiaSessionService.getSnapshot().generation;
+    const result = await window.electron?.cowork?.listSessions({ limit: COWORK_SESSION_PAGE_SIZE, offset: 0, agentId: agentId === AgentId.GuanjiaAssistant ? undefined : agentId });
     if (result?.success && result.sessions) {
       // High-frequency IM traffic can trigger overlapping list refreshes.
       // Ignore stale responses so an older snapshot does not hide newer sessions.
-      if (requestId !== this.latestLoadSessionsRequestId) {
+      if (requestId !== this.latestLoadSessionsRequestId || generation !== guanjiaSessionService.getSnapshot().generation) {
         return;
       }
-      store.dispatch(agentId ? setAgentSessions(result.sessions) : setSessions(result.sessions));
+      const sessions = agentId === AgentId.GuanjiaAssistant
+        ? result.sessions.filter(session => session.agentId === AgentId.GuanjiaAssistant)
+        : result.sessions;
+      sessions.forEach(session => {
+        if (session.agentId === AgentId.GuanjiaAssistant) this.knownGuanjiaSessions.add(session.id);
+      });
+      store.dispatch(agentId ? setAgentSessions(sessions) : setSessions(sessions));
       store.dispatch(setHasMoreSessions(result.hasMore ?? false));
       result.sessions.forEach((session) => {
         if (
@@ -954,7 +1054,14 @@ class CoworkService {
     offset: number,
   ): Promise<CoworkSessionListResult> {
     try {
-      const result = await window.electron?.cowork?.listSessions({ limit, offset, agentId });
+      const generation = guanjiaSessionService.getSnapshot().generation;
+      const result = await window.electron?.cowork?.listSessions({ limit, offset, agentId: agentId === AgentId.GuanjiaAssistant ? undefined : agentId });
+      if (generation !== guanjiaSessionService.getSnapshot().generation) return { success: false, error: '业务会话已变化' };
+      if (agentId === AgentId.GuanjiaAssistant && result?.success && result.sessions) {
+        const sessions = result.sessions.filter(session => session.agentId === AgentId.GuanjiaAssistant);
+        sessions.forEach(session => this.knownGuanjiaSessions.add(session.id));
+        return { ...result, sessions };
+      }
       const resolved = result ?? { success: false, error: 'Cowork IPC is unavailable' };
       if (!resolved.success) {
         this.logDiagnostic(
@@ -1062,6 +1169,87 @@ class CoworkService {
   }
 
   async startSession(options: CoworkStartOptions): Promise<{ session: CoworkSession | null; error?: string }> {
+    const currentAgentId = store.getState().agent.currentAgentId;
+    const isGuanjia = (options.agentId ?? currentAgentId) === AgentId.GuanjiaAssistant;
+
+    if (isGuanjia) {
+      const initialSnapshot = guanjiaSessionService.getSnapshot();
+      if (initialSnapshot.status !== 'authenticated' || !initialSnapshot.user?.tenantId || !initialSnapshot.store) {
+        const errorMsg = initialSnapshot.error || '请先登录并核验当前门店';
+        window.dispatchEvent(new CustomEvent('app:showToast', { detail: errorMsg }));
+        return { session: null, error: errorMsg };
+      }
+      const startGeneration = initialSnapshot.generation;
+
+      store.dispatch(setStreaming(true));
+      const startResult = await guanjiaNativeService.start({
+        initialMessage: options.prompt,
+        assistantType: 'general',
+        storeId: initialSnapshot.store?.id ? String(initialSnapshot.store.id) : undefined,
+        storeCode: initialSnapshot.store?.code,
+      });
+
+      const postStartSnapshot = guanjiaSessionService.getSnapshot();
+      if (postStartSnapshot.generation !== startGeneration || postStartSnapshot.status !== 'authenticated') {
+        return { session: null, error: '业务会话已变化' };
+      }
+
+      if (!startResult.success || !startResult.sessionId) {
+        store.dispatch(setStreaming(false));
+        const errorMsg = startResult.error || '创建会话失败';
+        window.dispatchEvent(new CustomEvent('app:showToast', { detail: errorMsg }));
+        return { session: null, error: errorMsg };
+      }
+
+      if (!await this.authorizeGuanjiaSession(startResult.sessionId)) {
+        store.dispatch(setStreaming(false));
+        return { session: null, error: '业务会话不可用' };
+      }
+
+      const cowork = window.electron?.cowork;
+      if (!cowork?.getSession) {
+        store.dispatch(setStreaming(false));
+        const errorMsg = 'Cowork API not available';
+        window.dispatchEvent(new CustomEvent('app:showToast', { detail: errorMsg }));
+        return { session: null, error: errorMsg };
+      }
+      const getResult = await cowork.getSession(startResult.sessionId);
+      const postGetSnapshot = guanjiaSessionService.getSnapshot();
+      if (postGetSnapshot.generation !== startGeneration || postGetSnapshot.status !== 'authenticated') {
+        return { session: null, error: '业务会话已变化' };
+      }
+      if (getResult.success && getResult.session) {
+        let hydratedSession = getResult.session;
+        if (hydratedSession.messages && hydratedSession.messages.length > 0) {
+          hydratedSession = {
+            ...hydratedSession,
+            messages: hydratedSession.messages.map((msg) => {
+              if (msg.type === 'user' && !msg.metadata?.[GuanjiaMessageMetadataKey.DisplayContent]) {
+                return {
+                  ...msg,
+                  metadata: {
+                    ...msg.metadata,
+                    [GuanjiaMessageMetadataKey.DisplayContent]: options.prompt,
+                  },
+                };
+              }
+              return msg;
+            }),
+          };
+        }
+        store.dispatch(addSession(hydratedSession));
+        if (hydratedSession.status !== 'running') {
+          store.dispatch(setStreaming(false));
+        }
+        return { session: hydratedSession };
+      }
+
+      store.dispatch(setStreaming(false));
+      const errorMsg = getResult.error || '获取会话失败';
+      window.dispatchEvent(new CustomEvent('app:showToast', { detail: errorMsg }));
+      return { session: null, error: errorMsg };
+    }
+
     const cowork = window.electron?.cowork;
     if (!cowork) {
       console.error('Cowork API not available');
@@ -1097,14 +1285,81 @@ class CoworkService {
   }
 
   async continueSession(options: CoworkContinueOptions): Promise<boolean> {
+    const rootState = store.getState();
+    const currentSession = rootState.cowork.currentSession;
+    const session = rootState.cowork.sessions.find(s => s.id === options.sessionId) || (currentSession?.id === options.sessionId ? currentSession : null);
+    const isGuanjia = session?.agentId === AgentId.GuanjiaAssistant;
+
+    if (isGuanjia) {
+      if (rootState.cowork.compactingSessionIds.includes(options.sessionId)) {
+        window.dispatchEvent(new CustomEvent('app:showToast', {
+          detail: i18nService.t('coworkContextCompactingSendBlocked'),
+        }));
+        return false;
+      }
+
+      const initialSnapshot = guanjiaSessionService.getSnapshot();
+      if (initialSnapshot.status !== 'authenticated' || !initialSnapshot.user?.tenantId || !initialSnapshot.store) {
+        const errorMsg = initialSnapshot.error || '请先登录并核验当前门店';
+        window.dispatchEvent(new CustomEvent('app:showToast', { detail: errorMsg }));
+        return false;
+      }
+      const continueGeneration = initialSnapshot.generation;
+
+      if (!await this.authorizeGuanjiaSession(options.sessionId)) return false;
+
+      this.setCurrentSessionStreaming(options.sessionId, true, 'continue_session_requested');
+      store.dispatch(updateSessionStatus({ sessionId: options.sessionId, status: 'running' }));
+
+      const result = await guanjiaNativeService.continue({
+        sessionId: options.sessionId,
+        message: options.prompt,
+      });
+
+      const postContinueSnapshot = guanjiaSessionService.getSnapshot();
+      if (postContinueSnapshot.generation !== continueGeneration || postContinueSnapshot.status !== 'authenticated') {
+        return false;
+      }
+
+      if (!result.success || !result.userMessageId) {
+        this.setCurrentSessionStreaming(options.sessionId, false, 'continue_session_failed');
+        store.dispatch(updateSessionStatus({ sessionId: options.sessionId, status: 'error' }));
+        const errorMessage = result.error || '发送消息失败';
+        store.dispatch(addMessage({
+          sessionId: options.sessionId,
+          message: {
+            id: `error-${Date.now()}`,
+            type: 'system',
+            content: errorMessage,
+            timestamp: Date.now(),
+          },
+        }));
+        return false;
+      }
+
+      store.dispatch(addMessage({
+        sessionId: options.sessionId,
+        message: {
+          id: result.userMessageId,
+          type: 'user',
+          content: options.prompt,
+          timestamp: Date.now(),
+          metadata: {
+            [GuanjiaMessageMetadataKey.DisplayContent]: options.prompt,
+          },
+        },
+      }));
+      return true;
+    }
+
     const cowork = window.electron?.cowork;
     if (!cowork) {
       console.error('Cowork API not available');
       return false;
     }
 
-    const state = store.getState().cowork;
-    if (state.compactingSessionIds.includes(options.sessionId)) {
+    const coworkState = store.getState().cowork;
+    if (coworkState.compactingSessionIds.includes(options.sessionId)) {
       console.debug(`[CoworkService] continue was ignored because manual context compaction is running for session ${options.sessionId}.`);
       window.dispatchEvent(new CustomEvent('app:showToast', {
         detail: i18nService.t('coworkContextCompactingSendBlocked'),
@@ -1522,6 +1777,28 @@ class CoworkService {
   }
 
   async stopSession(sessionId: string): Promise<boolean> {
+    const rootState = store.getState();
+    const currentSession = rootState.cowork.currentSession;
+    const session = rootState.cowork.sessions.find(s => s.id === sessionId) || (currentSession?.id === sessionId ? currentSession : null);
+    const isGuanjia = session?.agentId === AgentId.GuanjiaAssistant;
+
+    if (isGuanjia) {
+      const stopGeneration = guanjiaSessionService.getSnapshot().generation;
+      this.logDiagnostic('info', `guanjia stop requested for session ${sessionId}.`);
+      const result = await guanjiaNativeService.stop({ sessionId });
+      if (guanjiaSessionService.getSnapshot().generation !== stopGeneration) {
+        return false;
+      }
+      if (result.success) {
+        this.setCurrentSessionStreaming(sessionId, false, 'stop_session_completed');
+        store.dispatch(updateSessionStatus({ sessionId, status: 'idle' }));
+        this.logDiagnostic('info', `guanjia stop completed for session ${sessionId}.`);
+        return true;
+      }
+      this.logDiagnostic('warn', `guanjia stop failed for session ${sessionId}: ${result.error ?? 'Unknown error'}.`);
+      return false;
+    }
+
     return this.stopSessionRuntime(sessionId);
   }
 
@@ -1745,9 +2022,22 @@ class CoworkService {
       if (!cowork) return null;
       const requestId = ++this.latestLoadSessionRequestId;
       const previouslyLoadedSession = store.getState().cowork.currentSession;
+      const generation = guanjiaSessionService.getSnapshot().generation;
+
+      if (this.isGuanjiaSession(sessionId) && !await this.authorizeGuanjiaSession(sessionId)) return null;
 
       const result = await cowork.getSession(sessionId);
       if (result.success && result.session) {
+        if (result.session.agentId === AgentId.GuanjiaAssistant) {
+          this.knownGuanjiaSessions.add(sessionId);
+          if (generation !== guanjiaSessionService.getSnapshot().generation
+            || !await this.authorizeGuanjiaSession(sessionId)
+            || requestId !== this.latestLoadSessionRequestId) return null;
+          store.dispatch(setCurrentSession(result.session));
+          this.setCurrentSessionStreaming(sessionId, result.session.status === 'running', 'load_guanjia_session_completed');
+          store.dispatch(setRemoteManaged(false));
+          return result.session;
+        }
         this.logDiagnostic(
           'info',
           `received session ${sessionId}; returned ${result.session.messages.length} of ${result.session.totalMessages} messages from offset ${result.session.messagesOffset}.`,

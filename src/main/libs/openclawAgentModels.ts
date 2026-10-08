@@ -1,6 +1,7 @@
 import path from 'node:path';
 
 import { isDesignedAgentAvatarIcon } from '../../shared/agent/avatar';
+import { AgentId } from '../../shared/agent/constants';
 import { OpenClawProviderId } from '../../shared/providers/constants';
 import type { Agent } from '../coworkStore';
 
@@ -361,6 +362,45 @@ export function buildAgentEntry(
   const primaryModel = qualified.status === 'qualified' ? qualified.primaryModel : fallbackPrimaryModel;
   const legacyIcon = isDesignedAgentAvatarIcon(agent.icon) ? '' : agent.icon;
   const subagentConfig = buildSubagentConfig(agent);
+
+  const isGuanjia = agent.id === AgentId.GuanjiaAssistant || agent.id === 'guanjia-assistant';
+  if (isGuanjia) {
+    return {
+      id: agent.id,
+      ...(agent.name ? { name: agent.name } : {}),
+      ...(agent.name || legacyIcon ? {
+        identity: {
+          ...(agent.name ? { name: agent.name } : {}),
+          ...(legacyIcon ? { emoji: legacyIcon } : {}),
+        },
+      } : {}),
+      skills: [],
+      tools: {
+        allow: [
+          'guanjia_get_context',
+          'guanjia_list_skills',
+          'guanjia_execute_skill',
+          'guanjia_get_run_status',
+        ],
+        codeMode: false,
+        swarm: false,
+        elevated: { enabled: false },
+      },
+      subagents: {
+        allowAgents: [],
+      },
+      memory: {
+        search: {
+          enabled: false,
+        },
+      },
+      contextInjection: 'never',
+      ...(options?.workspace ? { workspace: options.workspace } : {}),
+      model: {
+        primary: primaryModel,
+      },
+    };
+  }
 
   return {
     id: agent.id,

@@ -19,6 +19,9 @@ import {
   getPortalProfileUrl,
   getPortalRechargeUrl,
 } from '../services/endpoints';
+import { localizeDesktopAuthError, useGuanjiaDesktopAuth } from '../services/guanjiaDesktopAuth';
+import { type GuanjiaI18nKey, tGuanjia } from '../services/guanjiaI18n';
+import { useGuanjiaSession } from '../services/guanjiaSession';
 import { i18nService } from '../services/i18n';
 import { LogReporterAction, reportYdAnalyzer } from '../services/logReporter';
 import { RootState } from '../store';
@@ -34,6 +37,7 @@ import { ACCOUNT_MENU_COMPACT_CTA_CLASS_NAME } from './accountMenuStyles';
 import CreditsFinalRewardModal from './CreditsFinalRewardModal';
 import { DailyCheckInAccountMenuEntry } from './DailyCheckInActivity';
 import { getDailyCheckInAuthScopeKey } from './dailyCheckInActivityState';
+import GuanjiaBindingModal from './guanjia/GuanjiaBindingModal';
 import GuanjiaLoginModal from './guanjia/GuanjiaLoginModal';
 import UserAvatarIcon from './icons/UserAvatarIcon';
 import {
@@ -45,6 +49,15 @@ import {
   type DailyCheckInSnapshot,
   loadDailyCheckInSnapshot,
 } from './useDailyCheckInActivity';
+
+const businessRoleLabels: Record<string, GuanjiaI18nKey> = {
+  admin: 'guanjiaRoleAdmin',
+  super_admin: 'guanjiaRoleSuperAdmin',
+  manager: 'guanjiaRoleManager',
+  frontdesk: 'guanjiaRoleFrontdesk',
+  cashier: 'guanjiaRoleFrontdesk',
+  employee: 'guanjiaRoleEmployee',
+};
 
 const ACCOUNT_MENU_ANALYTICS_SOURCE = 'home_account_menu';
 const reportAccountMenuAction = (
@@ -277,17 +290,26 @@ interface UserMenuProps {
   onClose: () => void;
   onOpenFinalReward: (campaignCode: string) => void;
   startupCreditEntry: StartupCreditCampaignEntry;
+  onOpenGuanjiaLogin: () => void;
+  onOpenGuanjiaBind: () => void;
+  onOpenGuanjiaUnbind: () => void;
 }
 
 const UserMenu: React.FC<UserMenuProps> = ({
   dailyCheckInSnapshot,
   onClose,
   onOpenFinalReward,
+  onOpenGuanjiaLogin,
+  onOpenGuanjiaBind,
+  onOpenGuanjiaUnbind,
   startupCreditEntry,
 }) => {
   const user = useSelector((state: RootState) => state.auth.user);
   const quota = useSelector((state: RootState) => state.auth.quota);
   const profileSummary = useSelector((state: RootState) => state.auth.profileSummary);
+  const guanjiaSession = useGuanjiaSession();
+  const desktopAuth = useGuanjiaDesktopAuth();
+  const isGuanjiaLoggedIn = guanjiaSession.status === 'authenticated' && guanjiaSession.user !== null;
   const isEn = i18nService.getLanguage() === 'en';
   // The menu fetches on mount, so start in the loading state to avoid a
   // one-frame "--" flash before the mount effect runs.
@@ -602,6 +624,201 @@ const UserMenu: React.FC<UserMenuProps> = ({
         />
       </div>
 
+      {/* Guanjia business section */}
+      <div className="border-b border-border py-2 px-3 text-left">
+        <div className="text-[11px] font-semibold text-secondary uppercase tracking-wider mb-1.5">
+          {tGuanjia('guanjiaSectionTitle')}
+        </div>
+        {isGuanjiaLoggedIn ? (
+          <div className="flex flex-col gap-1.5">
+            <div className="text-xs font-medium text-foreground truncate">
+              {guanjiaSession.user?.name || guanjiaSession.user?.employeeNo}
+              {guanjiaSession.store?.name ? ` · ${guanjiaSession.store.name}` : ''}
+            </div>
+            <div className="text-[11px] text-secondary flex items-center justify-between">
+              <span>{tGuanjia('guanjiaEmployeeNo')}: {guanjiaSession.user?.employeeNo}</span>
+              <span className="rounded bg-surface-raised px-1 py-0.5 text-[10px] font-medium text-foreground">
+                {tGuanjia(businessRoleLabels[guanjiaSession.user?.role || ''] || 'guanjiaRoleUnrecognized')}
+              </span>
+            </div>
+            <div className="mt-1 flex items-center gap-3">
+              <button
+                type="button"
+                onClick={async () => {
+                  try {
+                    await guanjiaSession.logout();
+                  } catch (error) {
+                    window.dispatchEvent(
+                      new CustomEvent('app:showToast', {
+                        detail: localizeDesktopAuthError(error),
+                      }),
+                    );
+                  }
+                }}
+                className="text-xs text-red-600 hover:text-red-700 transition-colors"
+              >
+                {tGuanjia('guanjiaLogout')}
+              </button>
+              {desktopAuth.status.bindingState === 'bound' && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    onClose();
+                    onOpenGuanjiaUnbind();
+                  }}
+                  className="text-xs text-secondary hover:text-foreground transition-colors"
+                >
+                  {tGuanjia('guanjiaUnbindAction')}
+                </button>
+              )}
+            </div>
+          </div>
+        ) : (
+          <div className="flex flex-col gap-1.5">
+            {desktopAuth.status.bindingState === 'bound' ? (
+              <>
+                <div className="text-xs text-secondary truncate">
+                  {tGuanjia('guanjiaBoundEmployee')}: {desktopAuth.status.binding?.employeeNo}
+                  {desktopAuth.status.binding?.employeeName ? ` (${desktopAuth.status.binding.employeeName})` : ''}
+                </div>
+                <div className="flex items-center gap-2 mt-0.5">
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      try {
+                        const res = await desktopAuth.loginBound();
+                        if (res.success) {
+                          onClose();
+                        } else {
+                          window.dispatchEvent(
+                            new CustomEvent('app:showToast', {
+                              detail: localizeDesktopAuthError(res.error || tGuanjia('guanjiaLoginBoundFailed')),
+                            }),
+                          );
+                        }
+                      } catch (err) {
+                        window.dispatchEvent(
+                          new CustomEvent('app:showToast', {
+                            detail: localizeDesktopAuthError(err),
+                          }),
+                        );
+                      }
+                    }}
+                    className="text-xs font-medium text-primary hover:underline"
+                  >
+                    {tGuanjia('guanjiaLoginBound')}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onClose();
+                      onOpenGuanjiaUnbind();
+                    }}
+                    className="text-xs text-secondary hover:text-foreground transition-colors"
+                  >
+                    {tGuanjia('guanjiaUnbindAction')}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onClose();
+                      onOpenGuanjiaLogin();
+                    }}
+                    className="text-xs text-secondary hover:text-foreground transition-colors ml-auto"
+                  >
+                    {tGuanjia('guanjiaEmployeePasswordLogin')}
+                  </button>
+                </div>
+              </>
+            ) : desktopAuth.status.bindingState === 'requires_reverification' ? (
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    onClose();
+                    onOpenGuanjiaBind();
+                  }}
+                  className="text-xs font-medium text-amber-600 hover:underline"
+                >
+                  {tGuanjia('guanjiaReverificationRequired')}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    onClose();
+                    onOpenGuanjiaLogin();
+                  }}
+                  className="text-xs text-secondary hover:text-foreground transition-colors ml-auto"
+                >
+                  {tGuanjia('guanjiaEmployeePasswordLogin')}
+                </button>
+              </div>
+            ) : desktopAuth.status.bindingState === 'unavailable' ? (
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-secondary">
+                  {tGuanjia('guanjiaAuthUnavailable')}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    void desktopAuth.refresh();
+                  }}
+                  className="text-xs font-medium text-primary hover:underline"
+                >
+                  {tGuanjia('guanjiaRetry')}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    onClose();
+                    onOpenGuanjiaLogin();
+                  }}
+                  className="text-xs text-secondary hover:text-foreground transition-colors ml-auto"
+                >
+                  {tGuanjia('guanjiaEmployeePasswordLogin')}
+                </button>
+              </div>
+            ) : desktopAuth.status.bindingState === 'unbound' ? (
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    onClose();
+                    onOpenGuanjiaBind();
+                  }}
+                  className="text-xs font-medium text-primary hover:underline"
+                >
+                  {tGuanjia('guanjiaBindTitle')}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    onClose();
+                    onOpenGuanjiaLogin();
+                  }}
+                  className="text-xs text-secondary hover:text-foreground transition-colors ml-auto"
+                >
+                  {tGuanjia('guanjiaEmployeePasswordLogin')}
+                </button>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    onClose();
+                    onOpenGuanjiaLogin();
+                  }}
+                  className="text-xs text-secondary hover:text-foreground transition-colors ml-auto"
+                >
+                  {tGuanjia('guanjiaEmployeePasswordLogin')}
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
       {/* Campaigns and invitations */}
       <div className="border-b border-border py-1">
         {campaignActionLabel && (
@@ -662,6 +879,11 @@ const LoginButton: React.FC<LoginButtonProps> = ({
 }) => {
   const { accountGeneration, isLoggedIn, isLoading, ownerAccountKey, profileSummary, user } =
     useSelector((state: RootState) => state.auth);
+  const guanjiaSession = useGuanjiaSession();
+  const desktopAuth = useGuanjiaDesktopAuth();
+  const isGuanjiaLoggedIn =
+    guanjiaSession.status === 'authenticated' && guanjiaSession.user !== null;
+  const [showGuanjiaMenu, setShowGuanjiaMenu] = useState(false);
   const enterpriseAccountContext = useSelector(selectEnterpriseAccountContext);
   const startupCreditEntry = useStartupCreditCampaignEntry();
   const [showMenu, setShowMenu] = useState(false);
@@ -669,6 +891,8 @@ const LoginButton: React.FC<LoginButtonProps> = ({
   const [menuStartupCreditEntry, setMenuStartupCreditEntry] =
     useState<StartupCreditCampaignEntry>(startupCreditEntry);
   const [showLoginModal, setShowLoginModal] = useState(false);
+  const [showBindingModal, setShowBindingModal] = useState(false);
+  const [bindingModalMode, setBindingModalMode] = useState<'bind' | 'unbind'>('bind');
   const [menuDailyCheckInSnapshot, setMenuDailyCheckInSnapshot] =
     useState<DailyCheckInSnapshot | null>(null);
   const [selectedFinalRewardCode, setSelectedFinalRewardCode] = useState<string | null>(null);
@@ -697,14 +921,29 @@ const LoginButton: React.FC<LoginButtonProps> = ({
   }, []);
 
   useEffect(() => {
-    const handleOpenLogin = () => {
+    const handleOfficialOpenLogin = () => {
+      void authService.login();
+    };
+    const handleGuanjiaOpenLogin = () => {
       setShowLoginModal(true);
     };
-    window.addEventListener('guanjia:open-login', handleOpenLogin);
-    window.addEventListener('app:open-login', handleOpenLogin);
+    const handleGuanjiaOpenBind = () => {
+      setBindingModalMode('bind');
+      setShowBindingModal(true);
+    };
+    const handleGuanjiaOpenUnbind = () => {
+      setBindingModalMode('unbind');
+      setShowBindingModal(true);
+    };
+    window.addEventListener('app:open-login', handleOfficialOpenLogin);
+    window.addEventListener('guanjia:open-login', handleGuanjiaOpenLogin);
+    window.addEventListener('guanjia:open-bind', handleGuanjiaOpenBind);
+    window.addEventListener('guanjia:open-unbind', handleGuanjiaOpenUnbind);
     return () => {
-      window.removeEventListener('guanjia:open-login', handleOpenLogin);
-      window.removeEventListener('app:open-login', handleOpenLogin);
+      window.removeEventListener('app:open-login', handleOfficialOpenLogin);
+      window.removeEventListener('guanjia:open-login', handleGuanjiaOpenLogin);
+      window.removeEventListener('guanjia:open-bind', handleGuanjiaOpenBind);
+      window.removeEventListener('guanjia:open-unbind', handleGuanjiaOpenUnbind);
     };
   }, []);
 
@@ -720,15 +959,16 @@ const LoginButton: React.FC<LoginButtonProps> = ({
         !isEnterpriseAccountFlyout
       ) {
         setShowMenu(false);
+        setShowGuanjiaMenu(false);
       }
     };
-    if (showMenu) {
+    if (showMenu || showGuanjiaMenu) {
       document.addEventListener('mousedown', handleClickOutside);
     }
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
     };
-  }, [showMenu]);
+  }, [showMenu, showGuanjiaMenu]);
 
   useEffect(() => {
     if (!isLoggedIn || (selectedFinalRewardCode && !finalReward)) {
@@ -752,11 +992,15 @@ const LoginButton: React.FC<LoginButtonProps> = ({
     setMenuDailyCheckInSnapshot(null);
   }, [isLoggedIn]);
 
-  if (isLoading) {
+  if (isLoading && !isGuanjiaLoggedIn) {
     return null;
   }
 
   const handleClick = async () => {
+    if (isGuanjiaLoggedIn && !isLoggedIn) {
+      setShowGuanjiaMenu(prev => !prev);
+      return;
+    }
     if (isLoggedIn) {
       const creditItemCount = profileSummary?.creditItems?.length ?? 0;
       if (showMenu) {
@@ -821,8 +1065,23 @@ const LoginButton: React.FC<LoginButtonProps> = ({
       }
       return;
     }
-    // 拦截原有 authService.login() 外跳，改为唤起原生智慧管家员工登录弹窗
-    setShowLoginModal(true);
+    // 当未登录时，恢复官方 authService.login() 登录外跳流程
+    const loginVariant = useSidebarPromoLogin ? 'sidebar_promo' : 'default';
+    writeAccountMenuRendererLog('debug', `login requested variant=${loginVariant}`);
+    try {
+      await authService.login();
+      reportAccountMenuAction('login', {
+        isLoggedIn: false,
+        result: 'success',
+      });
+    } catch (error) {
+      writeAccountMenuRendererLog('warn', `login request failed variant=${loginVariant}`);
+      reportAccountMenuAction('login', {
+        isLoggedIn: false,
+        result: 'failed',
+      });
+      throw error;
+    }
   };
 
   const closeFinalReward = () => {
@@ -857,7 +1116,7 @@ const LoginButton: React.FC<LoginButtonProps> = ({
     }
   };
 
-  const useSidebarPromoLogin = !isLoggedIn && loggedOutVariant === 'sidebarPromo';
+  const useSidebarPromoLogin = !isGuanjiaLoggedIn && !isLoggedIn && loggedOutVariant === 'sidebarPromo';
 
   return (
     <div ref={containerRef} className="relative">
@@ -888,6 +1147,20 @@ const LoginButton: React.FC<LoginButtonProps> = ({
               {user?.nickname || i18nService.t('myAccount')}
             </span>
           </>
+        ) : isGuanjiaLoggedIn ? (
+          <>
+            <UserAvatarIcon className="h-4 w-4 shrink-0" />
+            <span
+              className="truncate max-w-[120px]"
+              title={
+                guanjiaSession.store?.name
+                  ? `${guanjiaSession.user?.name || guanjiaSession.user?.employeeNo} · ${guanjiaSession.store.name}`
+                  : guanjiaSession.user?.name || guanjiaSession.user?.employeeNo
+              }
+            >
+              {guanjiaSession.user?.name || guanjiaSession.user?.employeeNo}
+            </span>
+          </>
         ) : useSidebarPromoLogin ? (
           i18nService.t('sidebarLoginNow')
         ) : (
@@ -897,6 +1170,58 @@ const LoginButton: React.FC<LoginButtonProps> = ({
           </>
         )}
       </button>
+      {showGuanjiaMenu && isGuanjiaLoggedIn && !isLoggedIn && (
+        <div
+          role="menu"
+aria-label={tGuanjia('guanjiaAccountMenu')}
+          className="absolute bottom-full left-0 mb-2 w-64 rounded-xl border border-border bg-surface p-4 shadow-xl z-50 text-left flex flex-col gap-3"
+        >
+          <div className="flex flex-col gap-1 border-b border-border pb-3">
+            <div className="text-sm font-semibold text-foreground truncate">
+              {guanjiaSession.user?.name || guanjiaSession.user?.employeeNo}
+            </div>
+            <div className="text-xs text-secondary flex items-center justify-between">
+              <span>{tGuanjia('guanjiaEmployeeNo')}: {guanjiaSession.user?.employeeNo}</span>
+              <span className="rounded bg-surface-raised px-1.5 py-0.5 text-[11px] font-medium text-foreground">
+                {tGuanjia(businessRoleLabels[guanjiaSession.user?.role || ''] || 'guanjiaRoleUnrecognized')}
+              </span>
+            </div>
+            {guanjiaSession.store?.name && (
+              <div className="text-xs text-secondary truncate">
+                {tGuanjia('guanjiaCurrentStore')}: {guanjiaSession.store.name}
+              </div>
+            )}
+          </div>
+          <button
+            type="button"
+            role="menuitem"
+            onClick={async () => {
+              setShowGuanjiaMenu(false);
+              try {
+                await authService.login();
+              } catch (error) {
+                console.warn('[LoginButton] official login error:', error);
+              }
+            }}
+            className="inline-flex h-8 w-full items-center justify-center rounded-md border border-border bg-surface text-xs font-medium text-primary transition-colors hover:bg-surface-raised"
+          >
+            {tGuanjia('guanjiaOfficialLoginPrompt')}
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            onClick={async () => {
+              setShowGuanjiaMenu(false);
+              try { await guanjiaSession.logout(); } catch (error) {
+                window.dispatchEvent(new CustomEvent('app:showToast', { detail: error instanceof Error ? error.message : tGuanjia('guanjiaLoginFailed') }));
+              }
+            }}
+            className="inline-flex h-8 w-full items-center justify-center rounded-md border border-border bg-surface text-xs font-medium text-red-600 transition-colors hover:bg-red-50 dark:hover:bg-red-950/20"
+          >
+            {tGuanjia('guanjiaLogout')}
+          </button>
+        </div>
+      )}
       {showMenu &&
         isLoggedIn &&
         (enterpriseAccountContext ? (
@@ -909,6 +1234,15 @@ const LoginButton: React.FC<LoginButtonProps> = ({
             dailyCheckInSnapshot={menuDailyCheckInSnapshot}
             onClose={() => setShowMenu(false)}
             onOpenFinalReward={setSelectedFinalRewardCode}
+            onOpenGuanjiaLogin={() => setShowLoginModal(true)}
+            onOpenGuanjiaBind={() => {
+              setBindingModalMode('bind');
+              setShowBindingModal(true);
+            }}
+            onOpenGuanjiaUnbind={() => {
+              setBindingModalMode('unbind');
+              setShowBindingModal(true);
+            }}
             startupCreditEntry={menuStartupCreditEntry}
           />
         ))}
@@ -925,6 +1259,14 @@ const LoginButton: React.FC<LoginButtonProps> = ({
         onClaim={() => void claimFinalReward()}
       />
       <GuanjiaLoginModal isOpen={showLoginModal} onClose={() => setShowLoginModal(false)} />
+      <GuanjiaBindingModal
+        isOpen={showBindingModal}
+        mode={bindingModalMode}
+        currentBoundEmployee={desktopAuth.status.binding}
+        onClose={() => setShowBindingModal(false)}
+        onBindSuccess={() => setShowBindingModal(false)}
+        onUnbindSuccess={() => setShowBindingModal(false)}
+      />
     </div>
   );
 };

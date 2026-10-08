@@ -29,6 +29,7 @@ import {
   CoworkUiEvent,
 } from './cowork/constants';
 import CoworkSearchModal from './cowork/CoworkSearchModal';
+import GuanjiaSidebarCard, { type GuanjiaCardStatus } from './guanjia/GuanjiaSidebarCard';
 import Cog6ToothIcon from './icons/Cog6ToothIcon';
 import ComposeIcon from './icons/ComposeIcon';
 import SidebarAutomationIcon from './icons/SidebarAutomationIcon';
@@ -41,7 +42,6 @@ import LoginButton from './LoginButton';
 import LowCreditPurchaseOfferCard from './LowCreditPurchaseOfferCard';
 import SidebarExperienceSlot from './SidebarExperienceSlot';
 import { useSidebarPurchaseGuide } from './useSidebarPurchaseGuide';
-import GuanjiaSidebarCard, { type GuanjiaCardStatus } from './guanjia/GuanjiaSidebarCard';
 
 interface SidebarProps {
   onShowSettings: () => void;
@@ -54,8 +54,8 @@ interface SidebarProps {
   onShowLibrary: () => void;
   onShowGuanjia?: () => void;
   onOpenGuanjiaAssistant?: () => void;
-  guanjiaStoreName?: string;
-  guanjiaTodoCount?: number;
+  guanjiaStoreName?: string | null;
+  guanjiaTodoCount?: number | null;
   guanjiaStatus?: GuanjiaCardStatus;
   onNewChat: () => void;
   isCollapsed: boolean;

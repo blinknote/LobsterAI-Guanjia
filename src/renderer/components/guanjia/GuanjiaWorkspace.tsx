@@ -1,88 +1,125 @@
-import React, { useCallback,useEffect, useRef, useState } from 'react';
+import React, {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from 'react';
+
+import { useGuanjiaDesktopAuth } from '../../services/guanjiaDesktopAuth';
+import { tGuanjia } from '../../services/guanjiaI18n';
+import type { OpenAssistantParams } from '../../services/guanjiaNativeService';
+import {
+  type GuanjiaSessionStatus,
+  useGuanjiaSession,
+} from '../../services/guanjiaSession';
+import GuanjiaNativeAssistant from './GuanjiaNativeAssistant';
 
 export interface GuanjiaWorkspaceProps {
   isSidebarCollapsed: boolean;
   onToggleSidebar: () => void;
   isAssistantOpen: boolean;
   onToggleAssistant: () => void;
-  storeName?: string;
-  currentUser?: string;
-  currentPageName?: string;
-  todoCount?: number;
+  storeName?: string | null;
+  currentUser?: string | null;
+  currentPageName?: string | null;
+  todoCount?: number | null;
   iframeUrl?: string;
   isVisible?: boolean;
   onStoreNameChange?: (name: string) => void;
-  onTodoCountChange?: (count: number) => void;
+  onTodoCountChange?: (count: number | null) => void;
+  openAssistantPayload?: OpenAssistantParams | null;
+  onClearOpenAssistantPayload?: () => void;
 }
+
+const getSessionStatusMessage = (status: GuanjiaSessionStatus): string => {
+  switch (status) {
+    case 'expired':
+      return tGuanjia('guanjiaReverificationRequired');
+    case 'temporarily_unavailable':
+    case 'unavailable':
+      return tGuanjia('guanjiaAuthUnavailable');
+    case 'unauthenticated':
+    default:
+      return tGuanjia('guanjiaNotLoggedIn');
+  }
+};
+
+const checkHasHostModal = (): boolean => {
+  if (typeof document === 'undefined') return false;
+  return Boolean(document.body.querySelector('[data-app-modal]'));
+};
 
 /**
  * 智慧管家主工作区
  * - 主区与右侧助理抽屉采用 Flex 7:3 弹性收窄并排布局
- * - 抽屉展开时主区自动弹性收窄，绝不浮层遮挡管家右侧操作
+ * - 抽屉展开时主区自动弹性收窄，不遮挡管家主视区操作
  * - 通过 IPC (AttachView/DetachView/SetBounds/ShowView/HideView) 联动真实 WebContentsView
  * - 监听窗口 resize 及右侧助理抽屉展开/收缩过渡完成，动态获取容器 DOMRect 并更新 SetBounds
- * - 交班结账按钮直通 window.guanjiaBridge.clearAssistantSession()，静默清场无弹窗
- * - 内置骨架屏加载状态，切走不卸载保持草稿与现场
- * - 包含顶栏(#guanjia-topbar)、主区(#guanjia-main-container)无障碍焦点锚点
+ * - 右侧内嵌原生 GuanjiaNativeAssistant 抽屉组件，对接真实 OpenClaw 与服务端受限工具
+ * - 彻底移除虚构业务兜底看板，使用真实的 WebContentsView 连接与错误呈现
  */
 export const GuanjiaWorkspace: React.FC<GuanjiaWorkspaceProps> = ({
   isSidebarCollapsed,
   onToggleSidebar,
   isAssistantOpen,
   onToggleAssistant,
-  storeName = '青盛堂旗舰店',
-  currentUser = '李店长',
-  currentPageName = '收银结账',
-  todoCount = 3,
+  storeName,
+  currentUser,
+  currentPageName,
+  todoCount,
   iframeUrl = 'https://guanjia.qszy.me/',
   isVisible = true,
   onStoreNameChange,
   onTodoCountChange,
+  openAssistantPayload,
+  onClearOpenAssistantPayload,
 }) => {
-  // 骨架屏加载状态
-  const [isLoading, setIsLoading] = useState(true);
-  // WebContentsView 真实视图附加状态
-  const [isViewAttached, setIsViewAttached] = useState(false);
-  // 助理输入框内容
-  const [assistantInput, setAssistantInput] = useState('');
-  // 助理操作流记录
-  const [actionHistory, setActionHistory] = useState<Array<{ id: string; text: string; time: string; type: 'step' | 'confirm' | 'done' }>>([
-    { id: '1', text: '定位订单 #20261024-082（顾客：张先生，足浴 70 分钟）', time: '14:28', type: 'step' },
-    { id: '2', text: '核对账单原付金额 ¥198，已填报退款事由：技师超时未到岗', time: '14:29', type: 'step' },
-  ]);
-  // 当前悬停或落定确认状态
-  const [pendingConfirm, setPendingConfirm] = useState<{
-    active: boolean;
-    amount: number;
-    reason: string;
-    resolved?: 'confirmed' | 'cancelled';
-  }>({
-    active: true,
-    amount: 198,
-    reason: '技师超时未到岗',
-  });
+  const guanjiaSession = useGuanjiaSession();
+  const sessionStatus = guanjiaSession.status;
+  const sessionGeneration = guanjiaSession.generation;
+  const isAuthenticated = sessionStatus === 'authenticated';
+  const desktopAuth = useGuanjiaDesktopAuth();
+  const isConfirmedUnbound = Boolean(
+    !isAuthenticated &&
+      desktopAuth.status.officialAuthenticated &&
+      desktopAuth.status.bindingState === 'unbound',
+  );
+
+  // 宿主模态框检测：Modal 组件 portal 到 document.body 并携带 [data-app-modal]
+  const [hasHostModal, setHasHostModal] = useState<boolean>(() => checkHasHostModal());
+
+  // 真实业务有效可见性判定：业务已鉴权 + 顶层可见 + 宿主无弹窗遮挡
+  const isEffectiveVisible = Boolean(isVisible && isAuthenticated && !hasHostModal);
+
+  // WebContentsView 视图附加生命周期
+  const [attachStatus, setAttachStatus] = useState<'idle' | 'attaching' | 'attached' | 'error'>('idle');
+  const [attachError, setAttachError] = useState<string | null>(null);
 
   // DOM 容器引用
   const mainContainerRef = useRef<HTMLElement>(null);
   const viewContainerRef = useRef<HTMLDivElement>(null);
   const isAttachedRef = useRef<boolean>(false);
+  const isAttachingRef = useRef<boolean>(false);
 
-  // 模拟初次加载骨架屏过渡
-  useEffect(() => {
-    const timer = window.setTimeout(() => {
-      setIsLoading(false);
-    }, 450);
-    return () => window.clearTimeout(timer);
-  }, []);
+  // 有效可见性最新引用（同步守卫所有异步回调与事件触发）
+  const effectiveVisibilityRef = useRef<boolean>(isEffectiveVisible);
+  effectiveVisibilityRef.current = isEffectiveVisible;
+  const currentGenerationRef = useRef<number>(sessionGeneration);
+  currentGenerationRef.current = sessionGeneration;
 
   // IPC 接口调用封装（兼容 window.guanjiaBridge 与 window.electron.guanjia）
   const ipcAttachView = useCallback(async (bounds: { x: number; y: number; width: number; height: number }, url?: string) => {
     if (typeof window !== 'undefined') {
-      if (window.guanjiaBridge?.attachView) {
-        return window.guanjiaBridge.attachView({ bounds, initialUrl: url });
+      const win = window as unknown as {
+        guanjiaBridge?: { attachView?: (args: { bounds: { x: number; y: number; width: number; height: number }; initialUrl?: string }) => Promise<{ success: boolean; error?: string }> };
+        electron?: { guanjia?: { attachView?: (args: { bounds: { x: number; y: number; width: number; height: number }; initialUrl?: string }) => Promise<{ success: boolean; error?: string }> } };
+      };
+      if (win.guanjiaBridge?.attachView) {
+        return win.guanjiaBridge.attachView({ bounds, initialUrl: url });
       }
-      if (window.electron?.guanjia?.attachView) {
-        return window.electron.guanjia.attachView({ bounds, initialUrl: url });
+      if (win.electron?.guanjia?.attachView) {
+        return win.electron.guanjia.attachView({ bounds, initialUrl: url });
       }
     }
     return { success: false, error: 'IPC not available' };
@@ -90,11 +127,15 @@ export const GuanjiaWorkspace: React.FC<GuanjiaWorkspaceProps> = ({
 
   const ipcSetBounds = useCallback(async (bounds: { x: number; y: number; width: number; height: number }) => {
     if (typeof window !== 'undefined') {
-      if (window.guanjiaBridge?.setBounds) {
-        return window.guanjiaBridge.setBounds(bounds);
+      const win = window as unknown as {
+        guanjiaBridge?: { setBounds?: (b: { x: number; y: number; width: number; height: number }) => Promise<{ success: boolean }> };
+        electron?: { guanjia?: { setBounds?: (b: { x: number; y: number; width: number; height: number }) => Promise<{ success: boolean }> } };
+      };
+      if (win.guanjiaBridge?.setBounds) {
+        return win.guanjiaBridge.setBounds(bounds);
       }
-      if (window.electron?.guanjia?.setBounds) {
-        return window.electron.guanjia.setBounds(bounds);
+      if (win.electron?.guanjia?.setBounds) {
+        return win.electron.guanjia.setBounds(bounds);
       }
     }
     return { success: false };
@@ -102,11 +143,15 @@ export const GuanjiaWorkspace: React.FC<GuanjiaWorkspaceProps> = ({
 
   const ipcShowView = useCallback(async () => {
     if (typeof window !== 'undefined') {
-      if (window.guanjiaBridge?.showView) {
-        return window.guanjiaBridge.showView();
+      const win = window as unknown as {
+        guanjiaBridge?: { showView?: () => Promise<{ success: boolean }> };
+        electron?: { guanjia?: { showView?: () => Promise<{ success: boolean }> } };
+      };
+      if (win.guanjiaBridge?.showView) {
+        return win.guanjiaBridge.showView();
       }
-      if (window.electron?.guanjia?.showView) {
-        return window.electron.guanjia.showView();
+      if (win.electron?.guanjia?.showView) {
+        return win.electron.guanjia.showView();
       }
     }
     return { success: false };
@@ -114,11 +159,15 @@ export const GuanjiaWorkspace: React.FC<GuanjiaWorkspaceProps> = ({
 
   const ipcHideView = useCallback(async () => {
     if (typeof window !== 'undefined') {
-      if (window.guanjiaBridge?.hideView) {
-        return window.guanjiaBridge.hideView();
+      const win = window as unknown as {
+        guanjiaBridge?: { hideView?: () => Promise<{ success: boolean }> };
+        electron?: { guanjia?: { hideView?: () => Promise<{ success: boolean }> } };
+      };
+      if (win.guanjiaBridge?.hideView) {
+        return win.guanjiaBridge.hideView();
       }
-      if (window.electron?.guanjia?.hideView) {
-        return window.electron.guanjia.hideView();
+      if (win.electron?.guanjia?.hideView) {
+        return win.electron.guanjia.hideView();
       }
     }
     return { success: false };
@@ -126,47 +175,119 @@ export const GuanjiaWorkspace: React.FC<GuanjiaWorkspaceProps> = ({
 
   const ipcGetContext = useCallback(async () => {
     if (typeof window !== 'undefined') {
-      if (window.guanjiaBridge?.getWorkspaceContext) {
-        return window.guanjiaBridge.getWorkspaceContext();
+      const win = window as unknown as {
+        guanjiaBridge?: { getWorkspaceContext?: () => Promise<unknown> };
+        electron?: { guanjia?: { getContext?: () => Promise<unknown> } };
+      };
+      if (win.guanjiaBridge?.getWorkspaceContext) {
+        return win.guanjiaBridge.getWorkspaceContext();
       }
-      if (window.electron?.guanjia?.getContext) {
-        return await window.electron.guanjia.getContext();
+      if (win.electron?.guanjia?.getContext) {
+        return await win.electron.guanjia.getContext();
       }
     }
     return null;
   }, []);
 
+  // 监听 document.body 下 [data-app-modal] 模态框变化（仅限当前 app 所属 body）
+  useLayoutEffect(() => {
+    if (typeof document === 'undefined') return undefined;
+
+    let prevHasModal = checkHasHostModal();
+    if (prevHasModal) {
+      effectiveVisibilityRef.current = false;
+      ipcHideView().catch(console.error);
+    }
+
+    const observer = new MutationObserver(() => {
+      const hasModal = checkHasHostModal();
+      if (hasModal !== prevHasModal) {
+        prevHasModal = hasModal;
+        if (hasModal) {
+          effectiveVisibilityRef.current = false;
+          ipcHideView().catch(console.error);
+        }
+        setHasHostModal(hasModal);
+      }
+    });
+
+    observer.observe(document.body, {
+      childList: true,
+      subtree: true,
+    });
+
+    return () => {
+      observer.disconnect();
+    };
+  }, [ipcHideView]);
+
+  // 有效可见性改变时，若变为不可见则在渲染上屏前立即隐藏原生视图（保留实例）
+  useLayoutEffect(() => {
+    effectiveVisibilityRef.current = isEffectiveVisible;
+    if (!isEffectiveVisible) {
+      ipcHideView().catch(console.error);
+    }
+  }, [isEffectiveVisible, ipcHideView]);
+
   // 加载工作区上下文并通知顶层状态更新
   useEffect(() => {
-    if (isLoading || !isVisible) return;
+    if (!isEffectiveVisible) return;
     let isCancelled = false;
+    const requestGeneration = sessionGeneration;
 
     const fetchContext = async () => {
       try {
-        const ctx: any = await ipcGetContext();
-        if (isCancelled || !ctx) return;
+        if (!effectiveVisibilityRef.current || currentGenerationRef.current !== requestGeneration) return;
+        const ctx = (await ipcGetContext()) as {
+          currentShop?: { name?: string };
+          currentUser?: { shopName?: string };
+          pendingCount?: number;
+        } | null;
+        if (
+          isCancelled ||
+          !effectiveVisibilityRef.current ||
+          currentGenerationRef.current !== requestGeneration
+        ) {
+          return;
+        }
+        if (!ctx) {
+          if (!isCancelled && onTodoCountChange) {
+            onTodoCountChange(null);
+          }
+          return;
+        }
         const resolvedStoreName = ctx.currentShop?.name || ctx.currentUser?.shopName;
         if (resolvedStoreName && onStoreNameChange) {
           onStoreNameChange(resolvedStoreName);
         }
         if (typeof ctx.pendingCount === 'number' && onTodoCountChange) {
           onTodoCountChange(ctx.pendingCount);
+        } else if (onTodoCountChange) {
+          onTodoCountChange(null);
         }
       } catch (err) {
         console.warn('[GuanjiaWorkspace] Failed to fetch workspace context:', err);
+        if (
+          !isCancelled &&
+          onTodoCountChange &&
+          effectiveVisibilityRef.current &&
+          currentGenerationRef.current === requestGeneration
+        ) {
+          onTodoCountChange(null);
+        }
       }
     };
 
-    fetchContext();
+    void fetchContext();
 
     return () => {
       isCancelled = true;
     };
-  }, [isLoading, isVisible, ipcGetContext, onStoreNameChange, onTodoCountChange]);
+  }, [isEffectiveVisible, sessionGeneration, ipcGetContext, onStoreNameChange, onTodoCountChange]);
 
   // 动态获取容器 DOMRect 并调用 SetBounds 更新视图大小
   const updateBounds = useCallback(() => {
-    if (!isVisible) return;
+    if (!effectiveVisibilityRef.current) return;
     const container = viewContainerRef.current || mainContainerRef.current;
     if (!container) return;
 
@@ -178,37 +299,38 @@ export const GuanjiaWorkspace: React.FC<GuanjiaWorkspaceProps> = ({
         width: Math.round(rect.width),
         height: Math.round(rect.height),
       };
-      ipcSetBounds(bounds).catch(err => {
+      ipcSetBounds(bounds).catch((err) => {
         console.warn('[GuanjiaWorkspace] setBounds failed:', err);
       });
     }
-  }, [isVisible, ipcSetBounds]);
+  }, [ipcSetBounds]);
 
   // 监听登录就绪事件：自动刷新上下文与就绪 WebContentsView
   useEffect(() => {
     const handleWorkspaceReady = () => {
-      if (isVisible) {
-        updateBounds();
-        ipcShowView().catch(console.error);
-      }
+      if (!effectiveVisibilityRef.current) return;
+      updateBounds();
+      ipcShowView()
+        .then(() => {
+          if (!effectiveVisibilityRef.current) {
+            ipcHideView().catch(console.error);
+          }
+        })
+        .catch(console.error);
     };
     window.addEventListener('guanjia:workspace-ready', handleWorkspaceReady);
     return () => {
       window.removeEventListener('guanjia:workspace-ready', handleWorkspaceReady);
     };
-  }, [isVisible, updateBounds, ipcShowView]);
+  }, [updateBounds, ipcShowView, ipcHideView]);
 
-  // WebContentsView 真实联动：挂载、显隐与切走现场保持
-  useEffect(() => {
-    if (isLoading) return;
-
+  // 附加 WebContentsView 视图
+  const attachWorkspaceView = useCallback(() => {
     const container = viewContainerRef.current || mainContainerRef.current;
     if (!container) return;
 
-    if (!isVisible) {
-      if (isAttachedRef.current) {
-        ipcHideView().catch(console.error);
-      }
+    if (!effectiveVisibilityRef.current) {
+      ipcHideView().catch(console.error);
       return;
     }
 
@@ -222,29 +344,73 @@ export const GuanjiaWorkspace: React.FC<GuanjiaWorkspaceProps> = ({
       };
 
       if (!isAttachedRef.current) {
+        if (isAttachingRef.current) return;
+        isAttachingRef.current = true;
+        setAttachStatus('attaching');
+        setAttachError(null);
         ipcAttachView(bounds, iframeUrl || 'https://guanjia.qszy.me/')
-          .then(res => {
+          .then((res) => {
+            isAttachingRef.current = false;
             if (res.success) {
               isAttachedRef.current = true;
-              setIsViewAttached(true);
+              setAttachStatus('attached');
+              if (!effectiveVisibilityRef.current) {
+                ipcHideView().catch(console.error);
+              }
+            } else {
+              setAttachStatus('error');
+              setAttachError(res.error || tGuanjia('guanjiaConnectFailed'));
             }
           })
-          .catch(console.error);
+          .catch((err) => {
+            isAttachingRef.current = false;
+            setAttachStatus('error');
+            setAttachError(err instanceof Error ? err.message : String(err));
+          });
       } else {
-        ipcShowView().catch(console.error);
-        ipcSetBounds(bounds).catch(console.error);
+        ipcSetBounds(bounds)
+          .then(() => {
+            if (!effectiveVisibilityRef.current) {
+              return ipcHideView().catch(console.error);
+            }
+            return ipcShowView().then(() => {
+              if (!effectiveVisibilityRef.current) {
+                ipcHideView().catch(console.error);
+              }
+            });
+          })
+          .catch(console.error);
       }
+    }
+  }, [iframeUrl, ipcAttachView, ipcShowView, ipcHideView, ipcSetBounds]);
+
+  // 组件卸载生命周期清理：设置有效可见性为 false 并隐藏原生视图，防止异步回调残留展示
+  useEffect(() => {
+    return () => {
+      effectiveVisibilityRef.current = false;
+      ipcHideView().catch(console.error);
+    };
+  }, [ipcHideView]);
+
+  // WebContentsView 真实联动：有效可见时附加/展示，不可见时仅隐藏保持现场
+  useEffect(() => {
+    if (isEffectiveVisible) {
+      attachWorkspaceView();
+    } else {
+      ipcHideView().catch(console.error);
     }
 
     return () => {
       ipcHideView().catch(console.error);
     };
-  }, [isLoading, isVisible, iframeUrl, ipcAttachView, ipcShowView, ipcHideView, ipcSetBounds]);
+  }, [isEffectiveVisible, attachWorkspaceView, ipcHideView]);
 
   // 监听窗口 resize
   useEffect(() => {
     const handleResize = () => {
-      updateBounds();
+      if (effectiveVisibilityRef.current) {
+        updateBounds();
+      }
     };
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
@@ -256,7 +422,9 @@ export const GuanjiaWorkspace: React.FC<GuanjiaWorkspaceProps> = ({
     if (!container || typeof ResizeObserver === 'undefined') return;
 
     const ro = new ResizeObserver(() => {
-      updateBounds();
+      if (effectiveVisibilityRef.current) {
+        updateBounds();
+      }
     });
     ro.observe(container);
     return () => ro.disconnect();
@@ -264,79 +432,64 @@ export const GuanjiaWorkspace: React.FC<GuanjiaWorkspaceProps> = ({
 
   // 监听右侧助理抽屉展开/收缩过渡完成
   useEffect(() => {
-    if (isLoading || !isVisible) return;
-    const timer1 = window.setTimeout(updateBounds, 100);
-    const timer2 = window.setTimeout(updateBounds, 220);
+    if (!isEffectiveVisible) return;
+    const timer1 = window.setTimeout(() => {
+      if (effectiveVisibilityRef.current) updateBounds();
+    }, 100);
+    const timer2 = window.setTimeout(() => {
+      if (effectiveVisibilityRef.current) updateBounds();
+    }, 220);
     return () => {
       window.clearTimeout(timer1);
       window.clearTimeout(timer2);
     };
-  }, [isAssistantOpen, isSidebarCollapsed, isLoading, isVisible, updateBounds]);
+  }, [isAssistantOpen, isSidebarCollapsed, isEffectiveVisible, updateBounds]);
 
   // 主视区过渡完成事件
   const handleTransitionEnd = (e: React.TransitionEvent<HTMLElement>) => {
-    if (e.target === mainContainerRef.current) {
+    if (e.target === mainContainerRef.current && effectiveVisibilityRef.current) {
       updateBounds();
     }
   };
 
-  // 交班结账：接入 window.guanjiaBridge.clearAssistantSession()，静默清场无弹窗
-  const handleShiftHandover = async () => {
+  // 重试连接 WebContentsView
+  const handleRetryAttach = () => {
+    isAttachedRef.current = false;
+    isAttachingRef.current = false;
+    attachWorkspaceView();
+  };
+
+  // 触发原生登录弹窗（通过已注册在 LoginButton 的标准事件）
+  const handleOpenNativeLogin = useCallback(() => {
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('guanjia:open-login'));
+    }
+  }, []);
+
+  // 触发原生绑定弹窗（通过已注册在 LoginButton 的标准事件）
+  const handleOpenNativeBind = useCallback(() => {
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('guanjia:open-bind'));
+    }
+  }, []);
+
+  // 清除本地助理会话
+  const handleClearAssistantSession = async () => {
     try {
       if (typeof window !== 'undefined') {
-        if (window.guanjiaBridge?.clearAssistantSession) {
-          await window.guanjiaBridge.clearAssistantSession();
-        } else if (window.electron?.guanjia?.clearAssistantSession) {
-          await window.electron.guanjia.clearAssistantSession();
+        const win = window as unknown as {
+          guanjiaBridge?: { clearAssistantSession?: () => Promise<unknown> };
+          electron?: { guanjia?: { clearAssistantSession?: () => Promise<unknown> } };
+        };
+        if (win.guanjiaBridge?.clearAssistantSession) {
+          await win.guanjiaBridge.clearAssistantSession();
+        } else if (win.electron?.guanjia?.clearAssistantSession) {
+          await win.electron.guanjia.clearAssistantSession();
         }
       }
     } catch (err) {
       console.warn('[GuanjiaWorkspace] Failed to silently clear assistant session:', err);
     }
-
-    // 静默清空助理操作流记录与待确认卡片，不弹窗无干扰
-    setActionHistory([]);
-    setPendingConfirm({
-      active: false,
-      amount: 0,
-      reason: '',
-      resolved: 'cancelled',
-    });
-  };
-
-  // 发送助理指令
-  const handleSendAssistantMessage = () => {
-    const trimmed = assistantInput.trim();
-    if (!trimmed) return;
-    const now = new Date();
-    const timeStr = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
-    setActionHistory(prev => [
-      ...prev,
-      { id: Date.now().toString(), text: trimmed, time: timeStr, type: 'step' },
-    ]);
-    setAssistantInput('');
-  };
-
-  // 确认退款动作
-  const handleConfirmAction = () => {
-    const now = new Date();
-    const timeStr = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
-    setPendingConfirm(prev => ({ ...prev, active: false, resolved: 'confirmed' }));
-    setActionHistory(prev => [
-      ...prev,
-      { id: Date.now().toString(), text: `已完成退款 ¥${pendingConfirm.amount}，流水已记入管家台账`, time: timeStr, type: 'done' },
-    ]);
-  };
-
-  // 取消退款动作
-  const handleCancelAction = () => {
-    const now = new Date();
-    const timeStr = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
-    setPendingConfirm(prev => ({ ...prev, active: false, resolved: 'cancelled' }));
-    setActionHistory(prev => [
-      ...prev,
-      { id: Date.now().toString(), text: '已取消退款操作，原订单状态保持不变', time: timeStr, type: 'done' },
-    ]);
   };
 
   return (
@@ -345,7 +498,7 @@ export const GuanjiaWorkspace: React.FC<GuanjiaWorkspaceProps> = ({
       <header
         id="guanjia-topbar"
         tabIndex={0}
-        aria-label={`智慧管家顶栏，当前门店：${storeName}，当前页面：${currentPageName}`}
+        aria-label={`${tGuanjia('guanjiaTopbarLabel')}${storeName ? `，当前门店：${storeName}` : ''}${currentPageName ? `，当前页面：${currentPageName}` : ''}${currentUser ? `，当前人：${currentUser}` : ''}`}
         className="flex h-11 shrink-0 items-center justify-between border-b border-border bg-surface px-3 focus:outline-none focus:ring-1 focus:ring-primary"
       >
         <div className="flex items-center gap-2.5">
@@ -353,47 +506,61 @@ export const GuanjiaWorkspace: React.FC<GuanjiaWorkspaceProps> = ({
             <button
               type="button"
               onClick={onToggleSidebar}
-              aria-label="展开侧栏"
+              aria-label={tGuanjia('guanjiaExpandSidebar')}
               className="flex h-7 w-7 items-center justify-center rounded-md text-secondary hover:bg-surface-raised hover:text-foreground transition-colors"
             >
-              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true" role="presentation">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
               </svg>
             </button>
           )}
           <div className="flex items-center gap-2">
-            <span className="flex h-6 w-6 items-center justify-center rounded bg-primary/10 text-xs text-primary" aria-hidden="true">
+            <span className="flex h-6 w-6 items-center justify-center rounded bg-primary/10 text-xs text-primary" aria-hidden="true" role="presentation">
               🏪
             </span>
             <span className="text-xs font-semibold text-foreground">
-              {storeName}
+              {storeName || tGuanjia('guanjiaWorkspaceTitle')}
             </span>
-            <span className="text-secondary text-xs">/</span>
-            <span className="text-xs text-secondary font-medium">
-              {currentPageName}
-            </span>
+            {currentPageName ? (
+              <>
+                <span className="text-secondary text-xs" aria-hidden="true">/</span>
+                <span className="text-xs text-secondary font-medium">
+                  {currentPageName}
+                </span>
+              </>
+            ) : null}
           </div>
         </div>
 
         <div className="flex items-center gap-2">
-          <span className="text-[11px] text-secondary">
-            当前人：{currentUser}
-          </span>
+          {currentUser ? (
+            <span className="text-[11px] text-secondary">
+              当前人：{currentUser}
+            </span>
+          ) : null}
+          <button
+            type="button"
+            onClick={() => void handleClearAssistantSession()}
+            aria-label={tGuanjia('guanjiaClearSession')}
+            className="inline-flex h-7 items-center rounded border border-border bg-surface px-2 text-xs font-medium text-secondary hover:bg-surface-raised hover:text-foreground active:scale-95 transition-all"
+          >
+            {tGuanjia('guanjiaClearSession')}
+          </button>
           {/* 切换助理抽屉按钮 */}
           <button
             type="button"
             onClick={onToggleAssistant}
             aria-expanded={isAssistantOpen}
-            aria-label={isAssistantOpen ? '收起智慧管家助理' : '展开智慧管家助理'}
+            aria-label={isAssistantOpen ? tGuanjia('guanjiaAssistantClose') : tGuanjia('guanjiaAssistantOpen')}
             className={`inline-flex h-7 items-center gap-1.5 rounded-md px-2.5 text-xs font-medium transition-all ${
               isAssistantOpen
                 ? 'bg-primary text-primary-foreground shadow-xs'
                 : 'border border-border bg-surface-raised text-foreground hover:bg-surface-overlay'
             }`}
           >
-            <span aria-hidden="true">🧭</span>
-            <span>智慧管家助理</span>
-            {todoCount > 0 && (
+            <span aria-hidden="true" role="presentation">🧭</span>
+            <span>{tGuanjia('guanjiaAssistantTitle')}</span>
+            {typeof todoCount === 'number' && todoCount > 0 && (
               <span className="ml-0.5 rounded-full bg-amber-500 px-1.5 py-0.2 text-[10px] text-white">
                 {todoCount}
               </span>
@@ -410,263 +577,110 @@ export const GuanjiaWorkspace: React.FC<GuanjiaWorkspaceProps> = ({
           ref={mainContainerRef}
           onTransitionEnd={handleTransitionEnd}
           tabIndex={0}
-          aria-label="智慧管家主操作区"
+          aria-label={tGuanjia('guanjiaMainAreaLabel')}
           className="relative flex h-full flex-col overflow-hidden transition-[flex] duration-200 ease-out focus:outline-none focus:ring-1 focus:ring-primary"
           style={{
             flex: isAssistantOpen ? 7 : 1,
             minWidth: 0,
           }}
         >
-          {isLoading ? (
-            /* 骨架屏（Skeleton）加载占位，平滑过渡不转圈 */
-            <div className="flex h-full w-full flex-col gap-4 p-4 animate-pulse bg-background" aria-busy="true" aria-label="管家界面加载中">
-              <div className="h-10 w-full rounded-lg bg-surface-raised" />
-              <div className="grid grid-cols-4 gap-3">
-                <div className="h-20 rounded-lg bg-surface-raised" />
-                <div className="h-20 rounded-lg bg-surface-raised" />
-                <div className="h-20 rounded-lg bg-surface-raised" />
-                <div className="h-20 rounded-lg bg-surface-raised" />
-              </div>
-              <div className="flex-1 w-full rounded-lg bg-surface-raised" />
-            </div>
-          ) : (
-            /* WebContentsView 挂载区域：左侧 DOM 容器，真实挂载老秦主进程管理的 WebContentsView */
-            <div
-              id="guanjia-view-container"
-              ref={viewContainerRef}
-              tabIndex={isViewAttached ? -1 : 0}
-              aria-label={isViewAttached ? "智慧管家原生工作区视图" : "智慧管家工作区视图"}
-              className="relative flex h-full w-full flex-col overflow-hidden bg-background"
-            >
-              {/* 兜底与内嵌看板：展示开钟、收银、技师台账与右侧操作栏；真实 WebContentsView 加载后作为静默兜底，不与原生视区产生焦点与事件冲突 */}
+          {/* WebContentsView 挂载区域：左侧 DOM 容器，真实承载主进程管理的 WebContentsView */}
+          <div
+            id="guanjia-view-container"
+            ref={viewContainerRef}
+            tabIndex={attachStatus === 'attached' && isEffectiveVisible ? -1 : 0}
+            aria-label={tGuanjia('guanjiaViewLabel')}
+            className="relative flex h-full w-full flex-col overflow-hidden bg-background"
+          >
+            {sessionStatus === 'restoring' ? (
               <div
-                className={`flex h-full w-full flex-col overflow-y-auto bg-background p-4 text-foreground transition-opacity duration-150 ${
-                  isViewAttached ? "pointer-events-none select-none opacity-0" : "opacity-100"
-                }`}
-                aria-hidden={isViewAttached}
+                className="flex h-full w-full flex-col items-center justify-center gap-2 bg-background p-4"
+                role="status"
+                aria-busy="true"
+                aria-label={tGuanjia('guanjiaConnecting')}
               >
-                {/* 顶部营收指标条 */}
-                <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
-                  <div className="rounded-lg border border-border bg-surface p-3">
-                    <div className="text-[11px] text-secondary">今日实收</div>
-                    <div className="mt-1 text-lg font-bold text-foreground">¥8,460.00</div>
-                  </div>
-                  <div className="rounded-lg border border-border bg-surface p-3">
-                    <div className="text-[11px] text-secondary">当前在钟</div>
-                    <div className="mt-1 text-lg font-bold text-primary">12 台</div>
-                  </div>
-                  <div className="rounded-lg border border-border bg-surface p-3">
-                    <div className="text-[11px] text-secondary">空闲技师</div>
-                    <div className="mt-1 text-lg font-bold text-foreground">6 位</div>
-                  </div>
-                  <div className="rounded-lg border border-border bg-surface p-3">
-                    <div className="text-[11px] text-secondary">待结台数</div>
-                    <div className="mt-1 text-lg font-bold text-amber-500">2 台</div>
-                  </div>
-                </div>
-
-                {/* 核心业务：开台/房态/收银看板与右侧操作栏 */}
-                <div className="flex flex-1 flex-col rounded-lg border border-border bg-surface p-3.5">
-                  <div className="mb-3 flex items-center justify-between border-b border-border pb-2.5">
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs font-semibold">房态看板</span>
-                      <span className="text-[11px] text-secondary">（共 18 间房间）</span>
-                    </div>
-                    {/* 右侧核心高频操作按钮：弹性收窄时依然完全可见且可操作 */}
-                    <div className="flex items-center gap-2 shrink-0">
-                      <button
-                        type="button"
-                        tabIndex={isViewAttached ? -1 : 0}
-                        className="rounded bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground shadow-xs hover:bg-primary-hover active:scale-95 transition-all"
-                      >
-                        快速开台
-                      </button>
-                      <button
-                        type="button"
-                        tabIndex={isViewAttached ? -1 : 0}
-                        className="rounded border border-border bg-surface-raised px-3 py-1.5 text-xs font-medium text-foreground hover:bg-surface-overlay active:scale-95 transition-all"
-                      >
-                        挂单管理
-                      </button>
-                      <button
-                        type="button"
-                        tabIndex={isViewAttached ? -1 : 0}
-                        onClick={handleShiftHandover}
-                        aria-label="交班结账"
-                        className="rounded border border-border bg-surface-raised px-3 py-1.5 text-xs font-medium text-foreground hover:bg-surface-overlay active:scale-95 transition-all"
-                      >
-                        交班结账
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* 房间列表网格 */}
-                  <div className="grid flex-1 grid-cols-2 gap-2.5 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 overflow-y-auto">
-                    {[
-                      { room: '801 养生包', status: '在钟', time: '剩 25 分', master: '808号技师' },
-                      { room: '802 足道房', status: '在钟', time: '剩 12 分', master: '812号技师' },
-                      { room: '803 VIP房', status: '空闲', time: '可安排', master: '无' },
-                      { room: '805 推拿室', status: '待结账', time: '已到钟', master: '805号技师' },
-                      { room: '806 泰式房', status: '在钟', time: '剩 45 分', master: '816号技师' },
-                      { room: '808 旗舰包', status: '打扫中', time: '整理中', master: '保洁' },
-                      { room: '809 舒适双人间', status: '空闲', time: '可安排', master: '无' },
-                      { room: '810 静心室', status: '在钟', time: '剩 18 分', master: '803号技师' },
-                    ].map((item, idx) => (
-                      <div
-                        key={idx}
-                        className={`flex flex-col justify-between rounded-lg border p-2.5 text-xs ${
-                          item.status === '在钟'
-                            ? 'border-blue-500/40 bg-blue-500/5'
-                            : item.status === '待结账'
-                            ? 'border-amber-500/60 bg-amber-500/5'
-                            : 'border-border bg-surface-raised'
-                        }`}
-                      >
-                        <div className="flex items-center justify-between">
-                          <span className="font-medium text-foreground">{item.room}</span>
-                          <span
-                            className={`rounded px-1 text-[10px] ${
-                              item.status === '在钟'
-                                ? 'bg-blue-500/20 text-blue-600 dark:text-blue-400'
-                                : item.status === '待结账'
-                                ? 'bg-amber-500/20 text-amber-600 dark:text-amber-400'
-                                : 'bg-surface-overlay text-secondary'
-                            }`}
-                          >
-                            {item.status}
-                          </span>
-                        </div>
-                        <div className="mt-2 flex items-center justify-between text-[11px] text-secondary">
-                          <span>{item.master}</span>
-                          <span>{item.time}</span>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
+                <div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" aria-hidden="true" role="presentation" />
+                <span className="text-xs text-secondary">{tGuanjia('guanjiaConnecting')}</span>
               </div>
-            </div>
-          )}
+            ) : !isAuthenticated ? (
+              <div
+                className="flex h-full w-full flex-col items-center justify-center gap-3 bg-background p-4 text-center"
+                role="status"
+                aria-label={isConfirmedUnbound ? tGuanjia('guanjiaUnbound') : getSessionStatusMessage(sessionStatus)}
+              >
+                <div className="text-xs font-medium text-secondary">
+                  {isConfirmedUnbound ? tGuanjia('guanjiaUnbound') : getSessionStatusMessage(sessionStatus)}
+                </div>
+                <button
+                  type="button"
+                  onClick={isConfirmedUnbound ? handleOpenNativeBind : handleOpenNativeLogin}
+                  aria-label={isConfirmedUnbound ? tGuanjia('guanjiaBindAccount') : tGuanjia('guanjiaLogin')}
+                  className="rounded border border-border bg-surface px-3 py-1.5 text-xs font-medium text-foreground hover:bg-surface-raised active:scale-95 transition-all"
+                >
+                  {isConfirmedUnbound ? tGuanjia('guanjiaBindAccount') : tGuanjia('guanjiaLogin')}
+                </button>
+              </div>
+            ) : attachStatus === 'attaching' ? (
+              <div
+                className="flex h-full w-full flex-col items-center justify-center gap-2 bg-background p-4"
+                role="status"
+                aria-busy="true"
+                aria-label={tGuanjia('guanjiaViewLoadingLabel')}
+              >
+                <div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" aria-hidden="true" role="presentation" />
+                <span className="text-xs text-secondary">{tGuanjia('guanjiaConnecting')}</span>
+              </div>
+            ) : attachStatus === 'error' ? (
+              <div
+                className="flex h-full w-full flex-col items-center justify-center gap-3 bg-background p-4 text-center"
+                role="alert"
+                aria-label={tGuanjia('guanjiaConnectFailed')}
+              >
+                <div className="text-xs font-medium text-destructive">
+                  {attachError || tGuanjia('guanjiaConnectFailed')}
+                </div>
+                <button
+                  type="button"
+                  onClick={handleRetryAttach}
+                  aria-label={tGuanjia('guanjiaRetryConnect')}
+                  className="rounded border border-border bg-surface px-3 py-1.5 text-xs font-medium text-foreground hover:bg-surface-raised active:scale-95 transition-all"
+                >
+                  {tGuanjia('guanjiaRetryConnect')}
+                </button>
+              </div>
+            ) : null}
+          </div>
         </main>
 
-        {/* 右侧助理抽屉：Flex 7:3 并排布局，宽度约 30%，抽屉展开时不遮挡管家右侧操作 */}
-        {isAssistantOpen && (
+        {/* 右侧助理抽屉：始终挂载保持现场与会话状态，关闭时仅隐藏 DOM 与停止焦点捕获 */}
           <aside
             id="guanjia-assistant-drawer"
-            aria-label="智慧管家助理操作抽屉"
-            className="relative flex h-full flex-col border-l border-border bg-surface transition-[flex] duration-200 ease-out"
+            aria-label={tGuanjia('guanjiaAssistantDrawerLabel')}
+          aria-hidden={!isAssistantOpen || !isVisible}
+          className={`relative h-full flex-col border-l border-border bg-surface transition-[flex] duration-200 ease-out ${
+            isAssistantOpen ? 'flex' : 'hidden'
+          }`}
             style={{
-              flex: 3,
-              minWidth: '320px',
+            flex: isAssistantOpen ? 3 : 0,
+            minWidth: isAssistantOpen ? '320px' : '0px',
               maxWidth: '420px',
             }}
           >
-            {/* 抽屉头部 */}
-            <div className="flex h-11 shrink-0 items-center justify-between border-b border-border px-3">
-              <div className="flex items-center gap-1.5">
-                <span aria-hidden="true" className="text-sm">🧭</span>
-                <span className="text-xs font-semibold text-foreground">智慧管家助理</span>
-              </div>
-              <button
-                type="button"
-                onClick={onToggleAssistant}
-                aria-label="关闭智慧管家助理抽屉"
-                className="flex h-6 w-6 items-center justify-center rounded text-secondary hover:bg-surface-raised hover:text-foreground transition-colors"
-              >
-                <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
-
-            {/* 上下文条（浅灰底）：展示当前页面、当前人、当前店 */}
-            <div className="flex flex-col gap-0.5 border-b border-border bg-surface-raised px-3 py-2 text-[11px] text-secondary">
-              <div className="flex items-center justify-between">
-                <span>当前：{currentPageName}</span>
-                <span>当前店：{storeName}</span>
-              </div>
-              <div>当前人：{currentUser}</div>
-            </div>
-
-            {/* 对话与操作历史区 */}
-            <div className="flex flex-1 flex-col space-y-3 overflow-y-auto p-3 text-xs">
-              {actionHistory.map(item => (
-                <div
-                  key={item.id}
-                  className={`rounded-lg border p-2.5 ${
-                    item.type === 'done'
-                      ? 'border-emerald-500/30 bg-emerald-500/5 text-emerald-800 dark:text-emerald-300'
-                      : 'border-border bg-surface-raised text-foreground'
-                  }`}
-                >
-                  <div className="flex items-center justify-between text-[10px] text-secondary">
-                    <span>步骤记录</span>
-                    <span>{item.time}</span>
-                  </div>
-                  <div className="mt-1 leading-relaxed">{item.text}</div>
-                </div>
-              ))}
-
-              {/* “落定”确认卡片：凡是提交、扣款、退款、作废等动作，停下来等店员确认 */}
-              {pendingConfirm.active && (
-                <div className="rounded-lg border border-amber-500/60 bg-amber-500/10 p-3 shadow-xs">
-                  <div className="font-medium text-amber-900 dark:text-amber-200">
-                    我已经填好原因了，要退这笔 ¥{pendingConfirm.amount} 吗？
-                  </div>
-                  <div className="mt-1 text-[11px] text-amber-700 dark:text-amber-300">
-                    事由：{pendingConfirm.reason}
-                  </div>
-                  <div className="mt-3 flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={handleConfirmAction}
-                      className="inline-flex items-center justify-center rounded bg-amber-500 px-3 py-1.5 text-xs font-medium text-white shadow-xs hover:bg-amber-600 active:scale-95 transition-all"
-                    >
-                      确认退款
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleCancelAction}
-                      className="inline-flex items-center justify-center rounded border border-border bg-surface px-3 py-1.5 text-xs font-medium text-foreground hover:bg-surface-raised active:scale-95 transition-all"
-                    >
-                      取消
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* 底部输入框：与宿主聊天框视觉规范一致 */}
-            <div className="border-t border-border p-2.5 bg-surface">
-              <div className="flex items-center rounded-lg border border-border bg-background px-2.5 py-1.5 shadow-2xs focus-within:border-primary focus-within:ring-1 focus-within:ring-primary">
-                <input
-                  type="text"
-                  value={assistantInput}
-                  onChange={(e) => setAssistantInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault();
-                      handleSendAssistantMessage();
-                    }
-                  }}
-                  placeholder="问一句…"
-                  className="flex-1 bg-transparent text-xs text-foreground placeholder:text-muted focus:outline-none"
-                />
-                <button
-                  type="button"
-                  onClick={handleSendAssistantMessage}
-                  disabled={!assistantInput.trim()}
-                  aria-label="发送给智慧管家助理"
-                  className="flex h-6 w-6 items-center justify-center rounded text-secondary hover:text-primary disabled:opacity-40 transition-colors"
-                >
-                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
-                  </svg>
-                </button>
-              </div>
-            </div>
+            <GuanjiaNativeAssistant
+              onClose={onToggleAssistant}
+              storeName={storeName}
+              currentUser={currentUser}
+              currentPageName={currentPageName}
+              isExpanded={isAssistantOpen && isEffectiveVisible}
+              onFocusWorkspace={() => {
+                if (effectiveVisibilityRef.current) {
+                  mainContainerRef.current?.focus();
+                }
+              }}
+              openAssistantPayload={openAssistantPayload}
+              onClearOpenAssistantPayload={onClearOpenAssistantPayload}
+            />
           </aside>
-        )}
       </div>
     </div>
   );

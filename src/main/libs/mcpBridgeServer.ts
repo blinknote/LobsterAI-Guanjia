@@ -94,6 +94,19 @@ export type DecisionToolHandler = (
   signal: AbortSignal,
 ) => Promise<DecisionToolResponse>;
 
+export type GuanjiaToolHandler = (
+  request: {
+    toolName: string;
+    args: Record<string, unknown>;
+    context: { sessionKey: string; toolCallId: string };
+  },
+  signal?: AbortSignal,
+) => Promise<{
+  content: Array<{ type: string; text: string }>;
+  isError?: boolean;
+  details?: Record<string, unknown>;
+}>;
+
 export class McpBridgeServer {
   private server: http.Server | null = null;
   private _port: number | null = null;
@@ -103,6 +116,7 @@ export class McpBridgeServer {
   private onAskUserDismissCallback: ((requestId: string) => void) | null = null;
   private onMediaGenerationCallback: ((request: MediaGenerationRequest) => Promise<MediaGenerationResponse>) | null = null;
   private onBrowserToolCallback: ((request: BrowserToolRequest) => Promise<BrowserToolResponse>) | null = null;
+  private onGuanjiaToolCallback: GuanjiaToolHandler | null = null;
   private onDecisionToolCallback: DecisionToolHandler | null = null;
 
   constructor(secret: string) {
@@ -128,6 +142,14 @@ export class McpBridgeServer {
 
   get decisionCallbackUrl(): string | null {
     return this._port ? `http://127.0.0.1:${this._port}/decision/tool` : null;
+  }
+
+  get guanjiaCallbackUrl(): string | null {
+    return this._port ? `http://127.0.0.1:${this._port}/guanjia/tool` : null;
+  }
+
+  setGuanjiaToolHandler(handler: GuanjiaToolHandler): void {
+    this.onGuanjiaToolCallback = handler;
   }
 
   /**
@@ -302,6 +324,11 @@ export class McpBridgeServer {
 
     if (req.url?.startsWith('/decision/tool')) {
       await this.handleDecisionTool(req, res);
+      return;
+    }
+
+    if (req.url === '/guanjia/tool') {
+      await this.handleGuanjiaTool(req, res);
       return;
     }
 
@@ -499,6 +526,71 @@ export class McpBridgeServer {
       const message = error instanceof Error ? error.message : String(error);
       log('ERROR', `Decision tool request failed after ${Date.now() - startedAt}ms: ${message}`);
       reply(500, { content: [{ type: 'text', text: `Decision model error: ${message}` }], isError: true });
+    }
+  }
+
+  private async handleGuanjiaTool(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+    const controller = new AbortController();
+    const onClose = () => { if (!res.writableEnded) controller.abort(); };
+    res.on('close', onClose);
+    const timer = setTimeout(() => {
+      controller.abort();
+      if (!res.writableEnded) { res.writeHead(504); res.end(JSON.stringify({ isError: true, content: [{ type: 'text', text: '业务结果尚未确认，请勿重试写操作' }] })); }
+      req.destroy();
+    }, 20000);
+
+    const reply = (status: number, payload: unknown) => {
+      if (res.writableEnded || res.destroyed) return;
+      res.writeHead(status, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(payload));
+    };
+
+    try {
+      const body = await new Promise<string>((resolve, reject) => {
+        const chunks: Buffer[] = []; let bytes = 0;
+        req.on('data', (chunk: Buffer) => {
+          bytes += chunk.length;
+          if (bytes > 1024 * 1024) { reject(new Error('请求超过大小限制')); req.destroy(); return; }
+          chunks.push(chunk);
+        });
+        req.once('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
+        req.once('error', reject);
+        controller.signal.addEventListener('abort', () => reject(new Error('请求已中断，结果尚未确认')), { once: true });
+      });
+      const request = JSON.parse(body) as {
+        toolName?: unknown;
+        args?: unknown;
+        context?: { sessionKey?: unknown; toolCallId?: unknown };
+      } | null;
+
+      const toolName = typeof request?.toolName === 'string' ? request.toolName : '';
+      const args = request?.args && typeof request.args === 'object' && !Array.isArray(request.args)
+        ? (request.args as Record<string, unknown>)
+        : {};
+      const sessionKey = typeof request?.context?.sessionKey === 'string' ? request.context.sessionKey : '';
+      const toolCallId = typeof request?.context?.toolCallId === 'string' ? request.context.toolCallId : '';
+
+      if (!toolName) {
+        reply(400, { content: [{ type: 'text', text: 'Missing toolName.' }], isError: true });
+        return;
+      }
+      if (!this.onGuanjiaToolCallback) {
+        reply(503, { content: [{ type: 'text', text: 'Guanjia native assistant service is not ready.' }], isError: true });
+        return;
+      }
+
+      const result = await this.onGuanjiaToolCallback({
+        toolName,
+        args,
+        context: { sessionKey, toolCallId },
+      }, controller.signal);
+      reply(200, result);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      reply(500, { content: [{ type: 'text', text: `Guanjia tool error: ${message}` }], isError: true });
+    } finally {
+      clearTimeout(timer);
+      res.removeListener('close', onClose);
     }
   }
 

@@ -143,6 +143,7 @@ import {
   getAutoPreviewOpenTarget,
   selectAutoPreviewArtifact,
 } from '../artifacts/autoPreviewPolicy';
+import GuanjiaConversationActions from '../guanjia/GuanjiaConversationActions';
 import ComposeIcon from '../icons/ComposeIcon';
 import FileTypeIcon from '../icons/fileTypes/FileTypeIcon';
 import SidebarSearchIcon from '../icons/SidebarSearchIcon';
@@ -6662,6 +6663,9 @@ const CoworkSessionDetail: React.FC<CoworkSessionDetailProps> = ({
           </button>
         )}
         <div className={COWORK_DETAIL_CONTENT_CLASS}>
+          {currentSession?.id && currentSession.agentId === 'guanjia-assistant' && (
+            <GuanjiaConversationActions sessionId={currentSession.id} />
+          )}
           <QuestionDock sessionId={currentSession.id} permissions={pendingPermissions} />
         </div>
         {minimizedPermission && (

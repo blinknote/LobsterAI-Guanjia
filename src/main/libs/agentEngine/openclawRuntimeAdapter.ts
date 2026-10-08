@@ -15,6 +15,7 @@ import {
   type OpenClawSessionPatch,
   OpenClawSessionReasoningLevel,
 } from '../../../common/openclawSession';
+import { AgentId } from '../../../shared/agent/constants';
 import {
   PromptAnalyticsConversationState,
   type PromptAnalyticsConversationState as PromptAnalyticsConversationStateValue,
@@ -2697,6 +2698,7 @@ export class OpenClawRuntimeAdapter extends EventEmitter implements CoworkRuntim
     } = {},
   ): void {
     try {
+      if (this.store.getSession(sessionId)?.agentId === AgentId.GuanjiaAssistant) return;
       if (
         typeof this.store.getSession !== 'function'
         || typeof this.store.getContinuityCapsule !== 'function'
@@ -5929,9 +5931,10 @@ export class OpenClawRuntimeAdapter extends EventEmitter implements CoworkRuntim
         + `to the outbound message for session ${sessionId}`,
       );
     }
-    const continuityCapsuleBridge = this.buildContinuityCapsuleBridge(sessionId);
-    const workspaceRehydrationBridge = await this.buildWorkspaceRehydrationBridge(sessionId);
-    const topKEvidenceBridge = this.buildTopKEvidenceBridge(sessionId, prompt);
+    const isGuanjiaAgent = agentId === AgentId.GuanjiaAssistant || agentId === 'guanjia-assistant';
+    const continuityCapsuleBridge = isGuanjiaAgent ? null : this.buildContinuityCapsuleBridge(sessionId);
+    const workspaceRehydrationBridge = isGuanjiaAgent ? null : await this.buildWorkspaceRehydrationBridge(sessionId);
+    const topKEvidenceBridge = isGuanjiaAgent ? null : this.buildTopKEvidenceBridge(sessionId, prompt);
 
     if (this.bridgedSessions.has(sessionId)) {
       if (continuityCapsuleBridge) {

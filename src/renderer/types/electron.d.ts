@@ -2289,35 +2289,32 @@ interface IElectronAPI {
     ) => () => void;
   };
     guanjia?: {
-      login: (args: { account: string; password: string }) => Promise<{
-        success: boolean;
-        data?: {
-          token: string;
-          userInfo: {
-            employee_id: string | number;
-            employee_no: string;
-            employee_name: string;
-            role: string;
-            store_code?: string;
-            store_name?: string;
-            [key: string]: unknown;
-          };
-        };
-        credentials?: any;
-        error?: string;
-      }>;
+      getSessionSnapshot: () => Promise<import('../../shared/guanjia/native').GuanjiaSessionSnapshot>;
+      getBusinessSession: () => Promise<import('../../shared/guanjia/native').GuanjiaSessionSnapshot>;
+      onSessionChanged: (callback: (snapshot: import('../../shared/guanjia/native').GuanjiaSessionSnapshot) => void) => () => void;
+      onBusinessSessionChanged: (callback: (snapshot: import('../../shared/guanjia/native').GuanjiaSessionSnapshot) => void) => () => void;
+      login: (args: { account: string; password: string }) => Promise<import('../../shared/guanjia/native').GuanjiaSessionSnapshot>;
       logout: () => Promise<{ success: boolean; error?: string }>;
+      restoreSession: () => Promise<import('../../shared/guanjia/native').GuanjiaSessionSnapshot>;
+      setStore: (store: { id: string | number; code?: string; name?: string } | null) => Promise<import('../../shared/guanjia/native').GuanjiaSessionSnapshot>;
+      invalidateSession: (reason?: string) => Promise<{ success: boolean }>;
+      getCapabilities: () => Promise<import('../../shared/guanjia/native').GuanjiaBridgeCapabilities>;
+      openAssistant: (params: import('../../shared/guanjia/native').OpenAssistantParams) => Promise<{ success: boolean; error?: string }>;
+      reportSessionEvent: (params: import('../../shared/guanjia/native').ReportSessionEventParams) => Promise<{ success: boolean; error?: string }>;
       attachView: (args: { bounds: { x: number; y: number; width: number; height: number }; initialUrl?: string }) => Promise<{ success: boolean; error?: string }>;
       detachView: () => Promise<{ success: boolean }>;
       setBounds: (bounds: { x: number; y: number; width: number; height: number }) => Promise<{ success: boolean }>;
       showView: () => Promise<{ success: boolean }>;
       hideView: () => Promise<{ success: boolean }>;
       loadUrl: (url: string) => Promise<{ success: boolean }>;
+      reload: (ignoreCache?: boolean) => Promise<{ success: boolean; error?: string }>;
       getNavigationState: () => Promise<{ url: string; title: string; canGoBack: boolean; canGoForward: boolean }>;
       clearAssistantSession: () => Promise<{ success: boolean; clearedCount: number }>;
       getContext: () => Promise<unknown>;
       executeAction: (payload: unknown) => Promise<unknown>;
       getAuditLogs: () => Promise<unknown>;
+      native?: import('../../shared/guanjia/native').ScopedNativeApi;
+      desktopAuth?: import('../../shared/guanjia/native').DesktopAuthApi;
     };
 }
 
@@ -2879,6 +2876,9 @@ declare global {
   interface Window {
     electron: IElectronAPI;
     guanjiaBridge?: {
+      getCapabilities?: () => Promise<any>;
+      openAssistant?: (params: any) => Promise<any>;
+      reportSessionEvent?: (params: any) => Promise<any>;
       login?: (args: { account: string; password: string }) => Promise<{ success: boolean; data?: any; error?: string }>;
       logout?: () => Promise<{ success: boolean; error?: string }>;
       clearAssistantSession: () => Promise<{ success: boolean; clearedCount: number }>;
@@ -2891,6 +2891,8 @@ declare global {
       getWorkspaceContext?: () => any;
       readContext?: () => any;
       executeAction?: (action: any) => Promise<any>;
+      getDesktopAuthStatus?: () => Promise<import('../../shared/guanjia/native').GuanjiaDesktopAuthStatus>;
+      registerBusinessToken?: (params: import('../../shared/guanjia/native').RegisterBusinessTokenParams) => Promise<import('../../shared/guanjia/native').RegisterBusinessTokenResult>;
     };
   }
 }

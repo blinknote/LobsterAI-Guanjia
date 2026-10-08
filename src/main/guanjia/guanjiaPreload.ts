@@ -1,13 +1,13 @@
 import { contextBridge, ipcRenderer } from 'electron';
+
+import type { RegisterBusinessTokenParams } from '../../shared/guanjia/desktopAuth';
+import { GuanjiaNativeIpcChannel, OpenAssistantParams, ReportSessionEventParams } from '../../shared/guanjia/native';
 import {
-  FINANCIAL_ACTION_TYPES,
-  FinancialDetails,
   GuanjiaActionRequest,
   GuanjiaActionResult,
   GuanjiaIpcChannel,
   GuanjiaSsoCredentials,
   GuanjiaWorkspaceContext,
-  isFinancialAction,
 } from './types';
 
 // =========================================================================
@@ -20,45 +20,23 @@ try {
   // IPC 同步获取失败时优雅降级
 }
 
+window.addEventListener('guanjia:auth-expired', () => { cachedSsoCredentials = null; });
+window.addEventListener('guanjia:host-session-cleared', () => { cachedSsoCredentials = null; });
+
 if (cachedSsoCredentials && cachedSsoCredentials.token) {
   try {
-    // contextIsolation=true 下必须使用 contextBridge.exposeInMainWorld 暴露凭据到主世界
-    contextBridge.exposeInMainWorld('__GUANJIA_SSO__', Object.freeze({ ...cachedSsoCredentials }));
-  } catch (err) {
-    console.warn('[GuanjiaPreload] Failed to expose __GUANJIA_SSO__ via contextBridge:', err);
-  }
-
-  try {
-    // 同时在 Preload 隔离上下文挂载，保证 Preload 内部直接读取
-    Object.defineProperty(window, '__GUANJIA_SSO__', {
-      value: Object.freeze({ ...cachedSsoCredentials }),
-      writable: false,
-      configurable: false,
-    });
-  } catch {
-    // 忽略定义失败
-  }
-
-  try {
-    // 自动将 SSO token 及用户信息同步至 localStorage / sessionStorage
     const applyStorageCredentials = () => {
       try {
-        if (window.localStorage && cachedSsoCredentials) {
-          window.localStorage.setItem('guanjia_token', cachedSsoCredentials.token);
-          window.localStorage.setItem('guanjia_sso_token', cachedSsoCredentials.token);
-          window.localStorage.setItem('token', cachedSsoCredentials.token);
-          window.localStorage.setItem('guanjia_user_id', cachedSsoCredentials.userId);
-          window.localStorage.setItem('guanjia_shop_id', cachedSsoCredentials.shopId);
-          window.localStorage.setItem('guanjia_shop_name', cachedSsoCredentials.shopName);
-          window.localStorage.setItem('guanjia_user_role', cachedSsoCredentials.role);
-        }
-        if (window.sessionStorage && cachedSsoCredentials) {
+        const isHttpsOrLocal = window.location.protocol === 'https:' || window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+        if (isHttpsOrLocal && window.sessionStorage && cachedSsoCredentials) {
           window.sessionStorage.setItem('guanjia_token', cachedSsoCredentials.token);
-          window.sessionStorage.setItem('token', cachedSsoCredentials.token);
-          window.sessionStorage.setItem('guanjia_sso_token', cachedSsoCredentials.token);
+          if (cachedSsoCredentials.shopId) window.sessionStorage.setItem('guanjia_store_id', cachedSsoCredentials.shopId);
+          else window.sessionStorage.removeItem('guanjia_store_id');
+          if (cachedSsoCredentials.storeCode) window.sessionStorage.setItem('guanjia_store_code', cachedSsoCredentials.storeCode);
+          else window.sessionStorage.removeItem('guanjia_store_code');
         }
       } catch {
-        // storage 可能因策略暂时受限
+        // Storage unavailable; no credential fallback.
       }
     };
 
@@ -71,7 +49,7 @@ if (cachedSsoCredentials && cachedSsoCredentials.token) {
       applyStorageCredentials();
     }
   } catch (err) {
-    console.warn('[GuanjiaPreload] Failed to inject SSO credentials at document-start:', err);
+    console.warn('[GuanjiaPreload] Failed to inject session credentials:', err);
   }
 }
 
@@ -130,7 +108,7 @@ const injectMainWorldPasswordShield = () => {
             t.appendChild(script);
             script.remove();
           }
-        } catch (_) {
+        } catch {
           // ignore
         }
       }, { once: true });
@@ -187,7 +165,7 @@ function extractWorkspaceContext(): GuanjiaWorkspaceContext {
   }
 
   // 提取待办/告警数量
-  let pendingCount = 0;
+  let pendingCount: number | null = null;
   const badgeEl = document.querySelector('.pending-badge, .badge-count, .ant-badge-count, .el-badge__content');
   if (badgeEl && badgeEl.textContent) {
     const num = parseInt(badgeEl.textContent.trim(), 10);
@@ -206,7 +184,7 @@ function extractWorkspaceContext(): GuanjiaWorkspaceContext {
       }
     : null;
 
-  const currentShop = cachedSsoCredentials
+  const currentShop = cachedSsoCredentials?.shopId
     ? {
         id: cachedSsoCredentials.shopId,
         name: cachedSsoCredentials.shopName,
@@ -229,94 +207,33 @@ function extractWorkspaceContext(): GuanjiaWorkspaceContext {
 // 4. 动账动作判定与拦截逻辑 (统一引用 types.ts 中的判定函数与集合)
 // =========================================================================
 async function handleExecuteAction(action: GuanjiaActionRequest): Promise<GuanjiaActionResult> {
-  const financial = isFinancialAction(action);
-  const isConfirmed = Boolean(action.confirmed && action.confirmedBy && action.confirmedBy.trim());
-
-  // 动账操作拦截：未确认或缺失 confirmedBy 前坚决硬拦截并报错，必须停下复述金额事由
-  if (financial && !isConfirmed) {
-    const details: FinancialDetails = action.financialDetails || {
-      amount: '需核对金额',
-      reason: '未注明事由',
-      actionType: (action.type && FINANCIAL_ACTION_TYPES.has(action.type)) ? (action.type as any) : 'other',
-    };
-
-    // 通知主进程记录拦截状态
-    ipcRenderer.invoke(GuanjiaIpcChannel.ExecuteAction, {
-      action,
-      intercepted: true,
-      financialDetails: details,
-    }).catch(() => {});
-
-    const errorMsg = !action.confirmed
-      ? `动账操作已拦截：必须向店员复述金额（${details.amount}）与事由（${details.reason}），等待明确确认后方可落定执行。`
-      : `动账操作已拦截：动账确认人（confirmedBy）缺失或为空，坚决拦截。`;
-
-    return {
-      success: false,
-      actionType: action.type,
-      requiresConfirmation: true,
-      financialDetails: details,
-      message: errorMsg,
-      error: !action.confirmed ? undefined : '动账确认人（confirmedBy）缺失或为空',
-    };
-  }
-
-  // 执行实际 DOM 动作
-  try {
-    if (action.type === 'navigate' && action.url) {
-      window.location.href = action.url;
-      return { success: true, actionType: 'navigate', message: `已跳转至 ${action.url}` };
-    }
-
-    if (action.selector) {
-      const targetEl = document.querySelector(action.selector) as HTMLElement | null;
-      if (!targetEl) {
-        return {
-          success: false,
-          actionType: action.type,
-          error: `未找到目标元素: ${action.selector}`,
-        };
-      }
-
-      if (action.type === 'click' || action.type === 'submit_order' || action.type === 'refund' || action.type === 'recharge') {
-        targetEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        targetEl.click();
-      } else if (action.type === 'input') {
-        if ('value' in targetEl && typeof action.value === 'string') {
-          (targetEl as HTMLInputElement).value = action.value;
-          targetEl.dispatchEvent(new Event('input', { bubbles: true }));
-          targetEl.dispatchEvent(new Event('change', { bubbles: true }));
-        }
-      }
-    }
-
-    // 若为已确认的动账操作，上报主进程记录审计日志
-    if (financial && isConfirmed) {
-      await ipcRenderer.invoke(GuanjiaIpcChannel.ExecuteAction, {
-        action,
-        intercepted: false,
-        executed: true,
-      });
-    }
-
-    return {
-      success: true,
-      actionType: action.type,
-      message: '动作执行成功',
-    };
-  } catch (error) {
-    return {
-      success: false,
-      actionType: action.type,
-      error: error instanceof Error ? error.message : '执行动作发生异常',
-    };
-  }
+  return { success: false, actionType: action.type, error: '旧页面动作执行接口已停用' };
 }
 
 // =========================================================================
 // 5. 暴露 Bridge (只读上下文 + 动作执行 + 交班清场)
 // =========================================================================
 const guanjiaBridge = {
+  getCapabilities: async () => {
+    return ipcRenderer.invoke(GuanjiaNativeIpcChannel.GetCapabilities);
+  },
+
+  openAssistant: async (params: OpenAssistantParams) => {
+    return ipcRenderer.invoke(GuanjiaNativeIpcChannel.OpenAssistant, params);
+  },
+
+  reportSessionEvent: async (params: ReportSessionEventParams) => {
+    return ipcRenderer.invoke(GuanjiaNativeIpcChannel.ReportSessionEvent, params);
+  },
+
+  getDesktopAuthStatus: async () => {
+    return ipcRenderer.invoke(GuanjiaIpcChannel.DesktopAuthGetStatus);
+  },
+
+  registerBusinessToken: async (params: RegisterBusinessTokenParams) => {
+    return ipcRenderer.invoke(GuanjiaIpcChannel.DesktopAuthRegisterBusinessToken, params);
+  },
+
   /**
    * 只读上下文提取：仅提供页面当前状态读取，不可修改任何数据
    */

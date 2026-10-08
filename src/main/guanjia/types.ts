@@ -5,6 +5,38 @@
 
 export const GUANJIA_WORKSPACE_PARTITION = 'persist:guanjia-workspace';
 
+// 从权威共享定义重导出
+export type {
+  DesktopAuthApi,
+  GuanjiaDesktopAuthBindParams,
+  GuanjiaDesktopAuthBindResult,
+  GuanjiaDesktopAuthLoginResult,
+  GuanjiaDesktopAuthStatus,
+  GuanjiaDesktopAuthUnbindParams,
+  GuanjiaDesktopAuthUnbindResult,
+  GuanjiaDesktopBindingInfo,
+  GuanjiaDesktopBindingState,
+  RegisterBusinessTokenParams,
+  RegisterBusinessTokenResult,
+} from '../../shared/guanjia/desktopAuth';
+export type {
+  GuanjiaAssistantType,
+  GuanjiaBridgeCapabilities,
+  GuanjiaBusinessSessionSnapshot,
+  GuanjiaSessionEventType,
+  GuanjiaSessionSnapshot,
+  GuanjiaSessionStatus,
+  GuanjiaStoreSnapshot,
+  GuanjiaUserSnapshot,
+  OpenAssistantParams,
+  ReportSessionEventParams,
+} from '../../shared/guanjia/native';
+
+export interface GuanjiaSessionCredentials {
+  token: string;
+  userId: string;
+  username: string;
+}
 export interface GuanjiaSsoCredentials {
   token: string;
   refreshToken?: string;
@@ -14,6 +46,7 @@ export interface GuanjiaSsoCredentials {
   role: 'manager' | 'frontdesk' | 'admin' | string;
   shopId: string;
   shopName: string;
+  storeCode?: string;
   tenantId?: string;
   expiredAt?: number;
 }
@@ -58,7 +91,7 @@ export interface GuanjiaWorkspaceContext {
     name: string;
   } | null;
   pageError: string | null;
-  pendingCount: number;
+  pendingCount: number | null;
   timestamp: number;
 }
 
@@ -216,4 +249,27 @@ export const GuanjiaIpcChannel = {
   // 真实账号密码认证与会话
   Login: 'guanjia:auth:login',
   Logout: 'guanjia:auth:logout',
+
+  // 权威业务会话管理 (无 Token Snapshot)
+  GetSessionSnapshot: 'guanjia:session:get-snapshot',
+  GetBusinessSession: 'guanjia:session:get-business-session',
+  SubscribeSessionChanged: 'guanjia:session:subscribe-changed',
+  SessionChanged: 'guanjia:session:changed',
+  RestoreSession: 'guanjia:session:restore',
+  SetStore: 'guanjia:session:set-store',
+  InvalidateSession: 'guanjia:session:invalidate',
+
+  // 原生能力与事件上报
+  GetCapabilities: 'guanjia:native:get-capabilities',
+  OpenAssistant: 'guanjia:native:open-assistant',
+  ReportSessionEvent: 'guanjia:native:report-session-event',
+
+  // 桌面专属官方绑定与静默登录 (Token-free)
+  DesktopAuthGetStatus: 'guanjia:desktop-auth:get-status',
+  DesktopAuthSubscribeStatus: 'guanjia:desktop-auth:subscribe-status',
+  DesktopAuthStatusChanged: 'guanjia:desktop-auth:status-changed',
+  DesktopAuthBind: 'guanjia:desktop-auth:bind',
+  DesktopAuthUnbind: 'guanjia:desktop-auth:unbind',
+  DesktopAuthLoginBound: 'guanjia:desktop-auth:login-bound',
+  DesktopAuthRegisterBusinessToken: 'guanjia:desktop-auth:register-business-token',
 } as const;

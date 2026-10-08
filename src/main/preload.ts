@@ -69,6 +69,7 @@ import {
   EnterpriseAccountIpcChannel,
   type EnterpriseQuotaRequestType,
 } from '../shared/enterpriseAccount/constants';
+import { GuanjiaNativeIpcChannel, type OpenAssistantParams,type ScopedNativeApi } from '../shared/guanjia/native';
 import {
   type HtmlShareAccessMode,
   type HtmlShareAnalyticsInput,
@@ -1535,26 +1536,36 @@ contextBridge.exposeInMainWorld('electron', {
     },
   },
   guanjia: {
+    getSessionSnapshot: () =>
+      ipcRenderer.invoke(GuanjiaIpcChannel.GetSessionSnapshot),
+    getBusinessSession: () =>
+      ipcRenderer.invoke(GuanjiaIpcChannel.GetBusinessSession),
+    onSessionChanged: (callback: (snapshot: any) => void) => {
+      const handler = (_event: any, data: any) => callback(data);
+      ipcRenderer.on('guanjia:session:changed', handler);
+      return () => ipcRenderer.removeListener('guanjia:session:changed', handler);
+    },
+    onBusinessSessionChanged: (callback: (snapshot: any) => void) => {
+      const handler = (_event: any, data: any) => callback(data);
+      ipcRenderer.on('guanjia:session:changed', handler);
+      return () => ipcRenderer.removeListener('guanjia:session:changed', handler);
+    },
     login: (args: { account: string; password: string }) =>
-      ipcRenderer.invoke(GuanjiaIpcChannel.Login, args) as Promise<{
-        success: boolean;
-        data?: {
-          token: string;
-          userInfo: {
-            employee_id: string | number;
-            employee_no: string;
-            employee_name: string;
-            role: string;
-            store_code?: string;
-            store_name?: string;
-            [key: string]: unknown;
-          };
-        };
-        credentials?: unknown;
-        error?: string;
-      }>,
+      ipcRenderer.invoke(GuanjiaIpcChannel.Login, args),
     logout: () =>
       ipcRenderer.invoke(GuanjiaIpcChannel.Logout) as Promise<{ success: boolean; error?: string }>,
+    restoreSession: () =>
+      ipcRenderer.invoke(GuanjiaIpcChannel.RestoreSession),
+    setStore: (store: { id: string | number; code?: string; name?: string } | null) =>
+      ipcRenderer.invoke(GuanjiaIpcChannel.SetStore, store),
+    invalidateSession: (reason?: string) =>
+      ipcRenderer.invoke(GuanjiaIpcChannel.InvalidateSession, reason),
+    getCapabilities: () =>
+      ipcRenderer.invoke(GuanjiaNativeIpcChannel.GetCapabilities),
+    openAssistant: (params: any) =>
+      ipcRenderer.invoke(GuanjiaNativeIpcChannel.OpenAssistant, params),
+    reportSessionEvent: (params: any) =>
+      ipcRenderer.invoke(GuanjiaNativeIpcChannel.ReportSessionEvent, params),
     attachView: (args: { bounds: { x: number; y: number; width: number; height: number }; initialUrl?: string }) =>
       ipcRenderer.invoke(GuanjiaIpcChannel.AttachView, args) as Promise<{ success: boolean; error?: string }>,
     detachView: () =>
@@ -1595,11 +1606,67 @@ contextBridge.exposeInMainWorld('electron', {
       ipcRenderer.invoke(GuanjiaIpcChannel.ExecuteAction, payload) as Promise<unknown>,
     getAuditLogs: () =>
       ipcRenderer.invoke(GuanjiaIpcChannel.GetAuditLogs) as Promise<unknown>,
+    native: {
+      getCapabilities: () =>
+        ipcRenderer.invoke(GuanjiaNativeIpcChannel.GetCapabilities),
+      openAssistant: (params: any) =>
+        ipcRenderer.invoke(GuanjiaNativeIpcChannel.OpenAssistant, params),
+      reportSessionEvent: (params: any) =>
+        ipcRenderer.invoke(GuanjiaNativeIpcChannel.ReportSessionEvent, params),
+      start: (req: Parameters<ScopedNativeApi['start']>[0]) =>
+        ipcRenderer.invoke(GuanjiaNativeIpcChannel.StartScopedSession, req),
+      continue: (req: Parameters<ScopedNativeApi['continue']>[0]) =>
+        ipcRenderer.invoke(GuanjiaNativeIpcChannel.ContinueScopedSession, req),
+      get: (sessionId: string) =>
+        ipcRenderer.invoke(GuanjiaNativeIpcChannel.GetScopedSession, sessionId),
+      stop: (sessionId: Parameters<ScopedNativeApi['stop']>[0]) =>
+        ipcRenderer.invoke(GuanjiaNativeIpcChannel.StopScopedSession, sessionId),
+      getPendingRuns: (sessionId?: string) =>
+        ipcRenderer.invoke(GuanjiaNativeIpcChannel.GetPendingActions, typeof sessionId === 'string' ? { sessionId } : sessionId),
+      confirmRun: (runId: string, note?: string) =>
+        ipcRenderer.invoke(GuanjiaNativeIpcChannel.ConfirmPendingAction, { runId, note }),
+      cancelRun: (runId: string, reason?: string) =>
+        ipcRenderer.invoke(GuanjiaNativeIpcChannel.CancelPendingAction, { runId, reason }),
+      onOpenAssistant: (callback: (payload: OpenAssistantParams) => void) => {
+        const handler = (_event: any, data: any) => callback(data);
+        ipcRenderer.on(GuanjiaNativeIpcChannel.OpenAssistantRequest, handler);
+        ipcRenderer.on(GuanjiaNativeIpcChannel.AssistantOpened, handler);
+        return () => {
+          ipcRenderer.removeListener(GuanjiaNativeIpcChannel.OpenAssistantRequest, handler);
+          ipcRenderer.removeListener(GuanjiaNativeIpcChannel.AssistantOpened, handler);
+        };
+      },
+    },
+    desktopAuth: {
+      getStatus: () =>
+        ipcRenderer.invoke(GuanjiaIpcChannel.DesktopAuthGetStatus),
+      onStatusChanged: (callback: (status: any) => void) => {
+        const handler = (_event: any, data: any) => callback(data);
+        ipcRenderer.on(GuanjiaIpcChannel.DesktopAuthStatusChanged, handler);
+        return () => ipcRenderer.removeListener(GuanjiaIpcChannel.DesktopAuthStatusChanged, handler);
+      },
+      bind: (params: { employeeNo: string; password: string }) =>
+        ipcRenderer.invoke(GuanjiaIpcChannel.DesktopAuthBind, params),
+      unbind: (params: { password: string }) =>
+        ipcRenderer.invoke(GuanjiaIpcChannel.DesktopAuthUnbind, params),
+      loginBound: () =>
+        ipcRenderer.invoke(GuanjiaIpcChannel.DesktopAuthLoginBound),
+    },
   },
 });
 
 // 暴露智慧管家 Bridge 供宿主与管家交互使用
 contextBridge.exposeInMainWorld('guanjiaBridge', {
+  getCapabilities: () =>
+    ipcRenderer.invoke(GuanjiaNativeIpcChannel.GetCapabilities),
+  openAssistant: (params: any) =>
+    ipcRenderer.invoke(GuanjiaNativeIpcChannel.OpenAssistant, params),
+  reportSessionEvent: (params: any) =>
+    ipcRenderer.invoke(GuanjiaNativeIpcChannel.ReportSessionEvent, params),
+  getDesktopAuthStatus: () =>
+    ipcRenderer.invoke(GuanjiaIpcChannel.DesktopAuthGetStatus),
+  registerBusinessToken: (params: any) =>
+    ipcRenderer.invoke(GuanjiaIpcChannel.DesktopAuthRegisterBusinessToken, params),
   login: (args: { account: string; password: string }) =>
     ipcRenderer.invoke(GuanjiaIpcChannel.Login, args),
   logout: () =>

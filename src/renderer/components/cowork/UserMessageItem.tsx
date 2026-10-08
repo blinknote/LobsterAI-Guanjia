@@ -8,6 +8,7 @@ import {
   isBrowserAnnotationTransportImage,
 } from '../../../shared/cowork/imageAttachments';
 import type { CoworkSelectedTextSnippet } from '../../../shared/cowork/selectedText';
+import { GuanjiaMessageMetadataKey } from '../../../shared/guanjia/native';
 import type { KitReference } from '../../../shared/kit/constants';
 import { copyTextToClipboard } from '../../services/clipboard';
 import { i18nService } from '../../services/i18n';
@@ -213,13 +214,16 @@ const UserMessageItem: React.FC<{
 
   const metadata = message.metadata as CoworkMessageMetadata | undefined;
   const isGoalSettingMessage = hasGoalSettingMessageMetadata(metadata);
+  const rawText = (typeof metadata?.[GuanjiaMessageMetadataKey.DisplayContent] === 'string' && metadata[GuanjiaMessageMetadataKey.DisplayContent])
+    ? (metadata[GuanjiaMessageMetadataKey.DisplayContent] as string)
+    : (message.content || '');
   const { text: displayContent, attachments: fileAttachments } = useMemo(
-    () => extractUserMessageFileAttachments(parseUserMessageForDisplay(message.content || '', {
+    () => extractUserMessageFileAttachments(parseUserMessageForDisplay(rawText, {
       localMediaAttachments: Array.isArray(metadata?.localMediaAttachments)
         ? metadata.localMediaAttachments
         : [],
     })),
-    [message.content, metadata?.localMediaAttachments]
+    [rawText, metadata?.localMediaAttachments]
   );
 
   const messageSkillIds = Array.isArray(metadata?.skillIds) ? metadata.skillIds : [];

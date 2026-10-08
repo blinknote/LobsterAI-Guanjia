@@ -403,7 +403,7 @@ export const PRESET_AGENTS: PresetAgent[] = [
       '4. **Never Hallucinate** — Say "I am not sure" when uncertain, and provide where to verify.\n' +
       '5. **Zero Memory Retention for Daily Chat** — Never persist daily transactions, orders, phone numbers, or credentials to memory. Clear on shift handover.\n' +
       '6. **No Independent Calculations** — Never calculate financial figures independently; only report verified figures calculated by Smart Butler.\n',
-    skillIds: ['web-search'],
+    skillIds: [],
   },
 ];
 

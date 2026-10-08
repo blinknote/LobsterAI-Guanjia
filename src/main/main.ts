@@ -245,6 +245,15 @@ import {
   readEnterpriseApiErrorCode,
   resolveEnterpriseMembershipRevocationSource,
 } from './enterpriseAccount/membershipRevocation';
+import { GuanjiaDesktopAuthCoordinator } from './guanjia/guanjiaDesktopAuthCoordinator';
+import {
+  canAccessGuanjiaSession,
+  filterAccessibleSessions,
+  handleGuanjiaNativeToolCall,
+  isSessionGuanjiaProtected,
+  registerGuanjiaNativeAssistantHandlers,
+} from './guanjia/guanjiaNativeAssistant';
+import { registerGuanjiaIpcHandlers } from './guanjia/ipcHandlers';
 import { setLanguage, t } from './i18n';
 import { IMGatewayConfig, IMGatewayManager } from './im';
 import {
@@ -294,7 +303,6 @@ import { registerSubscriptionTrialIpcHandlers } from './ipcHandlers/subscription
 import { LibraryIndexService } from './library/libraryIndexService';
 import { registerLibraryIpcHandlers } from './library/libraryIpc';
 import { LibraryLocalStore } from './library/libraryLocalStore';
-import { registerGuanjiaIpcHandlers } from './guanjia/ipcHandlers';
 import { AgentBrowserHost } from './libs/agentBrowserHost';
 import { showAgentBrowserHostMenu } from './libs/agentBrowserHostMenu';
 import {
@@ -491,6 +499,7 @@ import {
   preserveOpenClawConfigForStartupRecovery,
 } from './libs/openclawGatewayRepair';
 import { OpenClawImConfigRestartTracker } from './libs/openclawImConfigRestart';
+import { hasBundledOpenClawExtension } from './libs/openclawLocalExtensions';
 import {
   getCoworkParentSessionId,
   resolveCoworkSessionIdByOpenClawSessionKey,
@@ -2626,6 +2635,7 @@ const getOpenClawConfigSync = (): OpenClawConfigSync => {
         return getMcpRuntime().getResolvedServersCache();
       },
       getAskUserCallbackUrl: () => getMcpRuntime().getAskUserCallbackUrl(),
+      getGuanjiaCallbackUrl: () => getMcpRuntime().getGuanjiaCallbackUrl(),
       getMediaCallbackUrl: () => getMcpRuntime().getMediaCallbackUrl(),
       getDecisionCallbackUrl: () => getMcpRuntime().getDecisionCallbackUrl(),
       isDecisionModelActive: () => isDecisionModelFeatureActive(getStore()),
@@ -3515,7 +3525,7 @@ const bindCoworkRuntimeForwarder = (): void => {
     }
     console.log('[CoworkForwarder] forwarding message: sessionId=', sessionId, 'type=', messageType, 'windowCount=', windows.length);
     windows.forEach((win) => {
-      if (win.isDestroyed()) return;
+      if (win.isDestroyed() || !canAccessGuanjiaSession(sessionId)) return;
       try {
         win.webContents.send('cowork:stream:message', { sessionId, message: safeMessage, beforeMessageId });
       } catch (error) {
@@ -3530,7 +3540,7 @@ const bindCoworkRuntimeForwarder = (): void => {
       const safeContent = truncateIpcString(content, IPC_UPDATE_CONTENT_MAX_CHARS);
       const windows = BrowserWindow.getAllWindows();
       windows.forEach(win => {
-        if (win.isDestroyed()) return;
+        if (win.isDestroyed() || !canAccessGuanjiaSession(sessionId)) return;
         try {
           win.webContents.send('cowork:stream:messageUpdate', {
             sessionId,
@@ -3548,7 +3558,7 @@ const bindCoworkRuntimeForwarder = (): void => {
   runtime.on('sessionStatus', (sessionId: string, status: string) => {
     const windows = BrowserWindow.getAllWindows();
     windows.forEach(win => {
-      if (win.isDestroyed()) return;
+      if (win.isDestroyed() || !canAccessGuanjiaSession(sessionId)) return;
       try {
         win.webContents.send('cowork:stream:sessionStatus', { sessionId, status });
       } catch (error) {
@@ -3571,7 +3581,7 @@ const bindCoworkRuntimeForwarder = (): void => {
     };
     const windows = BrowserWindow.getAllWindows();
     windows.forEach(win => {
-      if (win.isDestroyed()) return;
+      if (win.isDestroyed() || !canAccessGuanjiaSession(sessionId)) return;
       try {
         win.webContents.send(CoworkIpcChannel.StreamBtwResult, {
           sessionId,
@@ -3586,7 +3596,7 @@ const bindCoworkRuntimeForwarder = (): void => {
   runtime.on('contextUsageUpdate', (sessionId: string, usage: unknown) => {
     const windows = BrowserWindow.getAllWindows();
     windows.forEach(win => {
-      if (win.isDestroyed()) return;
+      if (win.isDestroyed() || !canAccessGuanjiaSession(sessionId)) return;
       try {
         win.webContents.send('cowork:stream:contextUsage', { sessionId, usage });
       } catch (error) {
@@ -3598,7 +3608,7 @@ const bindCoworkRuntimeForwarder = (): void => {
   runtime.on('goalUpdate', (sessionId: string, goal: unknown) => {
     const windows = BrowserWindow.getAllWindows();
     windows.forEach(win => {
-      if (win.isDestroyed()) return;
+      if (win.isDestroyed() || !canAccessGuanjiaSession(sessionId)) return;
       try {
         win.webContents.send(CoworkIpcChannel.StreamGoal, { sessionId, goal });
       } catch (error) {
@@ -3613,7 +3623,7 @@ const bindCoworkRuntimeForwarder = (): void => {
       `[CoworkRuntime] forwarding context maintenance ${active ? 'start' : 'end'} for session ${sessionId} to ${windows.length} windows.`,
     );
     windows.forEach(win => {
-      if (win.isDestroyed()) return;
+      if (win.isDestroyed() || !canAccessGuanjiaSession(sessionId)) return;
       try {
         win.webContents.send('cowork:stream:contextMaintenance', { sessionId, active });
       } catch (error) {
@@ -3629,7 +3639,7 @@ const bindCoworkRuntimeForwarder = (): void => {
     const safeRequest = sanitizePermissionRequestForIpc(request);
     const windows = BrowserWindow.getAllWindows();
     windows.forEach(win => {
-      if (win.isDestroyed()) return;
+      if (win.isDestroyed() || !canAccessGuanjiaSession(sessionId)) return;
       try {
         win.webContents.send('cowork:stream:permission', { sessionId, request: safeRequest });
       } catch (error) {
@@ -3668,7 +3678,7 @@ const bindCoworkRuntimeForwarder = (): void => {
     getDesktopNotificationManager().handleComplete(sessionId);
     const windows = BrowserWindow.getAllWindows();
     windows.forEach(win => {
-      if (win.isDestroyed()) return;
+      if (win.isDestroyed() || !canAccessGuanjiaSession(sessionId)) return;
       win.webContents.send('cowork:stream:complete', { sessionId, claudeSessionId });
     });
     // If this session used a server model, notify renderer to refresh quota.
@@ -3676,7 +3686,7 @@ const bindCoworkRuntimeForwarder = (): void => {
       if (shouldRefreshServerQuotaForSession(sessionId)) {
         const windows = BrowserWindow.getAllWindows();
         windows.forEach(win => {
-          if (win.isDestroyed()) return;
+          if (win.isDestroyed() || !canAccessGuanjiaSession(sessionId)) return;
           win.webContents.send(AuthIpcChannel.QuotaChanged);
         });
       }
@@ -3698,7 +3708,7 @@ const bindCoworkRuntimeForwarder = (): void => {
     }
     const windows = BrowserWindow.getAllWindows();
     windows.forEach(win => {
-      if (win.isDestroyed()) return;
+      if (win.isDestroyed() || !canAccessGuanjiaSession(sessionId)) return;
       win.webContents.send('cowork:stream:error', { sessionId, error });
     });
     try {
@@ -6982,6 +6992,7 @@ if (!gotTheLock) {
   };
 
   const emitMediaTaskMessage = (sessionId: string, content: string, metadata?: Record<string, unknown>) => {
+    if (!canAccessGuanjiaSession(sessionId)) return;
     let message: CoworkMessage = {
       id: `media-task-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       type: 'system' as const,
@@ -7159,6 +7170,18 @@ if (!gotTheLock) {
     clearEnterpriseAccountContext(getStore());
     clearServerModelMetadata();
     resetAuthQuotaGateState();
+
+    try {
+      if (options.reason === AuthSessionChangeReason.EnterpriseMembershipRevoked) {
+        GuanjiaDesktopAuthCoordinator.getInstance().handleOfficialSessionInvalidated('企业账号资格已撤销');
+      } else if (options.reason === AuthSessionChangeReason.RefreshRejected) {
+        GuanjiaDesktopAuthCoordinator.getInstance().handleOfficialSessionInvalidated('官方登录刷新失败');
+      } else {
+        void GuanjiaDesktopAuthCoordinator.getInstance().handleOfficialLogout();
+      }
+    } catch (desktopAuthErr) {
+      console.warn('[DesktopAuth] failed to notify official auth cleanup:', desktopAuthErr);
+    }
 
     const quotaGateSyncScheduled = syncOpenClawConfigIfAuthQuotaGateChanged(previousQuotaGateState);
     if (!quotaGateSyncScheduled) {
@@ -7377,6 +7400,11 @@ if (!gotTheLock) {
       const quota = normalizeQuota(body.data.quota);
       const purchaseOffer = await activateLowCreditPurchaseOffer();
       syncOpenClawConfigIfAuthQuotaGateChanged(startingQuotaGateState);
+      try {
+        GuanjiaDesktopAuthCoordinator.getInstance().handleOfficialLoginOrAccountChanged(body.data.user);
+      } catch (authCoordErr) {
+        console.warn('[DesktopAuth] Failed to trigger silent SSO sync on exchange:', authCoordErr);
+      }
       return {
         success: true,
         user: body.data.user,
@@ -7416,6 +7444,11 @@ if (!gotTheLock) {
           console.warn('[Auth] failed to sync OpenClaw config after exchange rollback:', syncError);
         });
         console.warn('[Auth] rolled back local credentials after an incomplete exchange');
+        try {
+          GuanjiaDesktopAuthCoordinator.getInstance().handleOfficialExchangeRollback();
+        } catch (rollbackErr) {
+          console.warn('[DesktopAuth] Failed to trigger rollback in coordinator:', rollbackErr);
+        }
       }
       console.error('[Auth] exchange failed:', error);
       return {
@@ -9333,7 +9366,28 @@ if (!gotTheLock) {
 
 
   // Cowork IPC handlers
-  ipcMain.handle(
+  // Guanjia histories without a verified in-process identity mapping remain inaccessible.
+  const guardedCoworkHandle: typeof ipcMain.handle = (channel, listener) => {
+    ipcMain.handle(channel, (event, ...args) => {
+      const payload = args[0];
+      if (Array.isArray(payload) && payload.some(id => typeof id === 'string' && isSessionGuanjiaProtected(id))) {
+        return { success: false, error: '禁止通过通用入口批量修改管家业务会话' };
+      }
+      if (payload && typeof payload === 'object' && ['parentSessionId', 'sourceSessionId'].some(key => typeof payload[key] === 'string' && isSessionGuanjiaProtected(payload[key]))) {
+        return { success: false, error: '禁止通过通用入口派生管家业务会话' };
+      }
+      const id = typeof payload === 'string' ? payload : payload?.sessionId;
+      const restricted = payload?.agentId === AgentId.GuanjiaAssistant || (id && isSessionGuanjiaProtected(id));
+      if (restricted && (event.sender !== mainWindow?.webContents || event.senderFrame !== mainWindow?.webContents.mainFrame
+        || (id && !canAccessGuanjiaSession(id))
+        || (id && !['cowork:session:get', 'cowork:session:getMessages', 'cowork:session:contextUsage'].includes(channel))
+        || channel === 'cowork:session:start' || channel === 'cowork:session:continue')) {
+        return { success: false, error: '请使用当前业务身份的管家助手入口' };
+      }
+      return listener(event, ...args);
+    });
+  };
+  guardedCoworkHandle(
     'cowork:session:start',
     async (
       _event,
@@ -9585,7 +9639,7 @@ if (!gotTheLock) {
     },
   );
 
-  ipcMain.handle(
+  guardedCoworkHandle(
     'cowork:session:continue',
     async (
       _event,
@@ -9769,7 +9823,7 @@ if (!gotTheLock) {
     },
   );
 
-  ipcMain.handle(CoworkIpcChannel.SubmitBtw, async (
+  guardedCoworkHandle(CoworkIpcChannel.SubmitBtw, async (
     _event,
     options: CoworkBtwSubmitRequest,
   ): Promise<CoworkBtwSubmitResponse> => {
@@ -9847,7 +9901,7 @@ if (!gotTheLock) {
     }
   });
 
-  ipcMain.handle(CoworkIpcChannel.AbortBtw, async (
+  guardedCoworkHandle(CoworkIpcChannel.AbortBtw, async (
     _event,
     options: CoworkBtwAbortRequest,
   ): Promise<CoworkBtwAbortResponse> => {
@@ -9906,7 +9960,7 @@ if (!gotTheLock) {
     }
   });
 
-  ipcMain.handle(CoworkIpcChannel.SubmitSteer, async (
+  guardedCoworkHandle(CoworkIpcChannel.SubmitSteer, async (
     _event,
     options: { sessionId: string; text: string; clientSteerId: string },
   ) => {
@@ -10018,7 +10072,7 @@ if (!gotTheLock) {
     }
   });
 
-  ipcMain.handle(CoworkIpcChannel.GoalCommand, async (
+  guardedCoworkHandle(CoworkIpcChannel.GoalCommand, async (
     _event,
     options: { sessionId: string; command: string },
   ) => {
@@ -10061,7 +10115,7 @@ if (!gotTheLock) {
 
   const reviewSources = new WorkspaceReviewSourceStore(sessionId => getCoworkStore().getSession(sessionId, 0)?.cwd);
   const scopedReviews = new ScopedReviewStore(sessionId => getCoworkStore().getSession(sessionId, 0)?.cwd);
-  ipcMain.handle(ReviewIpc.Read, async (_event, input: ReviewScopeRequest) => {
+  guardedCoworkHandle(ReviewIpc.Read, async (_event, input: ReviewScopeRequest) => {
     if (!input || typeof input.sessionId !== 'string' || !Object.values(ReviewScope).includes(input.scope)) return null;
     const session = getCoworkStore().getSession(input.sessionId, 0);
     if (!session) return null;
@@ -10070,13 +10124,13 @@ if (!gotTheLock) {
     }
     return scopedReviews.create(input);
   });
-  ipcMain.handle(ReviewIpc.Source, (_event, input: ReviewSourceRequest) => {
+  guardedCoworkHandle(ReviewIpc.Source, (_event, input: ReviewSourceRequest) => {
     if (typeof input?.artifactId !== 'string' || typeof input.sessionId !== 'string' || !getCoworkStore().getSession(input.sessionId, 0)) return null;
     if (isScopedReview(input.artifactId)) return scopedReviews.readSource(input);
     return reviewSources.read(input);
   });
 
-  ipcMain.handle(CoworkIpcChannel.StopSession, async (_event, sessionId: string) => {
+  guardedCoworkHandle(CoworkIpcChannel.StopSession, async (_event, sessionId: string) => {
     try {
       const runtime = getCoworkEngineRouter();
       runtime.stopSession(sessionId);
@@ -10089,7 +10143,7 @@ if (!gotTheLock) {
     }
   });
 
-  ipcMain.handle(CoworkIpcChannel.MarkSessionViewed, async (_event, sessionId: string) => {
+  guardedCoworkHandle(CoworkIpcChannel.MarkSessionViewed, async (_event, sessionId: string) => {
     try {
       getDesktopNotificationManager().markSessionViewed(sessionId);
       return { success: true };
@@ -10102,7 +10156,7 @@ if (!gotTheLock) {
     }
   });
 
-  ipcMain.handle(CoworkIpcChannel.SetActiveSession, async (event, sessionId: string | null) => {
+  guardedCoworkHandle(CoworkIpcChannel.SetActiveSession, async (event, sessionId: string | null) => {
     if (!mainWindow || mainWindow.isDestroyed() || event.sender.id !== mainWindow.webContents.id) {
       return { success: false, error: 'Unknown renderer' };
     }
@@ -10120,7 +10174,7 @@ if (!gotTheLock) {
     }
   });
 
-  ipcMain.handle(
+  guardedCoworkHandle(
     CoworkIpcChannel.SeedNewUserWelcomeTask,
     async (_event, options: { title?: string; content?: string }) => {
       try {
@@ -10187,7 +10241,7 @@ if (!gotTheLock) {
     },
   );
 
-  ipcMain.handle(CoworkIpcChannel.OpenSessionFromNotificationReady, async event => {
+  guardedCoworkHandle(CoworkIpcChannel.OpenSessionFromNotificationReady, async event => {
     if (!mainWindow || mainWindow.isDestroyed() || event.sender.id !== mainWindow.webContents.id) {
       console.warn('[DesktopNotification] ignored notification open readiness from an unknown renderer');
       return { success: false, error: 'Unknown renderer' };
@@ -10199,7 +10253,7 @@ if (!gotTheLock) {
     return { success: true };
   });
 
-  ipcMain.handle(CoworkIpcChannel.DeleteSession, async (_event, sessionId: string) => {
+  guardedCoworkHandle(CoworkIpcChannel.DeleteSession, async (_event, sessionId: string) => {
     try {
       getCoworkEngineRouter().stopSession(sessionId);
       const coworkStoreInstance = getCoworkStore();
@@ -10238,7 +10292,7 @@ if (!gotTheLock) {
     }
   });
 
-  ipcMain.handle(CoworkIpcChannel.DeleteSessions, async (_event, sessionIds: string[]) => {
+  guardedCoworkHandle(CoworkIpcChannel.DeleteSessions, async (_event, sessionIds: string[]) => {
     try {
       const runtime = getCoworkEngineRouter();
       sessionIds.forEach(sessionId => {
@@ -10270,7 +10324,7 @@ if (!gotTheLock) {
     }
   });
 
-  ipcMain.handle(
+  guardedCoworkHandle(
     'cowork:session:pin',
     async (_event, options: { sessionId: string; pinned: boolean }) => {
       try {
@@ -10286,7 +10340,7 @@ if (!gotTheLock) {
     },
   );
 
-  ipcMain.handle(
+  guardedCoworkHandle(
     'cowork:session:rename',
     async (_event, options: { sessionId: string; title: string }) => {
       try {
@@ -10306,7 +10360,7 @@ if (!gotTheLock) {
     },
   );
 
-  ipcMain.handle(
+  guardedCoworkHandle(
     CoworkIpcChannel.ForkSession,
     async (
       _event,
@@ -10381,8 +10435,11 @@ if (!gotTheLock) {
     },
   );
 
-  ipcMain.handle('cowork:session:get', async (_event, sessionId: string) => {
+  guardedCoworkHandle('cowork:session:get', async (_event, sessionId: string) => {
     try {
+      if (!canAccessGuanjiaSession(sessionId)) {
+        return { success: false, error: 'Access denied: Guanjia session not authorized for current user' };
+      }
       const store = getCoworkStore();
       const session = store.getSession(sessionId);
       if (session) {
@@ -10404,7 +10461,7 @@ if (!gotTheLock) {
     }
   });
 
-  ipcMain.handle('cowork:session:remoteManaged', async (_event, sessionId: string) => {
+  guardedCoworkHandle('cowork:session:remoteManaged', async (_event, sessionId: string) => {
     try {
       const mapping = getIMGatewayManager()
         ?.getIMStore()
@@ -10419,7 +10476,7 @@ if (!gotTheLock) {
     }
   });
 
-  ipcMain.handle(
+  guardedCoworkHandle(
     'cowork:session:list',
     async (_event, options?: { limit?: number; offset?: number; agentId?: string; searchQuery?: string }) => {
       try {
@@ -10435,12 +10492,13 @@ if (!gotTheLock) {
         const total = searchQuery
           ? store.countSearchSessions({ query: searchQuery, agentId })
           : store.countSessions(agentId);
+        const filteredSessions = filterAccessibleSessions(sessions as Array<{ id: string; agent_id?: string | null }>);
         if (searchQuery) {
           console.debug(
             `[CoworkIPC] searched sessions; query length ${searchQuery.length}, returned ${sessions.length} of ${total} from offset ${offset} in ${Date.now() - startedAt}ms.`,
           );
         }
-        return { success: true, sessions, hasMore: offset + sessions.length < total };
+        return { success: true, sessions: filteredSessions, hasMore: offset + filteredSessions.length < total };
       } catch (error) {
         console.error('[CoworkIPC] failed to list sessions:', error);
         return {
@@ -10451,7 +10509,7 @@ if (!gotTheLock) {
     },
   );
 
-  ipcMain.handle(
+  guardedCoworkHandle(
     'cowork:session:getMessages',
     async (_event, options: {
       sessionId: string;
@@ -10459,6 +10517,9 @@ if (!gotTheLock) {
       offset?: number;
     }) => {
       try {
+        if (!canAccessGuanjiaSession(options.sessionId)) {
+          return { success: false, error: 'Access denied: Guanjia session not authorized for current user' };
+        }
         const { sessionId, limit = COWORK_MESSAGE_PAGE_SIZE, offset = 0 } = options;
         const store = getCoworkStore();
         const total = store.countSessionMessages(sessionId);
@@ -10479,7 +10540,7 @@ if (!gotTheLock) {
     },
   );
 
-  ipcMain.handle(
+  guardedCoworkHandle(
     CoworkIpcChannel.GetSessionSearchMessages,
     async (_event, options: {
       sessionId: string;
@@ -10520,7 +10581,7 @@ if (!gotTheLock) {
     },
   );
 
-  ipcMain.handle(CoworkIpcChannel.GetSessionMessageRailIndex, async (_event, sessionId: string) => {
+  guardedCoworkHandle(CoworkIpcChannel.GetSessionMessageRailIndex, async (_event, sessionId: string) => {
     try {
       const store = getCoworkStore();
       const items = store.getSessionMessageRailIndex(sessionId);
@@ -10537,7 +10598,32 @@ if (!gotTheLock) {
     }
   });
 
-  ipcMain.handle('cowork:session:contextUsage', async (_event, sessionId: string) => {
+  getMcpRuntime().setGuanjiaToolHandler(handleGuanjiaNativeToolCall);
+  registerGuanjiaNativeAssistantHandlers({
+    getMainWindow: () => mainWindow,
+    getCoworkStore,
+    getEngineRouter: () => getCoworkEngineRouter(),
+    ensureEngineRunning: () => ensureOpenClawRunningForCowork(),
+    ensureModelReady: () => {
+      const modelRef = resolveCoworkRunModelRef({ agentId: AgentId.GuanjiaAssistant });
+      return modelRef ? ensureServerModelReadyForRun(modelRef) : Promise.resolve({ allowed: false, error: '请先配置可用模型' });
+    },
+    getWorkspaceRoot: () => path.join(getOpenClawEngineManager().getStateDir(), 'guanjia-native-sessions'),
+    isBusinessBridgeReady: () => {
+      if (!getMcpRuntime().getGuanjiaCallbackUrl() || !hasBundledOpenClawExtension('guanjia-tools')) return false;
+      try {
+        const config = JSON.parse(fs.readFileSync(getOpenClawEngineManager().getConfigPath(), 'utf8'));
+        const entry = config.agents?.entries?.[AgentId.GuanjiaAssistant];
+        const plugin = config.plugins?.entries?.['guanjia-tools'];
+        const allow = entry?.tools?.allow;
+        return plugin?.enabled === true && !!plugin.config?.callbackUrl && entry?.contextInjection === 'never'
+          && entry?.memory?.search?.enabled === false && entry?.tools?.elevated?.enabled === false
+          && Array.isArray(allow) && allow.length === 4 && ['guanjia_get_context', 'guanjia_list_skills', 'guanjia_execute_skill', 'guanjia_get_run_status'].every(name => allow.includes(name));
+      } catch { return false; }
+    },
+  });
+
+  guardedCoworkHandle('cowork:session:contextUsage', async (_event, sessionId: string) => {
     try {
       const usage = await getCoworkEngineRouter().getContextUsage(sessionId);
       return {
@@ -10554,7 +10640,7 @@ if (!gotTheLock) {
     }
   });
 
-  ipcMain.handle('cowork:session:compactContext', async (_event, sessionId: string) => {
+  guardedCoworkHandle('cowork:session:compactContext', async (_event, sessionId: string) => {
     try {
       const result = await getCoworkEngineRouter().compactContext(sessionId);
       return { success: true, ...result };
@@ -10593,7 +10679,7 @@ if (!gotTheLock) {
     syncOpenClawConfig,
   });
 
-  ipcMain.handle(
+  guardedCoworkHandle(
     'cowork:session:exportResultImage',
     async (
       event,
@@ -10620,7 +10706,7 @@ if (!gotTheLock) {
     },
   );
 
-  ipcMain.handle(
+  guardedCoworkHandle(
     'cowork:session:captureImageChunk',
     async (
       event,
@@ -10652,7 +10738,7 @@ if (!gotTheLock) {
     },
   );
 
-  ipcMain.handle(
+  guardedCoworkHandle(
     'cowork:session:saveResultImage',
     async (
       event,
@@ -10682,7 +10768,7 @@ if (!gotTheLock) {
     },
   );
 
-  ipcMain.handle(
+  guardedCoworkHandle(
     'cowork:session:exportText',
     async (
       event,
@@ -10741,7 +10827,7 @@ if (!gotTheLock) {
     getCoworkEngineRouter,
   });
 
-  ipcMain.handle(CoworkIpcChannel.CancelMediaTask, async (_event, taskId: string) => {
+  guardedCoworkHandle(CoworkIpcChannel.CancelMediaTask, async (_event, taskId: string) => {
     try {
       const requestAccountScope = getCurrentMediaAccountScope();
       if (requestAccountScope === null) {
@@ -10773,9 +10859,9 @@ if (!gotTheLock) {
     }
   });
 
-  ipcMain.handle(CoworkIpcChannel.GetPendingQuestions, () => getCoworkEngineRouter().getPendingQuestions());
+  guardedCoworkHandle(CoworkIpcChannel.GetPendingQuestions, () => getCoworkEngineRouter().getPendingQuestions());
 
-  ipcMain.handle(CoworkIpcChannel.PermissionRespond, async (_event, options: {
+  guardedCoworkHandle(CoworkIpcChannel.PermissionRespond, async (_event, options: {
     requestId: string;
     result: PermissionResult;
   }) => {
@@ -10829,7 +10915,7 @@ if (!gotTheLock) {
     },
   );
 
-  ipcMain.handle('cowork:config:get', async () => {
+  guardedCoworkHandle('cowork:config:get', async () => {
     try {
       const config = getCoworkStore().getConfig();
       return { success: true, config };
@@ -10841,7 +10927,7 @@ if (!gotTheLock) {
     }
   });
 
-  ipcMain.handle(CoworkIpcChannel.TempStorageUsage, async () => {
+  guardedCoworkHandle(CoworkIpcChannel.TempStorageUsage, async () => {
     try {
       const preview = await getCoworkTempJanitor().preview();
       return { success: true, ...preview };
@@ -10853,7 +10939,7 @@ if (!gotTheLock) {
     }
   });
 
-  ipcMain.handle(
+  guardedCoworkHandle(
     CoworkIpcChannel.TempStorageClean,
     async (_event, options?: { cwds?: string[] }) => {
       try {
@@ -10871,7 +10957,7 @@ if (!gotTheLock) {
     },
   );
 
-  ipcMain.handle(OpenClawSessionPolicyIpc.Get, async () => {
+  guardedCoworkHandle(OpenClawSessionPolicyIpc.Get, async () => {
     try {
       const config = loadOpenClawSessionPolicyConfig(getStore());
       return { success: true, config };
@@ -10883,7 +10969,7 @@ if (!gotTheLock) {
     }
   });
 
-  ipcMain.handle(OpenClawSessionPolicyIpc.Set, async (_event, config: unknown) => {
+  guardedCoworkHandle(OpenClawSessionPolicyIpc.Set, async (_event, config: unknown) => {
     try {
       const saved = saveOpenClawSessionPolicyConfig(getStore(), config);
       // Persist first and let the caller decide when to perform a unified sync/restart.
@@ -10900,7 +10986,7 @@ if (!gotTheLock) {
     }
   });
 
-  ipcMain.handle(OpenClawSessionIpc.Patch, async (_event, input: unknown) => {
+  guardedCoworkHandle(OpenClawSessionIpc.Patch, async (_event, input: unknown) => {
     try {
       if (!input || typeof input !== 'object' || Array.isArray(input)) {
         throw new Error('Invalid OpenClaw session patch input.');
@@ -10955,7 +11041,7 @@ if (!gotTheLock) {
     }
   });
 
-  ipcMain.handle(
+  guardedCoworkHandle(
     'cowork:memory:listEntries',
     async (
       _event,
@@ -11002,7 +11088,7 @@ if (!gotTheLock) {
       }
     },
   );
-  ipcMain.handle(
+  guardedCoworkHandle(
     'cowork:memory:createEntry',
     async (
       _event,
@@ -11026,7 +11112,7 @@ if (!gotTheLock) {
       }
     },
   );
-  ipcMain.handle(
+  guardedCoworkHandle(
     'cowork:memory:updateEntry',
     async (
       _event,
@@ -11058,7 +11144,7 @@ if (!gotTheLock) {
       }
     },
   );
-  ipcMain.handle(
+  guardedCoworkHandle(
     'cowork:memory:deleteEntry',
     async (
       _event,
@@ -11080,7 +11166,7 @@ if (!gotTheLock) {
       }
     },
   );
-  ipcMain.handle(CoworkIpcChannel.MemoryReadRaw, async () => {
+  guardedCoworkHandle(CoworkIpcChannel.MemoryReadRaw, async () => {
     try {
       const filePath = resolveMemoryFilePath(
         getMainAgentWorkspacePath(getOpenClawEngineManager().getStateDir()),
@@ -11093,7 +11179,7 @@ if (!gotTheLock) {
       };
     }
   });
-  ipcMain.handle(CoworkIpcChannel.MemoryWriteRaw, async (_event, input: { content: string }) => {
+  guardedCoworkHandle(CoworkIpcChannel.MemoryWriteRaw, async (_event, input: { content: string }) => {
     try {
       if (typeof input?.content !== 'string') {
         return { success: false, error: 'Memory content is required' };
@@ -11110,7 +11196,7 @@ if (!gotTheLock) {
       };
     }
   });
-  ipcMain.handle('cowork:memory:getStats', async () => {
+  guardedCoworkHandle('cowork:memory:getStats', async () => {
     try {
       const filePath = resolveMemoryFilePath(
         getMainAgentWorkspacePath(getOpenClawEngineManager().getStateDir()),
@@ -11135,7 +11221,7 @@ if (!gotTheLock) {
     }
   });
   // ── Dreaming content display ──────────────────────────────────────────
-  ipcMain.handle('cowork:dreaming:status', async () => {
+  guardedCoworkHandle('cowork:dreaming:status', async () => {
     try {
       const gwClient = openClawRuntimeAdapter?.getGatewayClient();
       if (!gwClient) {
@@ -11158,7 +11244,7 @@ if (!gotTheLock) {
       };
     }
   });
-  ipcMain.handle('cowork:dreaming:diary', async () => {
+  guardedCoworkHandle('cowork:dreaming:diary', async () => {
     try {
       const gwClient = openClawRuntimeAdapter?.getGatewayClient();
       if (!gwClient) {
@@ -11178,7 +11264,7 @@ if (!gotTheLock) {
     }
   });
 
-  ipcMain.handle(CoworkIpcChannel.BootstrapRead, async (
+  guardedCoworkHandle(CoworkIpcChannel.BootstrapRead, async (
     _event,
     filename: string,
     options?: { agentId?: string },
@@ -11195,7 +11281,7 @@ if (!gotTheLock) {
       };
     }
   });
-  ipcMain.handle(CoworkIpcChannel.BootstrapWrite, async (
+  guardedCoworkHandle(CoworkIpcChannel.BootstrapWrite, async (
     _event,
     filename: string,
     content: string,
@@ -11264,7 +11350,7 @@ if (!gotTheLock) {
     };
   }
 
-  ipcMain.handle(CoworkIpcChannel.ConfigSet, async (_event, config: {
+  guardedCoworkHandle(CoworkIpcChannel.ConfigSet, async (_event, config: {
     workingDirectory?: string;
     executionMode?: 'auto' | 'local' | 'sandbox';
     agentEngine?: CoworkAgentEngine;
@@ -11412,6 +11498,11 @@ if (!gotTheLock) {
     getCoworkStore,
     getMainWindow: () => mainWindow,
   });
+
+  GuanjiaDesktopAuthCoordinator.getInstance().setOfficialAccessors(
+    () => getAuthTokens()?.accessToken || null,
+    () => getAuthUser(),
+  );
 
   // ==================== Scheduled Task IPC Handlers (OpenClaw) ====================
 
@@ -14939,6 +15030,15 @@ if (!gotTheLock) {
       cachedSubscriptionStatus = warmupResult.subscriptionStatus;
       cachedMediaGenerationEntitled = warmupResult.mediaGenerationEntitled;
       profiler.measure('startupCacheWarmup');
+
+      // Guanjia desktop auth startup restoration (verified once on startup)
+      try {
+        void GuanjiaDesktopAuthCoordinator.getInstance().syncDesktopAuthSilent().catch(err => {
+          console.warn('[DesktopAuth] Startup restoration error:', err);
+        });
+      } catch {
+        // ignore startup coordinator error
+      }
     }
 
     // Agent model migration — runs after cache warmup so resolveMatchedProvider

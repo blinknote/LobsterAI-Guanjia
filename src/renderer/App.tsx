@@ -71,6 +71,9 @@ import { apiService } from './services/api';
 import { authService } from './services/auth';
 import { configService } from './services/config';
 import { coworkService } from './services/cowork';
+import type { OpenAssistantParams } from './services/guanjiaNativeService';
+import { guanjiaNativeService } from './services/guanjiaNativeService';
+import { useGuanjiaSession } from './services/guanjiaSession';
 import { i18nService } from './services/i18n';
 import {
   beginLatestAsyncRequest,
@@ -225,8 +228,36 @@ const App: React.FC = () => {
     'cowork' | 'skills' | 'scheduledTasks' | 'kits' | 'mcp' | 'library' | 'guanjia'
   >('cowork');
   const [isGuanjiaAssistantOpen, setIsGuanjiaAssistantOpen] = useState(false);
-  const [guanjiaStoreName, setGuanjiaStoreName] = useState('青盛堂旗舰店');
-  const [guanjiaTodoCount, setGuanjiaTodoCount] = useState(3);
+  const guanjiaSession = useGuanjiaSession();
+  const [guanjiaStoreNameOverride, setGuanjiaStoreNameOverride] = useState<string | null>(null);
+  const [guanjiaTodoCount, setGuanjiaTodoCount] = useState<number | null>(null);
+  const [pendingOpenAssistantPayload, setPendingOpenAssistantPayload] = useState<OpenAssistantParams | null>(null);
+  const prevGuanjiaGenRef = useRef(guanjiaSession.generation);
+  const prevGuanjiaStoreIdRef = useRef(guanjiaSession.store?.id);
+
+  // 会话 generation、门店切换或登出时立即清空 override 和待办数，杜绝旧身份与门店残留
+  useEffect(() => {
+    const genChanged = prevGuanjiaGenRef.current !== guanjiaSession.generation;
+    const storeChanged = prevGuanjiaStoreIdRef.current !== guanjiaSession.store?.id;
+    const isLoggedOut = guanjiaSession.status === 'unauthenticated' || guanjiaSession.status === 'expired';
+
+    if (genChanged || storeChanged || isLoggedOut) {
+      prevGuanjiaGenRef.current = guanjiaSession.generation;
+      prevGuanjiaStoreIdRef.current = guanjiaSession.store?.id;
+      setGuanjiaStoreNameOverride(null);
+      setGuanjiaTodoCount(null);
+      setPendingOpenAssistantPayload(null);
+    }
+  }, [guanjiaSession.generation, guanjiaSession.store?.id, guanjiaSession.status]);
+
+  const resolvedGuanjiaStoreName =
+    guanjiaSession.status === 'authenticated' && guanjiaSession.store?.name
+      ? guanjiaSession.store.name
+      : guanjiaStoreNameOverride;
+  const resolvedGuanjiaUserName =
+    guanjiaSession.status === 'authenticated'
+      ? guanjiaSession.user?.name || guanjiaSession.user?.employeeNo || null
+      : null;
   const [ariaLiveAnnouncement, setAriaLiveAnnouncement] = useState('');
   const guanjiaFocusRegionRef = useRef<'main' | 'topbar' | 'sidebar'>('sidebar');
   const [libraryNavigationRequest, setLibraryNavigationRequest] = useState<{
@@ -2058,6 +2089,18 @@ const App: React.FC = () => {
     return unsubscribe;
   }, []);
 
+  // 监听内嵌网页或主进程通过原生能力派发的打开管家助手事件
+  useEffect(() => {
+    const unsubscribe = guanjiaNativeService.onOpenAssistant((payload) => {
+      setMainView('guanjia');
+      setIsGuanjiaAssistantOpen(true);
+      setPendingOpenAssistantPayload(payload);
+    });
+    return () => {
+      unsubscribe();
+    };
+  }, []);
+
   // Tell the main process which session is currently visible so desktop
   // notifications for that session can be suppressed and cleared.
   useEffect(() => {
@@ -2339,7 +2382,7 @@ const App: React.FC = () => {
             onShowLibrary={handleShowLibrary}
             onShowGuanjia={handleShowGuanjia}
             onOpenGuanjiaAssistant={handleOpenGuanjiaAssistant}
-            guanjiaStoreName={authUser?.shopName || guanjiaStoreName}
+            guanjiaStoreName={resolvedGuanjiaStoreName}
             guanjiaTodoCount={guanjiaTodoCount}
             onNewChat={handleNewChat}
             isCollapsed={isSidebarCollapsed}
@@ -2456,13 +2499,15 @@ const App: React.FC = () => {
                   onToggleSidebar={handleToggleSidebar}
                   isAssistantOpen={isGuanjiaAssistantOpen}
                   onToggleAssistant={handleToggleGuanjiaAssistant}
-                  storeName={authUser?.shopName || guanjiaStoreName}
-                  currentUser={authUser?.nickname || '李店长'}
+                  storeName={resolvedGuanjiaStoreName}
+                  currentUser={resolvedGuanjiaUserName}
                   todoCount={guanjiaTodoCount}
                   iframeUrl="https://guanjia.qszy.me/"
-                  onStoreNameChange={setGuanjiaStoreName}
+                  onStoreNameChange={setGuanjiaStoreNameOverride}
                   onTodoCountChange={setGuanjiaTodoCount}
-                  isVisible={mainView === 'guanjia'}
+                  openAssistantPayload={pendingOpenAssistantPayload}
+                  onClearOpenAssistantPayload={() => setPendingOpenAssistantPayload(null)}
+                  isVisible={mainView === 'guanjia' && !isOverlayActive}
                 />
               </div>
             </div>

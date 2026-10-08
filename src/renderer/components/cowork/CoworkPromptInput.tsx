@@ -20,6 +20,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom';
 import { useDispatch, useSelector } from 'react-redux';
 
+import { AgentId } from '../../../shared/agent/constants';
 import {
   CoworkBtwCommandValidationError,
   createCoworkBtwRunId,
@@ -519,6 +520,7 @@ const CoworkPromptInput = React.forwardRef<CoworkPromptInputRef, CoworkPromptInp
     );
     const queuedMediaSelection = useSelector((state: RootState) => state.cowork.mediaSelection[draftKey]);
     const currentAgentId = useSelector((state: RootState) => state.agent.currentAgentId);
+    const isGuanjia = currentAgentId === AgentId.GuanjiaAssistant || contextAgentId === AgentId.GuanjiaAssistant;
     const agents = useSelector((state: RootState) => state.agent.agents);
     const coworkAgentEngine = useSelector((state: RootState) => state.cowork.config.agentEngine);
     const availableModels = useSelector((state: RootState) => state.model.availableModels);
@@ -2884,7 +2886,7 @@ const CoworkPromptInput = React.forwardRef<CoworkPromptInputRef, CoworkPromptInp
     return () => window.removeEventListener(ConfigServiceEvent.Updated, syncFromConfig);
   }, []);
 
-  const largeModelSelector = showModelSelector ? (
+  const largeModelSelector = showModelSelector && !isGuanjia ? (
     <div className="flex flex-col items-start gap-1">
       <ModelSelector
         compact={useHomeContextLayout}
@@ -3035,6 +3037,7 @@ const CoworkPromptInput = React.forwardRef<CoworkPromptInputRef, CoworkPromptInp
             <PaperClipIcon className="h-5 w-5 shrink-0 text-secondary" />
             <span className="min-w-0 truncate">{i18nService.t('coworkAddFile')}</span>
           </button>
+          {!isGuanjia && (
           <button
             ref={skillMenuItemRef}
             type="button"
@@ -3052,6 +3055,7 @@ const CoworkPromptInput = React.forwardRef<CoworkPromptInputRef, CoworkPromptInp
             <span className="min-w-0 flex-1 truncate">{i18nService.t('useSkill')}</span>
             <ChevronRightIcon className="h-4 w-4 shrink-0 text-secondary" />
           </button>
+          )}
           <button
             type="button"
             onClick={() => {

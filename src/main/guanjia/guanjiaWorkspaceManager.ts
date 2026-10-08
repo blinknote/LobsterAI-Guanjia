@@ -2,18 +2,14 @@ import * as crypto from 'crypto';
 import { app, BrowserWindow, Rectangle, session, WebContentsView } from 'electron';
 import path from 'path';
 
-import { AgentId } from '../../shared/agent/constants';
 import type { CoworkStore } from '../coworkStore';
 import {
-  FINANCIAL_ACTION_TYPES,
-  FinancialDetails,
   GUANJIA_WORKSPACE_PARTITION,
   GuanjiaActionRequest,
   GuanjiaActionResult,
   GuanjiaFinancialAuditLog,
   GuanjiaSsoCredentials,
   GuanjiaWorkspaceContext,
-  isFinancialAction,
 } from './types';
 
 export const DEFAULT_GUANJIA_URL = 'https://guanjia.qszy.me/';
@@ -26,6 +22,7 @@ export class GuanjiaWorkspaceManager {
   private isVisible: boolean = false;
   private defaultUrl: string = DEFAULT_GUANJIA_URL;
 
+  private credentialEpoch = 0;
   private currentSsoCredentials: GuanjiaSsoCredentials | null = null;
   private auditLogs: GuanjiaFinancialAuditLog[] = [];
   private coworkStore: CoworkStore | null = null;
@@ -95,9 +92,7 @@ export class GuanjiaWorkspaceManager {
       return this.view;
     }
 
-    const preloadPath = app.isPackaged
-      ? path.join(__dirname, 'guanjiaPreload.js')
-      : path.join(__dirname, '../dist-electron/guanjiaPreload.js');
+    const preloadPath = path.join(__dirname, 'guanjiaPreload.js');
 
     this.view = new WebContentsView({
       webPreferences: {
@@ -106,6 +101,7 @@ export class GuanjiaWorkspaceManager {
         contextIsolation: true,
         nodeIntegration: false,
         spellcheck: false,
+        sandbox: true,
       },
     });
 
@@ -114,7 +110,30 @@ export class GuanjiaWorkspaceManager {
       console.warn(`[GuanjiaWorkspaceView] Page load failed (${errorCode}): ${errorDescription}`);
     });
 
+    // 导航安全看门狗：防止意外跳转到外部非受信站点导致凭据泄露
+    this.view.webContents.on('will-navigate', (event, navigationUrl) => {
+      let isTrustedOrigin = false;
+      try {
+        const trustedOrigin = new URL(this.defaultUrl || DEFAULT_GUANJIA_URL).origin;
+        isTrustedOrigin = new URL(navigationUrl).origin === trustedOrigin;
+      } catch {
+        isTrustedOrigin = false;
+      }
+      if (!isTrustedOrigin) {
+        console.warn(`[GuanjiaWorkspaceManager] Blocked untrusted navigation to: ${navigationUrl}`);
+        event.preventDefault();
+      }
+    });
+
     return this.view;
+  }
+
+  /**
+   * 检查给定 WebContents 是否为当前智慧管家 WebContentsView
+   */
+  public isGuanjiaWebContents(wc: { id?: number } | null | undefined): boolean {
+    if (!this.view || this.view.webContents.isDestroyed() || !wc) return false;
+    return this.view.webContents.id === wc.id;
   }
 
   /**
@@ -135,9 +154,20 @@ export class GuanjiaWorkspaceManager {
     view.setVisible(true);
     this.isVisible = true;
 
-    const targetUrl = initialUrl || this.defaultUrl;
-    if (targetUrl && (view.webContents.getURL() !== targetUrl || view.webContents.getURL() === 'about:blank')) {
-      view.webContents.loadURL(targetUrl);
+    const currentUrl = view.webContents.getURL();
+    const isFirstLoad = !currentUrl || currentUrl === 'about:blank';
+
+    if (initialUrl) {
+      if (currentUrl !== initialUrl) {
+        if (!this.isTrustedUrl(initialUrl)) throw new Error('不可信的管家地址');
+        void view.webContents.loadURL(initialUrl);
+      }
+    } else if (isFirstLoad) {
+      const targetUrl = this.defaultUrl;
+      if (targetUrl) {
+        if (!this.isTrustedUrl(targetUrl)) throw new Error('不可信的管家地址');
+        void view.webContents.loadURL(targetUrl);
+      }
     }
   }
 
@@ -160,7 +190,7 @@ export class GuanjiaWorkspaceManager {
 
   public showView(window?: BrowserWindow, bounds?: Rectangle): void {
     const targetWindow = window || this.attachedWindow;
-    if (!targetWindow) return;
+    if (!targetWindow) throw new Error('Untrusted origin');
     const targetBounds = bounds || this.currentBounds;
     this.attachView(targetWindow, targetBounds);
   }
@@ -173,9 +203,18 @@ export class GuanjiaWorkspaceManager {
   }
 
   public setDefaultUrl(url: string): void {
-    if (url && typeof url === 'string') {
-      this.defaultUrl = url.trim();
-    }
+    const parsed = new URL(url);
+    if (parsed.protocol !== 'https:' || parsed.origin !== new URL(DEFAULT_GUANJIA_URL).origin || parsed.username || parsed.password) throw new Error('不可信的管家地址');
+    this.defaultUrl = parsed.toString();
+  }
+
+  public isTrustedUrl(url: string): boolean {
+    try { const parsed = new URL(url); return parsed.protocol === 'https:' && parsed.origin === new URL(DEFAULT_GUANJIA_URL).origin && !parsed.username && !parsed.password; } catch { return false; }
+  }
+
+  public async getRestorableToken(): Promise<string | null> {
+    const cookies = await session.fromPartition(GUANJIA_WORKSPACE_PARTITION).cookies.get({ url: this.defaultUrl, name: 'guanjia_token' });
+    return cookies.find((cookie) => cookie.secure && cookie.value)?.value || null;
   }
 
   public getDefaultUrl(): string {
@@ -228,6 +267,7 @@ export class GuanjiaWorkspaceManager {
   // SSO 凭证托管
   // =========================================================================
   public setSsoCredentials(credentials: GuanjiaSsoCredentials): void {
+    ++this.credentialEpoch;
     this.currentSsoCredentials = { ...credentials };
   }
 
@@ -236,81 +276,60 @@ export class GuanjiaWorkspaceManager {
   }
 
   public clearSsoCredentials(): void {
+    ++this.credentialEpoch;
     this.currentSsoCredentials = null;
   }
 
   /**
-   * 将凭证注入 persist:guanjia-workspace 分区的 Cookie 和当前活跃视图的 Storage
+   * 将凭证注入 persist:guanjia-workspace 当前活跃受信视图的 sessionStorage (不写入 Cookie，不写入 localStorage)
    */
-  public async injectSessionCredentials(credentials: GuanjiaSsoCredentials): Promise<void> {
+  public async injectSessionCredentials(
+    credentials: GuanjiaSsoCredentials,
+    hostGeneration?: number,
+    operationId?: string,
+  ): Promise<void> {
     this.setSsoCredentials(credentials);
+    const epoch = this.credentialEpoch;
 
-    // 1. 在 session 中设置 Cookie
-    try {
-      const ses = session.fromPartition(GUANJIA_WORKSPACE_PARTITION);
-      const targetUrl = this.defaultUrl || DEFAULT_GUANJIA_URL;
-      let cookieUrl: string;
-      let hostname: string;
-      try {
-        const parsedUrl = new URL(targetUrl);
-        cookieUrl = parsedUrl.origin;
-        hostname = parsedUrl.hostname;
-      } catch {
-        const fallbackUrl = new URL(DEFAULT_GUANJIA_URL);
-        cookieUrl = fallbackUrl.origin;
-        hostname = fallbackUrl.hostname;
-      }
-
-      const cookieItems = [
-        { name: 'guanjia_token', value: credentials.token },
-        { name: 'token', value: credentials.token },
-        { name: 'guanjia_sso_token', value: credentials.token },
-      ];
-
-      if (ses && ses.cookies && typeof ses.cookies.set === 'function') {
-        for (const item of cookieItems) {
-          try {
-            await ses.cookies.set({
-              url: cookieUrl,
-              name: item.name,
-              value: item.value,
-              domain: hostname,
-              path: '/',
-              secure: cookieUrl.startsWith('https://'),
-              httpOnly: false,
-            });
-          } catch (e) {
-            console.warn(`[GuanjiaWorkspaceManager] Failed to set cookie ${item.name}:`, e);
-          }
-        }
-      }
-    } catch (err) {
-      console.warn('[GuanjiaWorkspaceManager] Failed to inject cookies into session:', err);
-    }
-
-    // 2. 如果当前已经存在活跃视图，直接注入到当前页面的 Storage
+    // 仅当处于可信来源时，注入到当前页面的 sessionStorage
     if (this.view && !this.view.webContents.isDestroyed()) {
       try {
-        await this.view.webContents.executeJavaScript(`
-          try {
-            if (window.localStorage) {
-              window.localStorage.setItem('guanjia_token', ${JSON.stringify(credentials.token)});
-              window.localStorage.setItem('guanjia_sso_token', ${JSON.stringify(credentials.token)});
-              window.localStorage.setItem('token', ${JSON.stringify(credentials.token)});
-              window.localStorage.setItem('guanjia_user_id', ${JSON.stringify(credentials.userId)});
-              window.localStorage.setItem('guanjia_shop_id', ${JSON.stringify(credentials.shopId)});
-              window.localStorage.setItem('guanjia_shop_name', ${JSON.stringify(credentials.shopName)});
-              window.localStorage.setItem('guanjia_user_role', ${JSON.stringify(credentials.role)});
-            }
-            if (window.sessionStorage) {
-              window.sessionStorage.setItem('guanjia_token', ${JSON.stringify(credentials.token)});
-              window.sessionStorage.setItem('token', ${JSON.stringify(credentials.token)});
-              window.sessionStorage.setItem('guanjia_sso_token', ${JSON.stringify(credentials.token)});
-            }
-          } catch (e) {}
-        `);
-      } catch (err) {
-        // 当前页面未加载或者处于空白页，忽略
+        const currentUrl = this.view.webContents.getURL();
+        const targetOrigin = new URL(this.defaultUrl || DEFAULT_GUANJIA_URL).origin;
+        let isTrustedOrigin = false;
+        try {
+          isTrustedOrigin = new URL(currentUrl).origin === targetOrigin;
+        } catch {
+          isTrustedOrigin = false;
+        }
+
+        if (isTrustedOrigin) {
+          if (epoch !== this.credentialEpoch) return;
+          const gen = hostGeneration ?? 0;
+          const readyDetail = JSON.stringify({
+            hostGeneration: gen,
+            ...(operationId ? { operationId } : {}),
+          });
+          await this.view.webContents.executeJavaScript(`
+            (() => {
+              try {
+                if (window.__guanjia_credential_epoch && window.__guanjia_credential_epoch > ${epoch}) return;
+                window.__guanjia_credential_epoch = ${epoch};
+                if (window.sessionStorage) {
+                  if (location.origin !== ${JSON.stringify(new URL(this.defaultUrl).origin)}) throw new Error('Untrusted origin');
+                  window.sessionStorage.setItem('guanjia_token', ${JSON.stringify(credentials.token)});
+                  if (${JSON.stringify(credentials.shopId)}) window.sessionStorage.setItem('guanjia_store_id', ${JSON.stringify(credentials.shopId)});
+                  else window.sessionStorage.removeItem('guanjia_store_id');
+                  if (${JSON.stringify(credentials.storeCode || '')}) window.sessionStorage.setItem('guanjia_store_code', ${JSON.stringify(credentials.storeCode || '')});
+                  else window.sessionStorage.removeItem('guanjia_store_code');
+                  window.dispatchEvent(new CustomEvent('guanjia:host-session-ready', { detail: ${readyDetail} }));
+                }
+              } catch (e) {}
+            })();
+          `);
+        }
+      } catch {
+        throw new Error('内嵌凭据同步失败');
       }
     }
   }
@@ -318,8 +337,9 @@ export class GuanjiaWorkspaceManager {
   /**
    * 清除 persist:guanjia-workspace 分区的凭据、Cookies 以及 Storage
    */
-  public async clearSessionCredentials(): Promise<void> {
+  public async clearSessionCredentials(hostGeneration?: number): Promise<void> {
     this.clearSsoCredentials();
+    const epoch = this.credentialEpoch;
 
     try {
       const ses = session.fromPartition(GUANJIA_WORKSPACE_PARTITION);
@@ -335,6 +355,7 @@ export class GuanjiaWorkspaceManager {
         const cookieNames = ['guanjia_token', 'token', 'guanjia_sso_token'];
         for (const name of cookieNames) {
           try {
+            if (epoch !== this.credentialEpoch) return;
             await ses.cookies.remove(cookieUrl, name);
           } catch {
             // 忽略
@@ -345,25 +366,36 @@ export class GuanjiaWorkspaceManager {
       console.warn('[GuanjiaWorkspaceManager] Failed to clear session cookies:', err);
     }
 
-    if (this.view && !this.view.webContents.isDestroyed()) {
+    if (epoch !== this.credentialEpoch) return;
+    if (this.view && !this.view.webContents.isDestroyed() && this.isTrustedUrl(this.view.webContents.getURL())) {
       try {
+        const gen = hostGeneration ?? 0;
         await this.view.webContents.executeJavaScript(`
-          try {
-            if (window.localStorage) {
-              window.localStorage.removeItem('guanjia_token');
-              window.localStorage.removeItem('token');
-              window.localStorage.removeItem('guanjia_sso_token');
-              window.localStorage.removeItem('guanjia_user_id');
-              window.localStorage.removeItem('guanjia_shop_id');
-              window.localStorage.removeItem('guanjia_shop_name');
-              window.localStorage.removeItem('guanjia_user_role');
-            }
-            if (window.sessionStorage) {
-              window.sessionStorage.removeItem('guanjia_token');
-              window.sessionStorage.removeItem('token');
-              window.sessionStorage.removeItem('guanjia_sso_token');
-            }
-          } catch (e) {}
+          (() => {
+            try {
+              if (window.__guanjia_credential_epoch && window.__guanjia_credential_epoch > ${epoch}) return;
+              window.__guanjia_credential_epoch = ${epoch};
+              if (location.origin !== ${JSON.stringify(new URL(this.defaultUrl).origin)}) throw new Error('Untrusted origin');
+              if (window.sessionStorage) {
+                window.sessionStorage.removeItem('guanjia_token');
+                window.sessionStorage.removeItem('token');
+                window.sessionStorage.removeItem('guanjia_sso_token');
+                window.sessionStorage.removeItem('guanjia_store_id');
+                window.sessionStorage.removeItem('guanjia_store_code');
+                window.dispatchEvent(new CustomEvent('guanjia:host-session-cleared', { detail: { hostGeneration: ${gen} } }));
+              }
+              // 清理历史遗留键，不再写入
+              if (window.localStorage) {
+                window.localStorage.removeItem('guanjia_token');
+                window.localStorage.removeItem('token');
+                window.localStorage.removeItem('guanjia_sso_token');
+                window.localStorage.removeItem('guanjia_user_id');
+                window.localStorage.removeItem('guanjia_shop_id');
+                window.localStorage.removeItem('guanjia_shop_name');
+                window.localStorage.removeItem('guanjia_user_role');
+              }
+            } catch (e) {}
+          })();
         `);
       } catch {
         // 忽略
@@ -388,18 +420,19 @@ export class GuanjiaWorkspaceManager {
               shopName: this.currentSsoCredentials.shopName,
             }
           : null,
-        currentShop: this.currentSsoCredentials
+        currentShop: this.currentSsoCredentials?.shopId
           ? {
               id: this.currentSsoCredentials.shopId,
               name: this.currentSsoCredentials.shopName,
             }
           : null,
         pageError: null,
-        pendingCount: 0,
+        pendingCount: null,
         timestamp: Date.now(),
       };
     }
 
+    if (!this.isTrustedUrl(this.view.webContents.getURL())) throw new Error('不可信的管家页面');
     try {
       const context = await this.view.webContents.executeJavaScript(
         'window.guanjiaBridge ? window.guanjiaBridge.getWorkspaceContext() : null',
@@ -416,7 +449,7 @@ export class GuanjiaWorkspaceManager {
       currentUser: null,
       currentShop: null,
       pageError: null,
-      pendingCount: 0,
+      pendingCount: null,
       timestamp: Date.now(),
     };
   }
@@ -425,74 +458,7 @@ export class GuanjiaWorkspaceManager {
   // 动作执行与动账拦截
   // =========================================================================
   public async executeAction(action: GuanjiaActionRequest): Promise<GuanjiaActionResult> {
-    if (!this.view || this.view.webContents.isDestroyed()) {
-      return {
-        success: false,
-        actionType: action.type,
-        error: '智慧管家工作区视图未创建或已关闭',
-      };
-    }
-
-    // 动账操作拦截校验：统一通过 isFinancialAction 匹配，严格校验 confirmed 与 confirmedBy
-    const isFinancial = isFinancialAction(action);
-    const isConfirmed = Boolean(action.confirmed && action.confirmedBy && action.confirmedBy.trim());
-
-    if (isFinancial && !isConfirmed) {
-      const details = action.financialDetails || {
-        amount: '需核对金额',
-        reason: '未注明事由',
-        actionType: (action.type && FINANCIAL_ACTION_TYPES.has(action.type)) ? (action.type as any) : ('other' as const),
-      };
-
-      this.recordAuditLog({
-        actionType: action.type,
-        amount: details.amount,
-        reason: details.reason,
-        operatorName: (action.confirmedBy && action.confirmedBy.trim()) || this.currentSsoCredentials?.realName || '未知店员',
-        confirmedBy: '',
-        shopId: this.currentSsoCredentials?.shopId || '',
-        status: 'intercepted',
-      });
-
-      const message = !action.confirmed
-        ? `动账操作拦截：必须停下复述金额（${details.amount}）与事由（${details.reason}），店员确认后方可落定。`
-        : `动账操作拦截：动账确认人（confirmedBy）缺失或为空，坚决拦截。`;
-
-      return {
-        success: false,
-        actionType: action.type,
-        requiresConfirmation: true,
-        financialDetails: details,
-        message,
-        error: !action.confirmed ? undefined : '动账确认人（confirmedBy）缺失或为空',
-      };
-    }
-
-    try {
-      const result = (await this.view.webContents.executeJavaScript(
-        `window.guanjiaBridge ? window.guanjiaBridge.executeAction(${JSON.stringify(action)}) : { success: false, error: 'Bridge not available' }`,
-      )) as GuanjiaActionResult;
-
-      if (isFinancial && isConfirmed && result.success) {
-        this.recordAuditLog({
-          actionType: action.type,
-          amount: action.financialDetails?.amount || 0,
-          reason: action.financialDetails?.reason || '',
-          operatorName: this.currentSsoCredentials?.realName || '当前店员',
-          confirmedBy: action.confirmedBy!.trim(),
-          shopId: this.currentSsoCredentials?.shopId || '',
-          status: 'executed',
-        });
-      }
-
-      return result;
-    } catch (error) {
-      return {
-        success: false,
-        actionType: action.type,
-        error: error instanceof Error ? error.message : '动作执行失败',
-      };
-    }
+    return { success: false, actionType: action.type, error: '旧页面动作执行接口已停用' };
   }
 
   public recordAuditLog(log: Omit<GuanjiaFinancialAuditLog, 'id' | 'timestamp'>): GuanjiaFinancialAuditLog {
@@ -515,22 +481,11 @@ export class GuanjiaWorkspaceManager {
   // =========================================================================
   // 交班清场：静默清空助理会话，不弹窗，不动管家台账
   // =========================================================================
-  public async clearAssistantSession(): Promise<{ success: boolean; clearedCount: number }> {
-    const store = this.getStoreInstance();
-    if (!store) {
-      console.warn('[GuanjiaWorkspaceManager] coworkStore not configured for clearing assistant session');
-      return { success: false, clearedCount: 0 };
-    }
-
-    try {
-      const deletedSessionIds = store.clearAgentSessions(AgentId.GuanjiaAssistant);
-      return {
-        success: true,
-        clearedCount: deletedSessionIds.length,
-      };
-    } catch (err) {
-      console.error('[GuanjiaWorkspaceManager] Failed to clear guanjia assistant sessions silently:', err);
-      return { success: false, clearedCount: 0 };
-    }
+  public async clearAssistantSession(): Promise<{ success: boolean; clearedCount: number; error?: string }> {
+    return {
+      success: false,
+      clearedCount: 0,
+      error: '旧会话清空接口已停用，业务会话失效不会删除合法历史记录',
+    };
   }
 }

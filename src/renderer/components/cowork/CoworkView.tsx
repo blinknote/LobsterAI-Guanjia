@@ -5,6 +5,7 @@ import { useDispatch, useSelector } from 'react-redux';
 
 import { buildGoalSettingMessageMetadata } from '../../../common/goalCommandDisplay';
 import { buildSessionTitleFromInput } from '../../../common/sessionTitle';
+import { AgentId } from '../../../shared/agent/constants';
 import { buildCoworkImageAttachmentPreviews } from '../../../shared/cowork/imageAttachments';
 import type { CoworkSelectedTextSnippet } from '../../../shared/cowork/selectedText';
 import startupCreditEntryGiftUrl from '../../assets/startup-credit-entry-gift.svg';
@@ -977,11 +978,11 @@ const CoworkView: React.FC<CoworkViewProps> = ({
                   onWorkingDirectoryChange={async (dir: string) => {
                     await agentService.updateAgent(currentAgentId, { workingDirectory: dir });
                   }}
-                  showFolderSelector={true}
-                  showModelSelector={true}
+                  showFolderSelector={currentAgentId !== AgentId.GuanjiaAssistant}
+                  showModelSelector={currentAgentId !== AgentId.GuanjiaAssistant}
                   showAgentSelector={true}
-                  onManageSkills={() => onShowSkills?.()}
-                  onManageKits={() => onShowKits?.()}
+                  onManageSkills={currentAgentId === AgentId.GuanjiaAssistant ? undefined : () => onShowSkills?.()}
+                  onManageKits={currentAgentId === AgentId.GuanjiaAssistant ? undefined : () => onShowKits?.()}
                   onGoalCommand={handleStartGoalSession}
                 />
                 <EnterpriseQuotaPrompt

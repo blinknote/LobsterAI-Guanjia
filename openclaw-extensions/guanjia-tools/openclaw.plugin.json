@@ -1,0 +1,32 @@
+{
+  "id": "guanjia-tools",
+  "name": "GuanjiaTools",
+  "description": "Scoped business tools for Smart Butler (智慧管家) store operations.",
+  "contracts": {
+    "tools": [
+      "guanjia_get_context",
+      "guanjia_list_skills",
+      "guanjia_execute_skill",
+      "guanjia_get_run_status"
+    ]
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "callbackUrl": {
+        "type": "string",
+        "description": "LobsterAI HTTP callback URL for Guanjia business tool requests"
+      },
+      "secret": {
+        "type": "string",
+        "description": "Shared secret for callback authentication"
+      },
+      "requestTimeoutMs": {
+        "type": "number",
+        "minimum": 1000,
+        "description": "Request timeout in milliseconds"
+      }
+    }
+  }
+}

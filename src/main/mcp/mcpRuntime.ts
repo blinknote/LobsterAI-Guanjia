@@ -14,6 +14,7 @@ import {
   type BrowserToolRequest,
   type BrowserToolResponse,
   type DecisionToolHandler,
+  type GuanjiaToolHandler,
   McpBridgeServer,
   type MediaGenerationRequest,
   type MediaGenerationResponse,
@@ -54,6 +55,7 @@ export class McpRuntime {
   private browserToolHandler:
     | ((request: BrowserToolRequest) => Promise<BrowserToolResponse>)
     | null = null;
+  private guanjiaToolHandler: GuanjiaToolHandler | null = null;
   private decisionToolHandler: DecisionToolHandler | null = null;
 
   constructor(private readonly deps: McpRuntimeDeps) {}
@@ -119,6 +121,15 @@ export class McpRuntime {
 
   getDecisionCallbackUrl(): string | null {
     return this.bridgeServer?.decisionCallbackUrl ?? null;
+  }
+
+  getGuanjiaCallbackUrl(): string | null {
+    return this.bridgeServer?.guanjiaCallbackUrl ?? null;
+  }
+
+  setGuanjiaToolHandler(handler: GuanjiaToolHandler): void {
+    this.guanjiaToolHandler = handler;
+    this.bridgeServer?.setGuanjiaToolHandler(handler);
   }
 
   getBridgeSecret(): string {
@@ -216,6 +227,10 @@ export class McpRuntime {
       }
       return await this.decisionToolHandler(request, signal);
     });
+
+    if (this.guanjiaToolHandler) {
+      this.bridgeServer.setGuanjiaToolHandler(this.guanjiaToolHandler);
+    }
 
     if (this.browserToolHandler) {
       this.bridgeServer.onBrowserTool(this.browserToolHandler);

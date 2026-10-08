@@ -1848,6 +1848,7 @@ type OpenClawConfigSyncDeps = {
   getAskUserCallbackUrl?: () => string | null;
   getMediaCallbackUrl?: () => string | null;
   getDecisionCallbackUrl?: () => string | null;
+  getGuanjiaCallbackUrl?: () => string | null;
   /** The experimental decision model is switched on and has a usable key. */
   isDecisionModelActive?: () => boolean;
   getBrowserCallbackUrl?: () => string | null;
@@ -1883,6 +1884,7 @@ export class OpenClawConfigSync {
   private readonly getAskUserCallbackUrl?: () => string | null;
   private readonly getMediaCallbackUrl?: () => string | null;
   private readonly getDecisionCallbackUrl?: () => string | null;
+  private readonly getGuanjiaCallbackUrl?: () => string | null;
   private readonly isDecisionModelActive?: () => boolean;
   private readonly getBrowserCallbackUrl?: () => string | null;
   private readonly getLobsterBrowserMcpCommand?: () => string | null;
@@ -1918,6 +1920,7 @@ export class OpenClawConfigSync {
     this.getAskUserCallbackUrl = deps.getAskUserCallbackUrl;
     this.getMediaCallbackUrl = deps.getMediaCallbackUrl;
     this.getDecisionCallbackUrl = deps.getDecisionCallbackUrl;
+    this.getGuanjiaCallbackUrl = deps.getGuanjiaCallbackUrl;
     this.isDecisionModelActive = deps.isDecisionModelActive;
     this.getBrowserCallbackUrl = deps.getBrowserCallbackUrl;
     this.getLobsterBrowserMcpCommand = deps.getLobsterBrowserMcpCommand;
@@ -2346,6 +2349,7 @@ export class OpenClawConfigSync {
     const hasAskUserPlugin = isBundledPluginAvailable('ask-user-question');
     const hasMediaGenPlugin = isBundledPluginAvailable('lobster-media-generation');
     const hasDecisionPlugin = isBundledPluginAvailable(DECISION_MODEL_PLUGIN_ID);
+    const hasGuanjiaPlugin = isBundledPluginAvailable('guanjia-tools');
     // Runtime-bundled xai extension (dist/extensions/xai): provides the Grok
     // model compat hooks (e.g. only grok-4.3 accepts reasoningEffort) plus the
     // OAuth refresh hook for credentials in the auth-profiles store. Declare
@@ -2600,6 +2604,7 @@ export class OpenClawConfigSync {
             : {}),
           ...(hasAskUserPlugin ? { 'ask-user-question': { enabled: true } } : {}),
           ...(hasMediaGenPlugin ? { 'lobster-media-generation': { enabled: true } } : {}),
+          ...(hasGuanjiaPlugin ? { 'guanjia-tools': { enabled: true } } : {}),
           // Experimental; enabled below only once the user turns it on.
           ...(hasDecisionPlugin ? { [DECISION_MODEL_PLUGIN_ID]: { enabled: false } } : {}),
           ...(hasModelCompatConfig
@@ -2761,6 +2766,21 @@ export class OpenClawConfigSync {
           // Longer than the provider timeout in main, so callers get its
           // structured timeout error instead of a dropped connection.
           requestTimeoutMs: 45000,
+        },
+      };
+    }
+
+    // Sync GuanjiaTools plugin config
+    const guanjiaCallbackUrl = this.getGuanjiaCallbackUrl?.();
+    if (hasGuanjiaPlugin && guanjiaCallbackUrl && managedConfig.plugins) {
+      const plugins = managedConfig.plugins as Record<string, unknown>;
+      const entries = plugins.entries as Record<string, Record<string, unknown>>;
+      entries['guanjia-tools'] = {
+        enabled: true,
+        config: {
+          callbackUrl: guanjiaCallbackUrl,
+          secret: '${LOBSTER_MCP_BRIDGE_SECRET}',
+          requestTimeoutMs: 60000,
         },
       };
     }
@@ -4063,6 +4083,8 @@ export class OpenClawConfigSync {
 
     for (const agent of agents) {
       if (agent.id === 'main' || !agent.enabled) continue;
+      // Restricted Guanjia sessions do not consume a shared employee workspace.
+      if (agent.id === 'guanjia-assistant') continue;
 
       const agentWorkspace = path.join(stateDir, `workspace-${agent.id}`);
       try {

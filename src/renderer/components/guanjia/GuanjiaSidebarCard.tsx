@@ -1,5 +1,7 @@
 import React from 'react';
 
+import { tGuanjia } from '../../services/guanjiaI18n';
+
 export type GuanjiaCardStatus = 'idle' | 'active' | 'pending';
 
 export interface GuanjiaSidebarCardProps {
@@ -7,10 +9,10 @@ export interface GuanjiaSidebarCardProps {
   isActive?: boolean;
   /** 显式指定状态，未传则依据 isActive 与 todoCount 计算 */
   status?: GuanjiaCardStatus;
-  /** 门店名称，默认“青盛堂旗舰店” */
-  storeName?: string;
-  /** 待办事项数量，默认 0 */
-  todoCount?: number;
+  /** 门店名称 */
+  storeName?: string | null;
+  /** 待办事项数量，未获取或未知时为 null/undefined，不以 0 冒充 */
+  todoCount?: number | null;
   /** 点击卡片回调 */
   onClick?: () => void;
   /** 点击问助手按钮回调 */
@@ -27,8 +29,8 @@ export interface GuanjiaSidebarCardProps {
 export const GuanjiaSidebarCard: React.FC<GuanjiaSidebarCardProps> = ({
   isActive = false,
   status: propStatus,
-  storeName = '青盛堂旗舰店',
-  todoCount = 0,
+  storeName,
+  todoCount,
   onClick,
   onAskAssistant,
   className = '',
@@ -37,21 +39,24 @@ export const GuanjiaSidebarCard: React.FC<GuanjiaSidebarCardProps> = ({
   const computedStatus: GuanjiaCardStatus = React.useMemo(() => {
     if (propStatus) return propStatus;
     if (isActive) return 'active';
-    if (todoCount > 0) return 'pending';
+    if (typeof todoCount === 'number' && todoCount > 0) return 'pending';
     return 'idle';
   }, [propStatus, isActive, todoCount]);
 
   // 生成屏幕阅读器播报文本
   const ariaLabel = React.useMemo(() => {
+    const storeInfo = storeName ? `，门店${storeName}` : '';
     switch (computedStatus) {
       case 'idle':
-        return `智慧管家，未打开，门店${storeName}`;
+        return `${tGuanjia('guanjiaWorkspaceTitle')}，${tGuanjia('guanjiaSidebarCardIdle')}${storeInfo}`;
       case 'active':
-        return `智慧管家，使用中，门店${storeName}`;
+        return `${tGuanjia('guanjiaWorkspaceTitle')}，${tGuanjia('guanjiaSidebarCardActive')}${storeInfo}`;
       case 'pending':
-        return `智慧管家，待办${todoCount}条，门店${storeName}`;
+        return typeof todoCount === 'number' && todoCount > 0
+          ? `${tGuanjia('guanjiaWorkspaceTitle')}，${tGuanjia('guanjiaSidebarCardPending')}${todoCount}条${storeInfo}`
+          : `${tGuanjia('guanjiaWorkspaceTitle')}，${tGuanjia('guanjiaSidebarCardPending')}${storeInfo}`;
       default:
-        return `智慧管家，门店${storeName}`;
+        return `${tGuanjia('guanjiaWorkspaceTitle')}${storeInfo}`;
     }
   }, [computedStatus, storeName, todoCount]);
 
@@ -85,31 +90,31 @@ export const GuanjiaSidebarCard: React.FC<GuanjiaSidebarCardProps> = ({
       aria-label={ariaLabel}
       onClick={onClick}
       onKeyDown={handleKeyDown}
-      className={`group relative flex w-full cursor-pointer flex-col rounded-lg border p-2.5 text-left transition-all duration-150 focus:outline-none focus:ring-2 focus:ring-primary/40 ${statusStyles} ${className}`}
+      className={`group relative flex w-full cursor-pointer flex-col rounded-lg border p-2.5 text-left transition-all duration-150 focus:outline-none focus:ring-2 focus:ring-primary/60 ${statusStyles} ${className}`}
     >
       {/* 头部：图标与名称 */}
       <div className="flex items-center justify-between gap-1.5">
         <div className="flex min-w-0 items-center gap-1.5">
-          <span className="flex h-5 w-5 shrink-0 items-center justify-center text-sm" aria-hidden="true">
+          <span className="flex h-5 w-5 shrink-0 items-center justify-center text-sm" aria-hidden="true" role="presentation">
             🏪
           </span>
           <span className="truncate text-xs font-semibold text-foreground">
-            智慧管家
+            {tGuanjia('guanjiaWorkspaceTitle')}
           </span>
         </div>
 
         {/* 状态徽标 */}
         {computedStatus === 'idle' && (
           <span className="shrink-0 rounded px-1.5 py-0.5 text-[11px] font-medium text-blue-600 dark:text-blue-400">
-            未打开
+            {tGuanjia('guanjiaSidebarCardIdle')}
           </span>
         )}
         {computedStatus === 'active' && (
           <span className="shrink-0 rounded bg-blue-500/15 px-1.5 py-0.5 text-[11px] font-medium text-blue-600 dark:text-blue-400">
-            使用中
+            {tGuanjia('guanjiaSidebarCardActive')}
           </span>
         )}
-        {computedStatus === 'pending' && (
+        {computedStatus === 'pending' && typeof todoCount === 'number' && todoCount > 0 && (
           <div className="flex shrink-0 items-center gap-1.5">
             <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-[11px] font-medium text-amber-600 dark:text-amber-400">
               待办 {todoCount}
@@ -120,19 +125,21 @@ export const GuanjiaSidebarCard: React.FC<GuanjiaSidebarCardProps> = ({
                 e.stopPropagation();
                 onAskAssistant?.();
               }}
-              aria-label="问助手"
+              aria-label={tGuanjia('guanjiaSidebarAskAssistant')}
               className="rounded bg-amber-500 px-1.5 py-0.5 text-[10px] font-medium text-white shadow-xs hover:bg-amber-600 active:scale-95 transition-all"
             >
-              问助手
+              {tGuanjia('guanjiaSidebarAskAssistant')}
             </button>
           </div>
         )}
       </div>
 
       {/* 次要信息：门店名 */}
-      <div className="mt-1 flex items-center justify-between text-[11px] text-secondary">
-        <span className="truncate">{storeName}</span>
-      </div>
+      {storeName ? (
+        <div className="mt-1 flex items-center justify-between text-[11px] text-secondary">
+          <span className="truncate">{storeName}</span>
+        </div>
+      ) : null}
     </div>
   );
 };
