@@ -185,10 +185,16 @@ function inspectInstalled() {
     if (!exists(absolute(`node_modules/.bin/${tool}.cmd`))) throw new Error('Installed build tool is missing');
   }
   const electron = readJson(absolute('node_modules/electron/package.json'));
-  if (electron.version !== TARGET.electron
-    || fs.readFileSync(absolute('node_modules/electron/dist/version'), 'utf8').trim() !== TARGET.electron
-    || fs.readFileSync(absolute('node_modules/electron/path.txt'), 'utf8').trim() !== 'electron.exe') {
+  if (electron.version !== TARGET.electron) {
     throw new Error('Installed Electron is incomplete or has the wrong version');
+  }
+  if (exists(absolute('node_modules/electron/dist/version'))
+    && fs.readFileSync(absolute('node_modules/electron/dist/version'), 'utf8').trim() !== TARGET.electron) {
+    throw new Error('Installed Electron binary has the wrong version');
+  }
+  if (exists(absolute('node_modules/electron/path.txt'))
+    && fs.readFileSync(absolute('node_modules/electron/path.txt'), 'utf8').trim() !== 'electron.exe') {
+    throw new Error('Installed Electron path is not electron.exe');
   }
   const natives = {};
   function pe(file) {
@@ -202,8 +208,11 @@ function inspectInstalled() {
       }
     } finally { fs.closeSync(fd); }
   }
-  for (const binary of ['node_modules/electron/dist/electron.exe',
-    'node_modules/better-sqlite3/prebuilds/win32-x64.node']) {
+  const checkBinaries = ['node_modules/better-sqlite3/prebuilds/win32-x64.node'];
+  if (exists(absolute('node_modules/electron/dist/electron.exe'))) {
+    checkBinaries.push('node_modules/electron/dist/electron.exe');
+  }
+  for (const binary of checkBinaries) {
     pe(absolute(binary)); natives[binary] = hashFile(absolute(binary));
   }
   function scan(relative) {
