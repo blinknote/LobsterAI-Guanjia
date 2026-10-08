@@ -27,14 +27,17 @@ on:
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
   NODE_OPTIONS: "--max-old-space-size=6144"
+  CSC_IDENTITY_AUTO_DISCOVERY: "false"
 
 jobs:
   # ========== macOS 构建 ==========
   build-macos:
     if: ${{ github.event_name == 'push' || inputs.build_macos }}
     runs-on: macos-latest
+    timeout-minutes: 60
     env:
       NODE_OPTIONS: "--max-old-space-size=6144"
+      CSC_IDENTITY_AUTO_DISCOVERY: "false"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -47,7 +50,9 @@ jobs:
           restore-keys: npm-${{ runner.os }}-
       
       - run: npm install -g pnpm
-      - run: npm install
+      - name: Install Dependencies
+        timeout-minutes: 10
+        run: npm install
       
       # 设置 OpenClaw runtime (如果需要)
       - name: Setup OpenClaw Runtime
@@ -59,25 +64,23 @@ jobs:
           fi
       
       - name: Build macOS
-        run: npm run dist:mac
-        env:
-          # 签名环境变量 (如果有证书)
-          CSC_LINK: ${{ secrets.CSC_LINK }}
-          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        timeout-minutes: 50
+        run: npm run dist:mac -- --publish never --config.afterSign=null --config.mac.identity=null
       
       - uses: actions/upload-artifact@v4
         with:
           name: macos-build
           path: release/*.dmg
+          if-no-files-found: error
           retention-days: 7
 
   # ========== Windows 构建 ==========
   build-windows:
     if: ${{ github.event_name == 'push' || inputs.build_windows }}
     runs-on: windows-latest
+    timeout-minutes: 60
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: "false"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -90,30 +93,35 @@ jobs:
           restore-keys: npm-${{ runner.os }}-
       
       - run: npm install -g pnpm
-      - run: npm install
+      - name: Install Dependencies
+        timeout-minutes: 10
+        run: npm install
       
       # Windows 需要 Python 运行时
       - name: Setup Python Runtime
+        timeout-minutes: 10
         run: npm run setup:python-runtime
         env:
           LOBSTERAI_PORTABLE_PYTHON_ARCHIVE: ${{ secrets.WINDOWS_PYTHON_ARCHIVE }}
       
       - name: Build Windows
-        run: npm run dist:win
-        env:
-          CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
-          CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+        timeout-minutes: 50
+        run: npm run dist:win -- --publish never
       
       - uses: actions/upload-artifact@v4
         with:
           name: windows-build
           path: release/*.exe
+          if-no-files-found: error
           retention-days: 7
 
   # ========== Linux 构建 ==========
   build-linux:
     if: ${{ github.event_name == 'push' || inputs.build_linux }}
     runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: "false"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -125,16 +133,20 @@ jobs:
           key: npm-${{ runner.os }}-${{ hashFiles('package.json') }}
           restore-keys: npm-${{ runner.os }}-
       
-      - name: Install Dependencies
+      - name: Install System Dependencies
+        timeout-minutes: 10
         run: |
           sudo apt-get update
           sudo apt-get install -y libgtk-3-0 libnotify4 libnss3 libxss1 libxtst6 xdg-utils libatspi2.0-0 libuuid1 libsecret-1-0
       
       - run: npm install -g pnpm
-      - run: npm install
+      - name: Install Node Dependencies
+        timeout-minutes: 10
+        run: npm install
       
       - name: Build Linux
-        run: npm run dist:linux
+        timeout-minutes: 50
+        run: npm run dist:linux -- --publish never
       
       - uses: actions/upload-artifact@v4
         with:
@@ -142,6 +154,7 @@ jobs:
           path: |
             release/*.AppImage
             release/*.deb
+          if-no-files-found: error
           retention-days: 7
 
   # ========== 创建 Release ==========

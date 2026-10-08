@@ -221,7 +221,7 @@ function precompileLocalExtensions(runtimeRoot, buildHint) {
 }
 
 function ensureBundledLocalExtensions(runtimeRoot, buildHint) {
-  const requiredLocalExtensions = ['mcp-bridge', 'ask-user-question', 'lobster-media-generation', 'lobster-decision'];
+  const requiredLocalExtensions = ['mcp-bridge', 'ask-user-question', 'lobster-media-generation', 'lobster-decision', 'guanjia-tools'];
   const missingCompiledExtensions = requiredLocalExtensions.filter(
     (extensionId) => !hasCompiledLocalExtension(runtimeRoot, extensionId),
   );
