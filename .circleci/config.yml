@@ -1,7 +1,7 @@
 version: 2.1
 
 jobs:
-  runtime-windows:
+  runtime-core-windows:
     machine: &windows-machine
       image: windows-server-2022-gui:current
     resource_class: windows.medium
@@ -38,14 +38,6 @@ jobs:
           name: Install dependencies (10m)
           command: .\.circleci\run-build.ps1 dependencies
           no_output_timeout: 12m
-      # Save early: later runtime/client failures must not lose downloaded deps.
-      - save_cache: &save-downloads-deps
-          key: win2022-x64-downloads-v1-node24.15.0-npm11.17.0-pnpm12.1.0-{{ checksum ".circleci/run-build.ps1" }}-{{ checksum "package.json" }}-{{ .BuildNum }}-deps
-          paths:
-            - 'C:/lobsterai-cache/npm/_cacache'
-            - 'C:/lobsterai-cache/electron'
-            - 'C:/lobsterai-cache/pnpm-store'
-            - 'C:/lobsterai-cache/electron-builder'
       - run:
           name: Generate exact compiled-cache keys before restore
           command: .\.circleci\run-build.ps1 runtime-cache-keys
@@ -53,28 +45,17 @@ jobs:
       - restore_cache:
           keys:
             - openclaw-compiled-core-win2022-x64-node24.15.0-npm11.17.0-pnpm12.1.0-{{ checksum ".circleci-runtime-keys/core.txt" }}
-      - restore_cache:
-          keys:
-            - openclaw-compiled-full-win2022-x64-node24.15.0-npm11.17.0-pnpm12.1.0-{{ checksum ".circleci-runtime-keys/full.txt" }}
       - run:
-          name: Validate or build and snapshot OpenClaw core (35m)
+          name: Validate or build, bundle and snapshot core (40m phase, 35m build)
           command: .\.circleci\run-build.ps1 runtime-core
-          no_output_timeout: 37m
+          no_output_timeout: 42m
       # Must precede plugins: a plugin failure still retains the real core.
-      # Even a full hit ensures a legitimate core; no missing-path save/relabel.
       - save_cache:
           key: openclaw-compiled-core-win2022-x64-node24.15.0-npm11.17.0-pnpm12.1.0-{{ checksum ".circleci-runtime-keys/core.txt" }}
           paths:
             - '.circleci-runtime-cache/core'
-      - run:
-          name: Validate full hit or build remainder and snapshot (20m)
-          command: .\.circleci\run-build.ps1 runtime-remainder
-          no_output_timeout: 22m
-      - save_cache:
-          key: openclaw-compiled-full-win2022-x64-node24.15.0-npm11.17.0-pnpm12.1.0-{{ checksum ".circleci-runtime-keys/full.txt" }}
-          paths:
-            - '.circleci-runtime-cache/full'
-      - save_cache:
+      # Save downloads after useful core work, not before its build budget.
+      - save_cache: &save-downloads-runtime
           key: win2022-x64-downloads-v1-node24.15.0-npm11.17.0-pnpm12.1.0-{{ checksum ".circleci/run-build.ps1" }}-{{ checksum "package.json" }}-{{ .BuildNum }}-runtime
           paths:
             - 'C:/lobsterai-cache/npm/_cacache'
@@ -82,14 +63,59 @@ jobs:
             - 'C:/lobsterai-cache/pnpm-store'
             - 'C:/lobsterai-cache/electron-builder'
       - run:
+          name: Export verified current-commit core workspace (5m, reuse snapshot)
+          command: .\.circleci\run-build.ps1 export-core
+          no_output_timeout: 7m
+      - persist_to_workspace:
+          root: '.circleci-workspace'
+          paths:
+            - core/runtime.tar
+            - core/manifest.json
+
+  runtime-windows:
+    machine: *windows-machine
+    resource_class: windows.medium
+    shell: powershell.exe -ExecutionPolicy Bypass
+    environment: *windows-environment
+    steps:
+      - checkout
+      - run: *begin-budget
+      - restore_cache: *restore-toolchain
+      - restore_cache: *restore-downloads
+      - run: *install-toolchain
+      - save_cache: *save-toolchain
+      - run: *dependencies
+      - run:
+          name: Generate exact compiled-cache keys before import and restore
+          command: .\.circleci\run-build.ps1 runtime-cache-keys
+          no_output_timeout: 2m
+      - attach_workspace:
+          at: '.circleci-workspace'
+      - run:
+          name: Import required verified core and recreate current (5m + 2m)
+          command: .\.circleci\run-build.ps1 import-core
+          no_output_timeout: 7m
+      - restore_cache:
+          keys:
+            - openclaw-compiled-full-win2022-x64-node24.15.0-npm11.17.0-pnpm12.1.0-{{ checksum ".circleci-runtime-keys/full.txt" }}
+      - run:
+          name: Validate full hit or build remainder and snapshot (40m phase, 30m plugins)
+          command: .\.circleci\run-build.ps1 runtime-remainder
+          no_output_timeout: 42m
+      - save_cache:
+          key: openclaw-compiled-full-win2022-x64-node24.15.0-npm11.17.0-pnpm12.1.0-{{ checksum ".circleci-runtime-keys/full.txt" }}
+          paths:
+            - '.circleci-runtime-cache/full'
+      - save_cache: *save-downloads-runtime
+      - run:
           name: Export verified runtime workspace (5m)
           command: .\.circleci\run-build.ps1 export-runtime
           no_output_timeout: 7m
       - persist_to_workspace:
           root: '.circleci-workspace'
           paths:
-            - runtime.tar
-            - manifest.json
+            - full/runtime.tar
+            - full/manifest.json
 
   build-windows:
     machine: *windows-machine
@@ -104,7 +130,6 @@ jobs:
       - run: *install-toolchain
       - save_cache: *save-toolchain
       - run: *dependencies
-      - save_cache: *save-downloads-deps
       - attach_workspace:
           at: '.circleci-workspace'
       - run:
@@ -153,13 +178,17 @@ jobs:
 workflows:
   build:
     jobs:
-      - runtime-windows:
+      - runtime-core-windows:
           filters: &branch-only
             branches:
               only:
                 - feat/smartbutler-integration
             tags:
               ignore: /.*/
+      - runtime-windows:
+          requires:
+            - runtime-core-windows
+          filters: *branch-only
       - build-windows:
           requires:
             - runtime-windows

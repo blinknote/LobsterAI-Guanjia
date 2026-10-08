@@ -226,24 +226,29 @@ function Limit-RuntimeStage {
 }
 
 function Prepare-RuntimeCore {
-    Limit-RuntimeStage 35
+    Limit-RuntimeStage 40
     Invoke-CommandWithHardTimeout -Command "node .circleci\runtime-workspace.cjs prepare-core" -TimeoutMinutes 5
     $state = Get-Content -LiteralPath ".circleci-runtime-state.json" -Raw | ConvertFrom-Json
     if (-not $state.coreReady) {
         Invoke-CommandWithHardTimeout -Command "npm run openclaw:ensure && npm run openclaw:patch && node scripts\run-build-openclaw-runtime.cjs win-x64" -TimeoutMinutes 35
     }
     Invoke-CommandWithHardTimeout -Command "node scripts\sync-openclaw-runtime-current.cjs win-x64" -TimeoutMinutes 2
+    if (-not $state.coreReady) {
+        # Startup migration bundling needs the patched source and its dependencies
+        # from the cold core build; neither is transferred to the remainder job.
+        Invoke-CommandWithHardTimeout -Command "npm run openclaw:bundle" -TimeoutMinutes 5
+    }
     Invoke-CommandWithHardTimeout -Command "node .circleci\runtime-workspace.cjs capture-core" -TimeoutMinutes 5
 }
 
 function Prepare-RuntimeRemainder {
-    Limit-RuntimeStage 20
+    Limit-RuntimeStage 40
     Invoke-CommandWithHardTimeout -Command "node .circleci\runtime-workspace.cjs prepare-full" -TimeoutMinutes 5
     Invoke-CommandWithHardTimeout -Command "node scripts\sync-openclaw-runtime-current.cjs win-x64" -TimeoutMinutes 2
     $state = Get-Content -LiteralPath ".circleci-runtime-state.json" -Raw | ConvertFrom-Json
     if (-not $state.fullReady) {
-        # Preserve the approved package.json chain and all npm lifecycle hooks.
-        Invoke-CommandWithHardTimeout -Command "npm run openclaw:bundle && npm run openclaw:plugins && npm run openclaw:extensions:local && npm run openclaw:precompile && npm run openclaw:channel-deps && npm run openclaw:prune" -TimeoutMinutes 20
+        # Bundling is already captured in core; retain the remaining chain/hooks.
+        Invoke-CommandWithHardTimeout -Command "npm run openclaw:plugins && npm run openclaw:extensions:local && npm run openclaw:precompile && npm run openclaw:channel-deps && npm run openclaw:prune" -TimeoutMinutes 30
     }
     Invoke-CommandWithHardTimeout -Command "node .circleci\runtime-workspace.cjs capture-full" -TimeoutMinutes 5
 }
@@ -265,6 +270,11 @@ function Invoke-BuildAction {
             "runtime-cache-keys" { Invoke-CommandWithHardTimeout -Command "node .circleci\runtime-workspace.cjs cache-keys" -TimeoutMinutes 1 }
             "runtime-core" { Prepare-RuntimeCore }
             "runtime-remainder" { Prepare-RuntimeRemainder }
+            "export-core" { Invoke-CommandWithHardTimeout -Command "node .circleci\runtime-workspace.cjs export-core" -TimeoutMinutes 5 }
+            "import-core" {
+                Invoke-CommandWithHardTimeout -Command "node .circleci\runtime-workspace.cjs import-core" -TimeoutMinutes 5
+                Invoke-CommandWithHardTimeout -Command "node scripts\sync-openclaw-runtime-current.cjs win-x64" -TimeoutMinutes 2
+            }
             "export-runtime" { Invoke-CommandWithHardTimeout -Command "node .circleci\runtime-workspace.cjs export" -TimeoutMinutes 5 }
             "import-runtime" {
                 Invoke-CommandWithHardTimeout -Command "node .circleci\runtime-workspace.cjs import" -TimeoutMinutes 5

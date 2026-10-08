@@ -62,8 +62,11 @@ function sourceFingerprint(config, files) {
 }
 
 // Conservative core inputs: all tracked build/patch scripts and package
-// configuration, except the app's name/version and full-stage plugin config.
-const coreConfig = { ...app, openclaw: { repo: app.openclaw.repo, version: app.openclaw.version } };
+// configuration except the app's name/version. Startup bundling embeds the
+// pinned plugin repair metadata, so plugin config is now a core input too.
+const coreConfig = { ...app, openclaw: {
+  repo: app.openclaw.repo, version: app.openclaw.version, plugins: app.openclaw.plugins,
+} };
 delete coreConfig.name;
 delete coreConfig.version;
 const coreFiles = tracked.filter(file => file.startsWith('scripts/') || file.startsWith('patches/')
@@ -80,8 +83,8 @@ function cacheIdentity(stage) {
     ...toolchain, openclawVersion: app.openclaw.version, openclawRepo: app.openclaw.repo };
 }
 
-function workspaceIdentity() {
-  return { ...cacheIdentity(FULL), commit, appVersion: app.version };
+function workspaceIdentity(stage = FULL) {
+  return { ...cacheIdentity(stage), commit, appVersion: app.version };
 }
 
 function payload(dir) {
@@ -147,12 +150,20 @@ function validateRuntime(stage, runtimeRoot = runtime) {
   const summary = packaging.summarizeGatewayAsarEntries(asar.listPackage(path.join(runtimeRoot, 'gateway.asar')));
   if (!summary.hasOpenClawEntry || !summary.hasControlUiIndex || !summary.hasGatewayEntry
     || summary.hasBundledExtensions) throw new Error('Runtime gateway.asar layout mismatch.');
-  // The core builder removes bare entries before sync; core needs no bundle or plugins.
+  // Sync restores bare entries, then the source-dependent bundle step completes
+  // core before transfer. Only plugins and their SDK bridge belong to full.
+  for (const file of ['gateway-bundle.mjs', 'openclaw.mjs',
+    'openclaw-startup-state-migration.mjs', 'openclaw-xai-auth-store.mjs',
+    'openclaw-startup-compat.mjs', 'openclaw-gateway-repair.mjs',
+    'lobsterai-repair-plugins.json']) nonempty(path.join(runtimeRoot, file));
+  const repairPlugins = readJson(path.join(runtimeRoot, 'lobsterai-repair-plugins.json'));
+  if (repairPlugins.openclawVersion !== host.version || !Array.isArray(repairPlugins.plugins)) {
+    throw new Error('Runtime bundled plugin repair metadata mismatch.');
+  }
+  const entry = ['dist/entry.js', 'dist/entry.mjs'].find(file => fs.existsSync(path.join(runtimeRoot, file)));
+  if (!entry) throw new Error('Runtime bare gateway entry is missing.');
+  nonempty(path.join(runtimeRoot, entry));
   if (stage === FULL) {
-    for (const file of ['gateway-bundle.mjs', 'openclaw.mjs']) nonempty(path.join(runtimeRoot, file));
-    const entry = ['dist/entry.js', 'dist/entry.mjs'].find(file => fs.existsSync(path.join(runtimeRoot, file)));
-    if (!entry) throw new Error('Full runtime bare gateway entry is missing.');
-    nonempty(path.join(runtimeRoot, entry));
     const localPackages = extensionFiles.filter(file => /^openclaw-extensions\/[^/]+\/package\.json$/.test(file));
     if (!localPackages.length) throw new Error('No tracked local extension packages found.');
     for (const file of localPackages) {
@@ -346,13 +357,30 @@ async function main() {
     if (!state.fullReady) await exportArchive(payload(path.join(cacheRoot, FULL)), cacheIdentity(FULL));
     else { validateLinks(); validateRuntime(FULL); }
     writeJson(stateFile, { ...state, fullReady: true, stage: FULL });
+  } else if (action === 'export-core') {
+    const state = readState();
+    if (!state.coreReady || state.stage !== CORE) throw new Error('Core workspace export requires verified core inputs.');
+    // Reuse the captured, identity/SHA/entry-verified core; never repack or
+    // relabel a full snapshot. Only the workspace attestation binds this HEAD.
+    const snapshot = payload(path.join(cacheRoot, CORE));
+    const manifest = await checkArchive(snapshot, cacheIdentity(CORE));
+    const files = payload(path.join(workspace, CORE));
+    fs.mkdirSync(files.dir, { recursive: true });
+    fs.rmSync(files.manifestFile, { force: true });
+    fs.copyFileSync(snapshot.archive, files.archive);
+    writeJson(files.manifestFile, { ...manifest, ...workspaceIdentity(CORE) });
+  } else if (action === 'import-core') {
+    if (fs.existsSync(runtime) || fs.existsSync(stateFile)) throw new Error('Core workspace import requires a fresh runtime and state.');
+    const manifest = await importArchive(payload(path.join(workspace, CORE)), workspaceIdentity(CORE));
+    writeJson(stateFile, { commit, coreFingerprint, fullFingerprint, ownsRuntime: true,
+      coreReady: true, fullReady: false, stage: CORE, originBuildCommit: manifest.originBuildCommit });
   } else if (action === 'export') {
     const state = readState();
     if (!state.fullReady || state.stage !== FULL) throw new Error('Workspace export requires validated full inputs.');
-    await exportArchive(payload(workspace), workspaceIdentity(), state.originBuildCommit);
+    await exportArchive(payload(path.join(workspace, FULL)), workspaceIdentity(), state.originBuildCommit);
   } else if (action === 'import') {
-    await importArchive(payload(workspace), workspaceIdentity());
-  } else throw new Error('Usage: runtime-workspace.cjs fingerprints|cache-keys|prepare-core|capture-core|prepare-full|capture-full|export|import');
+    await importArchive(payload(path.join(workspace, FULL)), workspaceIdentity());
+  } else throw new Error('Usage: runtime-workspace.cjs fingerprints|cache-keys|prepare-core|capture-core|prepare-full|capture-full|export-core|import-core|export|import');
   console.log(`Runtime ${action} verified: ${commit} (${toolchain.target})`);
 }
 
