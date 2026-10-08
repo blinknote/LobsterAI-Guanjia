@@ -70,6 +70,7 @@ function Install-NodeToolchain {
     $setup = {
     Set-StrictMode -Version Latest
     $ErrorActionPreference = "Stop"
+    $ProgressPreference = "SilentlyContinue"
     $nodeVersion = "24.15.0"
     $expectedSha256 = "cc5149eabd53779ce1e7bdc5401643622d0c7e6800ade18928a767e940bb0e62"
     $toolsDir = "C:\tools"
@@ -123,14 +124,17 @@ function Install-NodeToolchain {
         if ($LASTEXITCODE -ne 0) { throw "npm version check failed." }
     }
 
-    Write-Host "==> Installing pnpm 10.11.0..."
-    & npm.cmd install --global --prefix $nodeDir pnpm@10.11.0
+    # Match OpenClaw's packageManager pin; npm runs the native binary installer.
+    Write-Host "==> Installing pnpm 12.1.0..."
+    & npm.cmd install --global --prefix $nodeDir pnpm@12.1.0
     if ($LASTEXITCODE -ne 0) { throw "pnpm installation failed." }
-    & pnpm.cmd -v
+    $pnpmVersion = (& pnpm.cmd --version).Trim()
     if ($LASTEXITCODE -ne 0) { throw "pnpm version check failed." }
+    if ($pnpmVersion -ne "12.1.0") { throw "Expected pnpm 12.1.0, got $pnpmVersion." }
+    Write-Host "==> pnpm version: $pnpmVersion"
     }
     $encodedSetup = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($setup.ToString()))
-    Invoke-CommandWithHardTimeout -Executable "powershell.exe" -Command "-NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand $encodedSetup" -TimeoutMinutes 10
+    Invoke-CommandWithHardTimeout -Executable "powershell.exe" -Command "-NoProfile -NonInteractive -OutputFormat Text -ExecutionPolicy Bypass -EncodedCommand $encodedSetup" -TimeoutMinutes 10
 }
 
 function Build-LobsterAI {
