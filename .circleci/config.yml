@@ -12,14 +12,83 @@ jobs:
     steps:
       - checkout
       - run:
+          name: Initialize 80-minute cumulative execution budget
+          command: .\.circleci\run-build.ps1 begin-budget
+          no_output_timeout: 2m
+      # CircleCI cache archive steps have platform bounds, separate from the
+      # helper's cumulative command budget. Cache downloads, never workspaces.
+      - restore_cache:
+          keys:
+            - win2022-x64-toolchain-v1-node24.15.0-npm11.17.0-pnpm12.1.0-{{ checksum ".circleci/run-build.ps1" }}
+      - restore_cache:
+          keys:
+            - win2022-x64-downloads-v1-node24.15.0-npm11.17.0-pnpm12.1.0-{{ checksum ".circleci/run-build.ps1" }}-{{ checksum "package.json" }}-
+      - run:
           name: Setup Toolchain (Node 24.15.0, npm, pnpm)
           command: .\.circleci\run-build.ps1 install-toolchain
+          no_output_timeout: 12m
+      - save_cache:
+          key: win2022-x64-toolchain-v1-node24.15.0-npm11.17.0-pnpm12.1.0-{{ checksum ".circleci/run-build.ps1" }}
+          paths:
+            - 'C:/tools/node-v24.15.0-win-x64'
       - run:
-          name: Build LobsterAI Windows x64
-          command: .\.circleci\run-build.ps1 build
+          name: Install dependencies (10m)
+          command: .\.circleci\run-build.ps1 dependencies
+          no_output_timeout: 12m
+      # Save early: later runtime/client failures must not lose downloaded deps.
+      - save_cache:
+          key: win2022-x64-downloads-v1-node24.15.0-npm11.17.0-pnpm12.1.0-{{ checksum ".circleci/run-build.ps1" }}-{{ checksum "package.json" }}-{{ .BuildNum }}-deps
+          paths:
+            - 'C:/lobsterai-cache/npm/_cacache'
+            - 'C:/lobsterai-cache/electron'
+            - 'C:/lobsterai-cache/pnpm-store'
+            - 'C:/lobsterai-cache/electron-builder'
+      - run:
+          name: Build OpenClaw Windows runtime (50m)
+          command: .\.circleci\run-build.ps1 runtime
+          no_output_timeout: 52m
+      - save_cache:
+          key: win2022-x64-downloads-v1-node24.15.0-npm11.17.0-pnpm12.1.0-{{ checksum ".circleci/run-build.ps1" }}-{{ checksum "package.json" }}-{{ .BuildNum }}-runtime
+          paths:
+            - 'C:/lobsterai-cache/npm/_cacache'
+            - 'C:/lobsterai-cache/electron'
+            - 'C:/lobsterai-cache/pnpm-store'
+            - 'C:/lobsterai-cache/electron-builder'
+      - run:
+          name: Verify installer patches (2m)
+          command: .\.circleci\run-build.ps1 verify-installer
+          no_output_timeout: 4m
+      - run:
+          name: Setup Python runtime (5m)
+          command: .\.circleci\run-build.ps1 python
+          no_output_timeout: 7m
+      - run:
+          name: Build renderer and main via npm run build (10m)
+          command: .\.circleci\run-build.ps1 build-client
+          no_output_timeout: 12m
+      - run:
+          name: Compile Electron (5m)
+          command: .\.circleci\run-build.ps1 compile-electron
+          no_output_timeout: 7m
+      - run:
+          name: Build skills (5m)
+          command: .\.circleci\run-build.ps1 skills
+          no_output_timeout: 7m
+      - run:
+          name: Package unsigned Windows x64 (15m, publish never)
+          command: .\.circleci\run-build.ps1 package
+          no_output_timeout: 17m
+      - save_cache:
+          key: win2022-x64-downloads-v1-node24.15.0-npm11.17.0-pnpm12.1.0-{{ checksum ".circleci/run-build.ps1" }}-{{ checksum "package.json" }}-{{ .BuildNum }}-package
+          paths:
+            - 'C:/lobsterai-cache/npm/_cacache'
+            - 'C:/lobsterai-cache/electron'
+            - 'C:/lobsterai-cache/pnpm-store'
+            - 'C:/lobsterai-cache/electron-builder'
       - run:
           name: Collect and Verify Artifacts
           command: .\.circleci\run-build.ps1 artifacts
+          no_output_timeout: 7m
       - store_artifacts:
           path: artifacts/windows
           destination: windows-x64
