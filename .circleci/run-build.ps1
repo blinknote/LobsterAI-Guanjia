@@ -23,14 +23,14 @@ Get-ChildItem Env: | Where-Object { $_.Name -like "CSC_*" -or $_.Name -like "WIN
 $env:CSC_IDENTITY_AUTO_DISCOVERY = "false"
 $env:LOBSTERAI_UNSIGNED_WINDOWS = "1"
 
-# Never cached. Charge action execution, not CircleCI cache archive transfers.
+# Never cached. The absolute job deadline also charges cache/workspace waits.
 $budgetFile = Join-Path $PSScriptRoot ".windows-build-deadline.json"
 $script:deadlineUtc = [DateTime]::MinValue
 
 function Initialize-BuildBudget {
-    @{ remainingMilliseconds = 80 * 60 * 1000; deadlineUtc = $null } |
+    @{ deadlineUtc = [DateTime]::UtcNow.AddMinutes(55).ToString('o') } |
         ConvertTo-Json | Set-Content -LiteralPath $budgetFile -Encoding UTF8
-    Write-Host "==> $([DateTime]::UtcNow.ToString('o')) Initialized cumulative execution budget: 80m"
+    Write-Host "==> $([DateTime]::UtcNow.ToString('o')) Initialized absolute job budget: 55m"
 }
 
 function Invoke-CommandWithHardTimeout {
@@ -44,7 +44,7 @@ function Invoke-CommandWithHardTimeout {
     )
 
     $remainingMs = [Math]::Floor(($script:deadlineUtc - [DateTime]::UtcNow).TotalMilliseconds)
-    if ($remainingMs -le 0) { throw "80-minute cumulative execution budget exhausted before: $Command" }
+    if ($remainingMs -le 0) { throw "55-minute absolute job budget exhausted before: $Command" }
     $timeoutMs = [int][Math]::Min($TimeoutMinutes * 60 * 1000, $remainingMs)
     $startedUtc = [DateTime]::UtcNow
     $timer = [Diagnostics.Stopwatch]::StartNew()
@@ -68,7 +68,7 @@ function Invoke-CommandWithHardTimeout {
         }
         $exited = $proc.WaitForExit($timeoutMs)
         if (-not $exited) {
-            throw "Command execution timed out after $timeoutMs ms (stage or cumulative budget): $Command"
+            throw "Command execution timed out after $timeoutMs ms (stage or job deadline): $Command"
         }
         if ($proc.ExitCode -ne 0) {
             throw "Command failed with exit code $($proc.ExitCode): $Command"
@@ -220,11 +220,9 @@ function Invoke-BuildAction {
     param([string]$Stage)
     if (-not (Test-Path -LiteralPath $budgetFile)) { throw "Missing build budget; run begin-budget first." }
     $budget = Get-Content -LiteralPath $budgetFile -Raw | ConvertFrom-Json
-    $remainingMs = [double]$budget.remainingMilliseconds
-    if ($remainingMs -le 0 -or $remainingMs -gt (80 * 60 * 1000)) { throw "Invalid or exhausted cumulative execution budget." }
-    $script:deadlineUtc = [DateTime]::UtcNow.AddMilliseconds($remainingMs)
-    $budget.deadlineUtc = $script:deadlineUtc.ToString('o')
-    $budget | ConvertTo-Json | Set-Content -LiteralPath $budgetFile -Encoding UTF8
+    $script:deadlineUtc = [DateTime]::Parse($budget.deadlineUtc).ToUniversalTime()
+    $remainingMs = ($script:deadlineUtc - [DateTime]::UtcNow).TotalMilliseconds
+    if ($remainingMs -le 0 -or $remainingMs -gt (55 * 60 * 1000)) { throw "Invalid or exhausted absolute job budget." }
     $actionTimer = [Diagnostics.Stopwatch]::StartNew()
     try {
         # Keep predist:win and every dist:win command in their original order.
@@ -232,7 +230,16 @@ function Invoke-BuildAction {
         switch ($Stage) {
             "install-toolchain" { Install-NodeToolchain }
             "dependencies" { Invoke-CommandWithHardTimeout -Command "npm install" -TimeoutMinutes 10 }
-            "runtime" { Invoke-CommandWithHardTimeout -Command "npm run openclaw:runtime:win-x64" -TimeoutMinutes 50 }
+            "runtime" {
+                # Reserve five minutes for export/workspace transfer, within the job deadline.
+                $script:deadlineUtc = $script:deadlineUtc.AddMinutes(-5)
+                Invoke-CommandWithHardTimeout -Command "npm run openclaw:runtime:win-x64" -TimeoutMinutes 50
+            }
+            "export-runtime" { Invoke-CommandWithHardTimeout -Command "node .circleci\runtime-workspace.cjs export" -TimeoutMinutes 5 }
+            "import-runtime" {
+                Invoke-CommandWithHardTimeout -Command "node .circleci\runtime-workspace.cjs import" -TimeoutMinutes 5
+                Invoke-CommandWithHardTimeout -Command "node scripts\sync-openclaw-runtime-current.cjs win-x64" -TimeoutMinutes 2
+            }
             "verify-installer" { Invoke-CommandWithHardTimeout -Command "npm run verify:installer-patches" -TimeoutMinutes 2 }
             "python" { Invoke-CommandWithHardTimeout -Command "npm run setup:python-runtime" -TimeoutMinutes 5 }
             "build-client" { Invoke-CommandWithHardTimeout -Command "npm run build" -TimeoutMinutes 10 }
@@ -251,9 +258,8 @@ function Invoke-BuildAction {
         }
     } finally {
         $actionTimer.Stop()
-        $budget.remainingMilliseconds = [Math]::Max(0, $remainingMs - $actionTimer.Elapsed.TotalMilliseconds)
-        $budget | ConvertTo-Json | Set-Content -LiteralPath $budgetFile -Encoding UTF8
-        Write-Host "==> $([DateTime]::UtcNow.ToString('o')) Action $Stage duration=$($actionTimer.Elapsed.TotalSeconds.ToString('F3'))s; remaining execution budget=$([Math]::Round($budget.remainingMilliseconds / 60000, 3))m"
+        $remainingMs = [Math]::Max(0, ([DateTime]::Parse($budget.deadlineUtc).ToUniversalTime() - [DateTime]::UtcNow).TotalMilliseconds)
+        Write-Host "==> $([DateTime]::UtcNow.ToString('o')) Action $Stage duration=$($actionTimer.Elapsed.TotalSeconds.ToString('F3'))s; remaining job budget=$([Math]::Round($remainingMs / 60000, 3))m"
     }
 }
 

@@ -1,42 +1,44 @@
 version: 2.1
 
 jobs:
-  build-windows:
-    machine:
+  runtime-windows:
+    machine: &windows-machine
       image: windows-server-2022-gui:current
     resource_class: windows.medium
     shell: powershell.exe -ExecutionPolicy Bypass
-    environment:
+    environment: &windows-environment
       CSC_IDENTITY_AUTO_DISCOVERY: "false"
       NODE_OPTIONS: "--max-old-space-size=6144"
     steps:
       - checkout
-      - run:
-          name: Initialize 80-minute cumulative execution budget
+      - run: &begin-budget
+          name: Initialize absolute 55-minute job deadline
           command: .\.circleci\run-build.ps1 begin-budget
           no_output_timeout: 2m
-      # CircleCI cache archive steps have platform bounds, separate from the
-      # helper's cumulative command budget. Cache downloads, never workspaces.
-      - restore_cache:
+      # Cache/workspace waits consume the absolute deadline at the next command.
+      # Cache only tools/downloads; compiled runtime is workflow-local.
+      - restore_cache: &restore-toolchain
           keys:
             - win2022-x64-toolchain-v1-node24.15.0-npm11.17.0-pnpm12.1.0-{{ checksum ".circleci/run-build.ps1" }}
-      - restore_cache:
+            - win2022-x64-toolchain-v1-node24.15.0-npm11.17.0-pnpm12.1.0-ewAy4f7_DeYhyJzQfRALwZDOW_p5IZ54NpSIgrliGC0=
+      - restore_cache: &restore-downloads
           keys:
             - win2022-x64-downloads-v1-node24.15.0-npm11.17.0-pnpm12.1.0-{{ checksum ".circleci/run-build.ps1" }}-{{ checksum "package.json" }}-
-      - run:
+            - win2022-x64-downloads-v1-node24.15.0-npm11.17.0-pnpm12.1.0-ewAy4f7_DeYhyJzQfRALwZDOW_p5IZ54NpSIgrliGC0=-{{ checksum "package.json" }}-
+      - run: &install-toolchain
           name: Setup Toolchain (Node 24.15.0, npm, pnpm)
           command: .\.circleci\run-build.ps1 install-toolchain
           no_output_timeout: 12m
-      - save_cache:
+      - save_cache: &save-toolchain
           key: win2022-x64-toolchain-v1-node24.15.0-npm11.17.0-pnpm12.1.0-{{ checksum ".circleci/run-build.ps1" }}
           paths:
             - 'C:/tools/node-v24.15.0-win-x64'
-      - run:
+      - run: &dependencies
           name: Install dependencies (10m)
           command: .\.circleci\run-build.ps1 dependencies
           no_output_timeout: 12m
       # Save early: later runtime/client failures must not lose downloaded deps.
-      - save_cache:
+      - save_cache: &save-downloads-deps
           key: win2022-x64-downloads-v1-node24.15.0-npm11.17.0-pnpm12.1.0-{{ checksum ".circleci/run-build.ps1" }}-{{ checksum "package.json" }}-{{ .BuildNum }}-deps
           paths:
             - 'C:/lobsterai-cache/npm/_cacache'
@@ -54,6 +56,36 @@ jobs:
             - 'C:/lobsterai-cache/electron'
             - 'C:/lobsterai-cache/pnpm-store'
             - 'C:/lobsterai-cache/electron-builder'
+      - run:
+          name: Export verified runtime workspace (5m)
+          command: .\.circleci\run-build.ps1 export-runtime
+          no_output_timeout: 7m
+      - persist_to_workspace:
+          root: '.circleci-workspace'
+          paths:
+            - runtime.tar
+            - manifest.json
+
+  build-windows:
+    machine: *windows-machine
+    resource_class: windows.medium
+    shell: powershell.exe -ExecutionPolicy Bypass
+    environment: *windows-environment
+    steps:
+      - checkout
+      - run: *begin-budget
+      - restore_cache: *restore-toolchain
+      - restore_cache: *restore-downloads
+      - run: *install-toolchain
+      - save_cache: *save-toolchain
+      - run: *dependencies
+      - save_cache: *save-downloads-deps
+      - attach_workspace:
+          at: '.circleci-workspace'
+      - run:
+          name: Import verified runtime and recreate current (5m + 2m)
+          command: .\.circleci\run-build.ps1 import-runtime
+          no_output_timeout: 7m
       - run:
           name: Verify installer patches (2m)
           command: .\.circleci\run-build.ps1 verify-installer
@@ -96,10 +128,14 @@ jobs:
 workflows:
   build:
     jobs:
-      - build-windows:
-          filters:
+      - runtime-windows:
+          filters: &branch-only
             branches:
               only:
                 - feat/smartbutler-integration
             tags:
               ignore: /.*/
+      - build-windows:
+          requires:
+            - runtime-windows
+          filters: *branch-only
