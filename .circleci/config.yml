@@ -16,7 +16,8 @@ jobs:
           command: .\.circleci\run-build.ps1 begin-budget
           no_output_timeout: 2m
       # Cache/workspace waits consume the absolute deadline at the next command.
-      # Cache only tools/downloads; compiled runtime is workflow-local.
+      # Tools/downloads use their existing caches. Compiled caches below are
+      # exact source/toolchain identities, independent of HEAD/app version.
       - restore_cache: &restore-toolchain
           keys:
             - win2022-x64-toolchain-v1-node24.15.0-npm11.17.0-pnpm12.1.0-{{ checksum ".circleci/run-build.ps1" }}
@@ -46,9 +47,33 @@ jobs:
             - 'C:/lobsterai-cache/pnpm-store'
             - 'C:/lobsterai-cache/electron-builder'
       - run:
-          name: Build OpenClaw Windows runtime (50m)
-          command: .\.circleci\run-build.ps1 runtime
-          no_output_timeout: 52m
+          name: Generate exact compiled-cache keys before restore
+          command: .\.circleci\run-build.ps1 runtime-cache-keys
+          no_output_timeout: 2m
+      - restore_cache:
+          keys:
+            - openclaw-compiled-core-win2022-x64-node24.15.0-npm11.17.0-pnpm12.1.0-{{ checksum ".circleci-runtime-keys/core.txt" }}
+      - restore_cache:
+          keys:
+            - openclaw-compiled-full-win2022-x64-node24.15.0-npm11.17.0-pnpm12.1.0-{{ checksum ".circleci-runtime-keys/full.txt" }}
+      - run:
+          name: Validate or build and snapshot OpenClaw core (35m)
+          command: .\.circleci\run-build.ps1 runtime-core
+          no_output_timeout: 37m
+      # Must precede plugins: a plugin failure still retains the real core.
+      # Even a full hit ensures a legitimate core; no missing-path save/relabel.
+      - save_cache:
+          key: openclaw-compiled-core-win2022-x64-node24.15.0-npm11.17.0-pnpm12.1.0-{{ checksum ".circleci-runtime-keys/core.txt" }}
+          paths:
+            - '.circleci-runtime-cache/core'
+      - run:
+          name: Validate full hit or build remainder and snapshot (20m)
+          command: .\.circleci\run-build.ps1 runtime-remainder
+          no_output_timeout: 22m
+      - save_cache:
+          key: openclaw-compiled-full-win2022-x64-node24.15.0-npm11.17.0-pnpm12.1.0-{{ checksum ".circleci-runtime-keys/full.txt" }}
+          paths:
+            - '.circleci-runtime-cache/full'
       - save_cache:
           key: win2022-x64-downloads-v1-node24.15.0-npm11.17.0-pnpm12.1.0-{{ checksum ".circleci/run-build.ps1" }}-{{ checksum "package.json" }}-{{ .BuildNum }}-runtime
           paths:

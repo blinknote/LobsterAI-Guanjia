@@ -216,6 +216,38 @@ function Collect-Artifacts {
     Write-Host "==> Artifact collection completed successfully."
 }
 
+function Limit-RuntimeStage {
+    param([int]$Minutes)
+    # One shared stage cap, including restore/validation/snapshot child commands.
+    # Keep five minutes in the absolute job budget for export and upload.
+    $reservedDeadline = $script:deadlineUtc.AddMinutes(-5)
+    $stageDeadline = [DateTime]::UtcNow.AddMinutes($Minutes)
+    $script:deadlineUtc = if ($stageDeadline -lt $reservedDeadline) { $stageDeadline } else { $reservedDeadline }
+}
+
+function Prepare-RuntimeCore {
+    Limit-RuntimeStage 35
+    Invoke-CommandWithHardTimeout -Command "node .circleci\runtime-workspace.cjs prepare-core" -TimeoutMinutes 5
+    $state = Get-Content -LiteralPath ".circleci-runtime-state.json" -Raw | ConvertFrom-Json
+    if (-not $state.coreReady) {
+        Invoke-CommandWithHardTimeout -Command "npm run openclaw:ensure && npm run openclaw:patch && node scripts\run-build-openclaw-runtime.cjs win-x64" -TimeoutMinutes 35
+    }
+    Invoke-CommandWithHardTimeout -Command "node scripts\sync-openclaw-runtime-current.cjs win-x64" -TimeoutMinutes 2
+    Invoke-CommandWithHardTimeout -Command "node .circleci\runtime-workspace.cjs capture-core" -TimeoutMinutes 5
+}
+
+function Prepare-RuntimeRemainder {
+    Limit-RuntimeStage 20
+    Invoke-CommandWithHardTimeout -Command "node .circleci\runtime-workspace.cjs prepare-full" -TimeoutMinutes 5
+    Invoke-CommandWithHardTimeout -Command "node scripts\sync-openclaw-runtime-current.cjs win-x64" -TimeoutMinutes 2
+    $state = Get-Content -LiteralPath ".circleci-runtime-state.json" -Raw | ConvertFrom-Json
+    if (-not $state.fullReady) {
+        # Preserve the approved package.json chain and all npm lifecycle hooks.
+        Invoke-CommandWithHardTimeout -Command "npm run openclaw:bundle && npm run openclaw:plugins && npm run openclaw:extensions:local && npm run openclaw:precompile && npm run openclaw:channel-deps && npm run openclaw:prune" -TimeoutMinutes 20
+    }
+    Invoke-CommandWithHardTimeout -Command "node .circleci\runtime-workspace.cjs capture-full" -TimeoutMinutes 5
+}
+
 function Invoke-BuildAction {
     param([string]$Stage)
     if (-not (Test-Path -LiteralPath $budgetFile)) { throw "Missing build budget; run begin-budget first." }
@@ -230,11 +262,9 @@ function Invoke-BuildAction {
         switch ($Stage) {
             "install-toolchain" { Install-NodeToolchain }
             "dependencies" { Invoke-CommandWithHardTimeout -Command "npm install" -TimeoutMinutes 10 }
-            "runtime" {
-                # Reserve five minutes for export/workspace transfer, within the job deadline.
-                $script:deadlineUtc = $script:deadlineUtc.AddMinutes(-5)
-                Invoke-CommandWithHardTimeout -Command "npm run openclaw:runtime:win-x64" -TimeoutMinutes 50
-            }
+            "runtime-cache-keys" { Invoke-CommandWithHardTimeout -Command "node .circleci\runtime-workspace.cjs cache-keys" -TimeoutMinutes 1 }
+            "runtime-core" { Prepare-RuntimeCore }
+            "runtime-remainder" { Prepare-RuntimeRemainder }
             "export-runtime" { Invoke-CommandWithHardTimeout -Command "node .circleci\runtime-workspace.cjs export" -TimeoutMinutes 5 }
             "import-runtime" {
                 Invoke-CommandWithHardTimeout -Command "node .circleci\runtime-workspace.cjs import" -TimeoutMinutes 5
@@ -268,12 +298,12 @@ switch ($Action) {
     "collect-artifacts-internal" { Collect-Artifacts }
     "all" {
         Initialize-BuildBudget
-        foreach ($stage in @("install-toolchain", "dependencies", "runtime", "verify-installer", "python", "build-client", "compile-electron", "skills", "package", "artifacts")) {
+        foreach ($stage in @("install-toolchain", "dependencies", "runtime-cache-keys", "runtime-core", "runtime-remainder", "verify-installer", "python", "build-client", "compile-electron", "skills", "package", "artifacts")) {
             Invoke-BuildAction $stage
         }
     }
     "build" {
-        foreach ($stage in @("dependencies", "runtime", "verify-installer", "python", "build-client", "compile-electron", "skills", "package")) {
+        foreach ($stage in @("dependencies", "runtime-cache-keys", "runtime-core", "runtime-remainder", "verify-installer", "python", "build-client", "compile-electron", "skills", "package")) {
             Invoke-BuildAction $stage
         }
     }
