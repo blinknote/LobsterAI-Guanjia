@@ -227,7 +227,7 @@ function Limit-RuntimeStage {
 
 function Prepare-RuntimeCore {
     Limit-RuntimeStage 40
-    Invoke-CommandWithHardTimeout -Command "node .circleci\runtime-workspace.cjs prepare-core" -TimeoutMinutes 5
+    Invoke-CommandWithHardTimeout -Command "node .circleci\runtime-workspace.cjs prepare-core" -TimeoutMinutes 55
     $state = Get-Content -LiteralPath ".circleci-runtime-state.json" -Raw | ConvertFrom-Json
     if (-not $state.coreReady) {
         Invoke-CommandWithHardTimeout -Command "npm run openclaw:ensure && npm run openclaw:patch && node scripts\run-build-openclaw-runtime.cjs win-x64" -TimeoutMinutes 35
@@ -243,7 +243,7 @@ function Prepare-RuntimeCore {
 
 function Prepare-RuntimePublished {
     Limit-RuntimeStage 40
-    Invoke-CommandWithHardTimeout -Command "node .circleci\runtime-workspace.cjs prepare-plugins" -TimeoutMinutes 5
+    Invoke-CommandWithHardTimeout -Command "node .circleci\runtime-workspace.cjs prepare-plugins" -TimeoutMinutes 55
     Invoke-CommandWithHardTimeout -Command "node scripts\sync-openclaw-runtime-current.cjs win-x64" -TimeoutMinutes 2
     $state = Get-Content -LiteralPath ".circleci-runtime-state.json" -Raw | ConvertFrom-Json
     if (-not $state.pluginsReady) {
@@ -254,7 +254,7 @@ function Prepare-RuntimePublished {
 
 function Prepare-RuntimeRemainder {
     Limit-RuntimeStage 40
-    Invoke-CommandWithHardTimeout -Command "node .circleci\runtime-workspace.cjs prepare-full" -TimeoutMinutes 5
+    Invoke-CommandWithHardTimeout -Command "node .circleci\runtime-workspace.cjs prepare-full" -TimeoutMinutes 55
     Invoke-CommandWithHardTimeout -Command "node scripts\sync-openclaw-runtime-current.cjs win-x64" -TimeoutMinutes 2
     $state = Get-Content -LiteralPath ".circleci-runtime-state.json" -Raw | ConvertFrom-Json
     if (-not $state.fullReady) {
@@ -284,12 +284,12 @@ function Invoke-BuildAction {
             "runtime-remainder" { Prepare-RuntimeRemainder }
             "export-core" { Invoke-CommandWithHardTimeout -Command "node .circleci\runtime-workspace.cjs export-core" -TimeoutMinutes 5 }
             "import-core" {
-                Invoke-CommandWithHardTimeout -Command "node .circleci\runtime-workspace.cjs import-core" -TimeoutMinutes 5
+                Invoke-CommandWithHardTimeout -Command "node .circleci\runtime-workspace.cjs import-core" -TimeoutMinutes 55
                 Invoke-CommandWithHardTimeout -Command "node scripts\sync-openclaw-runtime-current.cjs win-x64" -TimeoutMinutes 2
             }
             "export-runtime" { Invoke-CommandWithHardTimeout -Command "node .circleci\runtime-workspace.cjs export" -TimeoutMinutes 5 }
             "import-runtime" {
-                Invoke-CommandWithHardTimeout -Command "node .circleci\runtime-workspace.cjs import" -TimeoutMinutes 5
+                Invoke-CommandWithHardTimeout -Command "node .circleci\runtime-workspace.cjs import" -TimeoutMinutes 55
                 Invoke-CommandWithHardTimeout -Command "node scripts\sync-openclaw-runtime-current.cjs win-x64" -TimeoutMinutes 2
             }
             "verify-installer" { Invoke-CommandWithHardTimeout -Command "npm run verify:installer-patches" -TimeoutMinutes 2 }

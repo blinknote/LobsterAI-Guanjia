@@ -92,9 +92,9 @@ jobs:
       - attach_workspace:
           at: '.circleci-workspace'
       - run:
-          name: Import required verified core and recreate current (5m + 2m)
+          name: Import required verified core and recreate current (job deadline + 2m sync)
           command: .\.circleci\run-build.ps1 import-core
-          no_output_timeout: 7m
+          no_output_timeout: 57m
       - restore_cache:
           keys:
             - openclaw-compiled-plugins-win2022-x64-node24.15.0-npm11.17.0-pnpm12.1.0-{{ checksum ".circleci-runtime-keys/plugins.txt" }}
@@ -145,9 +145,9 @@ jobs:
       - attach_workspace:
           at: '.circleci-workspace'
       - run:
-          name: Import verified runtime and recreate current (5m + 2m)
+          name: Import verified runtime and recreate current (job deadline + 2m sync)
           command: .\.circleci\run-build.ps1 import-runtime
-          no_output_timeout: 7m
+          no_output_timeout: 57m
       - run:
           name: Verify installer patches (2m)
           command: .\.circleci\run-build.ps1 verify-installer
