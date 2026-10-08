@@ -12,11 +12,22 @@ const workspace = path.join(root, '.circleci-workspace');
 const cacheRoot = path.join(root, '.circleci-runtime-cache');
 const keysRoot = path.join(root, '.circleci-runtime-keys');
 const stateFile = path.join(root, '.circleci-runtime-state.json');
-const CACHE_SCHEMA = 2;
+const CACHE_SCHEMA = 3;
 // CircleCI caches are immutable. Bump this to retire a corrupt exact-key cache.
 const CACHE_EPOCH = 1;
 const CORE = 'core';
+const PLUGINS = 'plugins';
 const FULL = 'full';
+// All jobs use the same unmodified source/published-plugin policy. Environment
+// bypasses or alternate source/output roots must never create reusable caches.
+for (const name of ['OPENCLAW_SKIP_ENSURE', 'OPENCLAW_SKIP_PLUGINS', 'OPENCLAW_SKIP_OPTIONAL_PLUGINS']) {
+  if (process.env[name] && !['0', 'false'].includes(process.env[name].toLowerCase())) {
+    throw new Error(`Compiled cache requires the default build policy; unset ${name}.`);
+  }
+}
+for (const name of ['OPENCLAW_SRC', 'ELECTRON_ROOT', 'OUT_DIR']) {
+  if (process.env[name]) throw new Error(`Compiled cache requires the default build roots; unset ${name}.`);
+}
 const readJson = file => JSON.parse(fs.readFileSync(file, 'utf8'));
 const app = readJson(path.join(root, 'package.json'));
 const commit = execFileSync('git', ['rev-parse', 'HEAD'], {
@@ -29,10 +40,8 @@ const toolchain = { target: 'win-x64', platform: 'windows-server-2022-gui',
 if (!/^\d+\.\d+\.\d+$/.test(toolchain.electronVersion)) {
   throw new Error('Compiled runtime caching requires an exact Electron pin.');
 }
-const tracked = execFileSync('git', ['ls-files', '-z'], {
-  cwd: root, encoding: 'utf8', timeout: 10000, maxBuffer: 16 * 1024 * 1024,
-}).split('\0').filter(Boolean).sort();
 const packaging = require('../scripts/openclaw-runtime-packaging.cjs');
+const inputs = require('./cache-inputs.cjs').collectInputs(root, app);
 
 function stable(value) {
   if (Array.isArray(value)) return value.map(stable);
@@ -61,25 +70,21 @@ function sourceFingerprint(config, files) {
   return hash.digest('hex');
 }
 
-// Conservative core inputs: all tracked build/patch scripts and package
-// configuration except the app's name/version. Startup bundling embeds the
-// pinned plugin repair metadata, so plugin config is now a core input too.
-const coreConfig = { ...app, openclaw: {
-  repo: app.openclaw.repo, version: app.openclaw.version, plugins: app.openclaw.plugins,
-} };
-delete coreConfig.name;
-delete coreConfig.version;
-const coreFiles = tracked.filter(file => file.startsWith('scripts/') || file.startsWith('patches/')
-  || file.startsWith('.circleci/')
-  || ['package-lock.json', 'npm-shrinkwrap.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml'].includes(file));
+// Startup bundling embeds the pinned plugin repair metadata. Its local source
+// imports and file reads belong to core; CI YAML/PowerShell/helper code do not.
+const repairPlugins = (app.openclaw.plugins || []).filter(plugin => plugin.version && plugin.npm)
+  .map(plugin => ({ id: plugin.id, npm: plugin.npm, version: plugin.version, runtimeBundled: plugin.runtimeBundled === true }));
 const coreFingerprint = sourceFingerprint({ schemaVersion: CACHE_SCHEMA, epoch: CACHE_EPOCH,
-  ...toolchain, package: coreConfig }, coreFiles);
-const extensionFiles = tracked.filter(file => file.startsWith('openclaw-extensions/'));
-const fullFingerprint = sourceFingerprint({ coreFingerprint, openclaw: app.openclaw }, extensionFiles);
+  ...toolchain, openclawRepo: app.openclaw.repo, openclawVersion: app.openclaw.version,
+  repairPlugins, ...inputs.coreConfig }, inputs.core.files);
+const pluginsFingerprint = sourceFingerprint({ coreFingerprint, plugins: app.openclaw.plugins,
+  ...inputs.pluginsConfig }, inputs.plugins.files);
+const extensionFiles = inputs.extensionFiles;
+const fullFingerprint = sourceFingerprint({ pluginsFingerprint, ...inputs.fullConfig }, inputs.full.files);
 
 function cacheIdentity(stage) {
   return { schemaVersion: CACHE_SCHEMA, epoch: CACHE_EPOCH, stage,
-    fingerprint: stage === CORE ? coreFingerprint : fullFingerprint,
+    fingerprint: stage === CORE ? coreFingerprint : stage === PLUGINS ? pluginsFingerprint : fullFingerprint,
     ...toolchain, openclawVersion: app.openclaw.version, openclawRepo: app.openclaw.repo };
 }
 
@@ -98,6 +103,7 @@ function writeJson(file, value) {
 function readState() {
   const state = readJson(stateFile);
   if (state.commit !== commit || state.coreFingerprint !== coreFingerprint
+    || state.pluginsFingerprint !== pluginsFingerprint
     || state.fullFingerprint !== fullFingerprint || state.ownsRuntime !== true) {
     throw new Error('Runtime state is not owned by this checkout and these inputs.');
   }
@@ -175,6 +181,8 @@ function validateRuntime(stage, runtimeRoot = runtime) {
         throw new Error(`Local compiled plugin metadata mismatch: ${id}`);
       }
     }
+  }
+  if (stage === PLUGINS || stage === FULL) {
     for (const plugin of app.openclaw.plugins || []) {
       if (plugin.optional) continue;
       const pluginDir = packaging.resolvePreinstalledPluginDir(runtimeRoot, plugin);
@@ -186,8 +194,19 @@ function validateRuntime(stage, runtimeRoot = runtime) {
       }
       packaging.verifyRuntimeBundledPlugin(runtimeRoot, plugin);
     }
-    require('../scripts/openclaw-plugin-sdk-bridge.cjs').verifyOpenClawPluginSdkBridge(runtimeRoot);
   }
+  if (stage === PLUGINS) {
+    // Never manufacture a pre-local snapshot by relabelling the full runtime.
+    for (const file of extensionFiles.filter(file => /^openclaw-extensions\/[^/]+\/package\.json$/.test(file))) {
+      if (fs.existsSync(path.join(runtimeRoot, 'third-party-extensions', file.split('/')[1]))) {
+        throw new Error('Published plugin snapshot must not contain local extensions.');
+      }
+    }
+    if (fs.existsSync(path.join(runtimeRoot, 'node_modules', 'openclaw'))) {
+      throw new Error('Published plugin snapshot must precede the SDK bridge.');
+    }
+  }
+  if (stage === FULL) require('../scripts/openclaw-plugin-sdk-bridge.cjs').verifyOpenClawPluginSdkBridge(runtimeRoot);
   return info.openclawCommit;
 }
 
@@ -274,7 +293,7 @@ async function exportArchive(files, identity, originBuildCommit = commit) {
     archiveSha256: await sha256(files.archive) });
 }
 
-async function importArchive(files, identity, replaceOwnedCore = false) {
+async function importArchive(files, identity, replaceOwnedStage = null) {
   const manifest = await checkArchive(files, identity);
   const parent = path.dirname(runtime);
   fs.mkdirSync(parent, { recursive: true });
@@ -287,11 +306,13 @@ async function importArchive(files, identity, replaceOwnedCore = false) {
     if (validateRuntime(identity.stage, extracted) !== manifest.openclawCommit) {
       throw new Error('Runtime OpenClaw source commit mismatch.');
     }
-    if (replaceOwnedCore) {
+    if (replaceOwnedStage) {
       const state = readState();
-      if (!state.coreReady || state.stage !== CORE) throw new Error('Only this job\'s verified core can be replaced.');
+      const ready = replaceOwnedStage === CORE ? state.coreReady
+        : replaceOwnedStage === PLUGINS ? state.pluginsReady : false;
+      if (!ready || state.stage !== replaceOwnedStage) throw new Error('Only this job\'s verified core/plugins can be replaced.');
       validateLinks();
-      validateRuntime(CORE);
+      validateRuntime(replaceOwnedStage);
       fs.rmSync(runtime, { recursive: true });
     } else if (fs.existsSync(runtime)) {
       throw new Error('Runtime destination already exists; refusing to overwrite.');
@@ -315,7 +336,7 @@ function cachePresent(stage) {
 async function main() {
   const action = process.argv[2];
   if (action === 'fingerprints') {
-    console.log(JSON.stringify({ core: cacheIdentity(CORE), full: cacheIdentity(FULL) }, null, 2));
+    console.log(JSON.stringify({ core: cacheIdentity(CORE), plugins: cacheIdentity(PLUGINS), full: cacheIdentity(FULL) }, null, 2));
     return;
   }
   if (process.platform !== 'win32' || process.arch !== 'x64' || process.versions.node !== toolchain.nodeVersion) {
@@ -326,13 +347,13 @@ async function main() {
       throw new Error('Compiled-cache setup requires a fresh job; refusing to reuse unowned output.');
     }
     fs.mkdirSync(keysRoot, { recursive: true });
-    for (const stage of [CORE, FULL]) writeJson(path.join(keysRoot, `${stage}.txt`), cacheIdentity(stage));
+    for (const stage of [CORE, PLUGINS, FULL]) writeJson(path.join(keysRoot, `${stage}.txt`), cacheIdentity(stage));
   } else if (action === 'prepare-core') {
     if (fs.existsSync(runtime) || fs.existsSync(stateFile)) throw new Error('Core destination/state already exists; refusing to overwrite.');
     const hit = cachePresent(CORE);
     const manifest = hit ? await importArchive(payload(path.join(cacheRoot, CORE)), cacheIdentity(CORE)) : null;
-    writeJson(stateFile, { commit, coreFingerprint, fullFingerprint, ownsRuntime: true,
-      coreReady: hit, fullReady: false, stage: CORE, originBuildCommit: manifest?.originBuildCommit || commit });
+    writeJson(stateFile, { commit, coreFingerprint, pluginsFingerprint, fullFingerprint, ownsRuntime: true,
+      coreReady: hit, pluginsReady: false, fullReady: false, stage: CORE, originBuildCommit: manifest?.originBuildCommit || commit });
     console.log(hit ? 'Verified core compiled cache hit; skip core build.'
       : fs.existsSync(path.join(cacheRoot, FULL))
         ? 'Full cache present but core missing; rebuild a legitimate core before saving (never relabel full).'
@@ -343,17 +364,32 @@ async function main() {
     if (!state.coreReady) await exportArchive(payload(path.join(cacheRoot, CORE)), cacheIdentity(CORE));
     else { validateLinks(); validateRuntime(CORE); }
     writeJson(stateFile, { ...state, coreReady: true });
+  } else if (action === 'prepare-plugins') {
+    const state = readState();
+    if (!state.coreReady || state.stage !== CORE) throw new Error('Published plugins require this job\'s verified core.');
+    const hit = cachePresent(PLUGINS);
+    const manifest = hit ? await importArchive(payload(path.join(cacheRoot, PLUGINS)), cacheIdentity(PLUGINS), CORE) : null;
+    writeJson(stateFile, { ...state, pluginsReady: hit, stage: hit ? PLUGINS : CORE,
+      originBuildCommit: manifest?.originBuildCommit || commit });
+    console.log(hit ? 'Verified published plugins cache hit; skip installation.'
+      : 'Published plugins cache miss; install and snapshot before local extensions (even with a full hit).');
+  } else if (action === 'capture-plugins') {
+    const state = readState();
+    if (!state.coreReady || ![CORE, PLUGINS].includes(state.stage)) throw new Error('Cannot label a full runtime as published plugins.');
+    if (!state.pluginsReady) await exportArchive(payload(path.join(cacheRoot, PLUGINS)), cacheIdentity(PLUGINS));
+    else { validateLinks(); validateRuntime(PLUGINS); }
+    writeJson(stateFile, { ...state, pluginsReady: true, stage: PLUGINS });
   } else if (action === 'prepare-full') {
     const state = readState();
-    if (!state.coreReady || state.stage !== CORE) throw new Error('Save a verified core before preparing full runtime.');
+    if (!state.coreReady || !state.pluginsReady || state.stage !== PLUGINS) throw new Error('Save verified published plugins before preparing full runtime.');
     const hit = cachePresent(FULL);
-    const manifest = hit ? await importArchive(payload(path.join(cacheRoot, FULL)), cacheIdentity(FULL), true) : null;
-    writeJson(stateFile, { ...state, fullReady: hit, stage: hit ? FULL : CORE,
+    const manifest = hit ? await importArchive(payload(path.join(cacheRoot, FULL)), cacheIdentity(FULL), PLUGINS) : null;
+    writeJson(stateFile, { ...state, fullReady: hit, stage: hit ? FULL : PLUGINS,
       originBuildCommit: manifest?.originBuildCommit || commit });
     console.log(hit ? 'Verified full compiled cache hit; skip build remainder.' : 'Full compiled cache miss; build remainder only.');
   } else if (action === 'capture-full') {
     const state = readState();
-    if (!state.coreReady) throw new Error('Full snapshot requires verified core.');
+    if (!state.coreReady || !state.pluginsReady || ![PLUGINS, FULL].includes(state.stage)) throw new Error('Full snapshot requires verified published plugins.');
     if (!state.fullReady) await exportArchive(payload(path.join(cacheRoot, FULL)), cacheIdentity(FULL));
     else { validateLinks(); validateRuntime(FULL); }
     writeJson(stateFile, { ...state, fullReady: true, stage: FULL });
@@ -372,21 +408,29 @@ async function main() {
   } else if (action === 'import-core') {
     if (fs.existsSync(runtime) || fs.existsSync(stateFile)) throw new Error('Core workspace import requires a fresh runtime and state.');
     const manifest = await importArchive(payload(path.join(workspace, CORE)), workspaceIdentity(CORE));
-    writeJson(stateFile, { commit, coreFingerprint, fullFingerprint, ownsRuntime: true,
-      coreReady: true, fullReady: false, stage: CORE, originBuildCommit: manifest.originBuildCommit });
+    writeJson(stateFile, { commit, coreFingerprint, pluginsFingerprint, fullFingerprint, ownsRuntime: true,
+      coreReady: true, pluginsReady: false, fullReady: false, stage: CORE, originBuildCommit: manifest.originBuildCommit });
   } else if (action === 'export') {
     const state = readState();
     if (!state.fullReady || state.stage !== FULL) throw new Error('Workspace export requires validated full inputs.');
-    await exportArchive(payload(path.join(workspace, FULL)), workspaceIdentity(), state.originBuildCommit);
+    // Reuse the successfully captured/restored full archive, just as export-core
+    // does. Bind the current checkout only in the workspace manifest, not tar.
+    const snapshot = payload(path.join(cacheRoot, FULL));
+    const manifest = await checkArchive(snapshot, cacheIdentity(FULL));
+    const files = payload(path.join(workspace, FULL));
+    fs.mkdirSync(files.dir, { recursive: true });
+    fs.rmSync(files.manifestFile, { force: true });
+    fs.copyFileSync(snapshot.archive, files.archive);
+    writeJson(files.manifestFile, { ...manifest, ...workspaceIdentity() });
   } else if (action === 'import') {
     await importArchive(payload(path.join(workspace, FULL)), workspaceIdentity());
-  } else throw new Error('Usage: runtime-workspace.cjs fingerprints|cache-keys|prepare-core|capture-core|prepare-full|capture-full|export-core|import-core|export|import');
+  } else throw new Error('Usage: runtime-workspace.cjs fingerprints|cache-keys|prepare-core|capture-core|prepare-plugins|capture-plugins|prepare-full|capture-full|export-core|import-core|export|import');
   console.log(`Runtime ${action} verified: ${commit} (${toolchain.target})`);
 }
 
 main().catch(error => {
   console.error(error.stack || error);
-  if (['prepare-core', 'prepare-full'].includes(process.argv[2])) {
+  if (['prepare-core', 'prepare-plugins', 'prepare-full'].includes(process.argv[2])) {
     console.error('Compiled cache rejected; no fallback. Inspect the error and bump CACHE_EPOCH in .circleci/runtime-workspace.cjs to retire immutable corrupt caches.');
   }
   process.exitCode = 1;

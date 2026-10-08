@@ -241,14 +241,25 @@ function Prepare-RuntimeCore {
     Invoke-CommandWithHardTimeout -Command "node .circleci\runtime-workspace.cjs capture-core" -TimeoutMinutes 5
 }
 
+function Prepare-RuntimePublished {
+    Limit-RuntimeStage 40
+    Invoke-CommandWithHardTimeout -Command "node .circleci\runtime-workspace.cjs prepare-plugins" -TimeoutMinutes 5
+    Invoke-CommandWithHardTimeout -Command "node scripts\sync-openclaw-runtime-current.cjs win-x64" -TimeoutMinutes 2
+    $state = Get-Content -LiteralPath ".circleci-runtime-state.json" -Raw | ConvertFrom-Json
+    if (-not $state.pluginsReady) {
+        Invoke-CommandWithHardTimeout -Command "npm run openclaw:plugins" -TimeoutMinutes 30
+    }
+    Invoke-CommandWithHardTimeout -Command "node .circleci\runtime-workspace.cjs capture-plugins" -TimeoutMinutes 5
+}
+
 function Prepare-RuntimeRemainder {
     Limit-RuntimeStage 40
     Invoke-CommandWithHardTimeout -Command "node .circleci\runtime-workspace.cjs prepare-full" -TimeoutMinutes 5
     Invoke-CommandWithHardTimeout -Command "node scripts\sync-openclaw-runtime-current.cjs win-x64" -TimeoutMinutes 2
     $state = Get-Content -LiteralPath ".circleci-runtime-state.json" -Raw | ConvertFrom-Json
     if (-not $state.fullReady) {
-        # Bundling is already captured in core; retain the remaining chain/hooks.
-        Invoke-CommandWithHardTimeout -Command "npm run openclaw:plugins && npm run openclaw:extensions:local && npm run openclaw:precompile && npm run openclaw:channel-deps && npm run openclaw:prune" -TimeoutMinutes 30
+        # Published plugins are already captured; retain local build hooks.
+        Invoke-CommandWithHardTimeout -Command "npm run openclaw:extensions:local && npm run openclaw:precompile && npm run openclaw:channel-deps && npm run openclaw:prune" -TimeoutMinutes 30
     }
     Invoke-CommandWithHardTimeout -Command "node .circleci\runtime-workspace.cjs capture-full" -TimeoutMinutes 5
 }
@@ -269,6 +280,7 @@ function Invoke-BuildAction {
             "dependencies" { Invoke-CommandWithHardTimeout -Command "npm install" -TimeoutMinutes 10 }
             "runtime-cache-keys" { Invoke-CommandWithHardTimeout -Command "node .circleci\runtime-workspace.cjs cache-keys" -TimeoutMinutes 1 }
             "runtime-core" { Prepare-RuntimeCore }
+            "runtime-published" { Prepare-RuntimePublished }
             "runtime-remainder" { Prepare-RuntimeRemainder }
             "export-core" { Invoke-CommandWithHardTimeout -Command "node .circleci\runtime-workspace.cjs export-core" -TimeoutMinutes 5 }
             "import-core" {
@@ -308,12 +320,12 @@ switch ($Action) {
     "collect-artifacts-internal" { Collect-Artifacts }
     "all" {
         Initialize-BuildBudget
-        foreach ($stage in @("install-toolchain", "dependencies", "runtime-cache-keys", "runtime-core", "runtime-remainder", "verify-installer", "python", "build-client", "compile-electron", "skills", "package", "artifacts")) {
+        foreach ($stage in @("install-toolchain", "dependencies", "runtime-cache-keys", "runtime-core", "runtime-published", "runtime-remainder", "verify-installer", "python", "build-client", "compile-electron", "skills", "package", "artifacts")) {
             Invoke-BuildAction $stage
         }
     }
     "build" {
-        foreach ($stage in @("dependencies", "runtime-cache-keys", "runtime-core", "runtime-remainder", "verify-installer", "python", "build-client", "compile-electron", "skills", "package")) {
+        foreach ($stage in @("dependencies", "runtime-cache-keys", "runtime-core", "runtime-published", "runtime-remainder", "verify-installer", "python", "build-client", "compile-electron", "skills", "package")) {
             Invoke-BuildAction $stage
         }
     }

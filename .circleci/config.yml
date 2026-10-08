@@ -20,18 +20,18 @@ jobs:
       # exact source/toolchain identities, independent of HEAD/app version.
       - restore_cache: &restore-toolchain
           keys:
-            - win2022-x64-toolchain-v1-node24.15.0-npm11.17.0-pnpm12.1.0-{{ checksum ".circleci/run-build.ps1" }}
-            - win2022-x64-toolchain-v1-node24.15.0-npm11.17.0-pnpm12.1.0-ewAy4f7_DeYhyJzQfRALwZDOW_p5IZ54NpSIgrliGC0=
+            - win2022-x64-toolchain-v2-node24.15.0-npm11.17.0-pnpm12.1.0
+            - win2022-x64-toolchain-v1-node24.15.0-npm11.17.0-pnpm12.1.0-
       - restore_cache: &restore-downloads
           keys:
-            - win2022-x64-downloads-v1-node24.15.0-npm11.17.0-pnpm12.1.0-{{ checksum ".circleci/run-build.ps1" }}-{{ checksum "package.json" }}-
-            - win2022-x64-downloads-v1-node24.15.0-npm11.17.0-pnpm12.1.0-ewAy4f7_DeYhyJzQfRALwZDOW_p5IZ54NpSIgrliGC0=-{{ checksum "package.json" }}-
+            - win2022-x64-downloads-v2-node24.15.0-npm11.17.0-pnpm12.1.0-
+            - win2022-x64-downloads-v1-node24.15.0-npm11.17.0-pnpm12.1.0-
       - run: &install-toolchain
           name: Setup Toolchain (Node 24.15.0, npm, pnpm)
           command: .\.circleci\run-build.ps1 install-toolchain
           no_output_timeout: 12m
       - save_cache: &save-toolchain
-          key: win2022-x64-toolchain-v1-node24.15.0-npm11.17.0-pnpm12.1.0-{{ checksum ".circleci/run-build.ps1" }}
+          key: win2022-x64-toolchain-v2-node24.15.0-npm11.17.0-pnpm12.1.0
           paths:
             - 'C:/tools/node-v24.15.0-win-x64'
       - run: &dependencies
@@ -56,7 +56,7 @@ jobs:
             - '.circleci-runtime-cache/core'
       # Save downloads after useful core work, not before its build budget.
       - save_cache: &save-downloads-runtime
-          key: win2022-x64-downloads-v1-node24.15.0-npm11.17.0-pnpm12.1.0-{{ checksum ".circleci/run-build.ps1" }}-{{ checksum "package.json" }}-{{ .BuildNum }}-runtime
+          key: win2022-x64-downloads-v2-node24.15.0-npm11.17.0-pnpm12.1.0-{{ .BuildNum }}-{{ .Environment.CIRCLE_JOB }}
           paths:
             - 'C:/lobsterai-cache/npm/_cacache'
             - 'C:/lobsterai-cache/electron'
@@ -97,9 +97,21 @@ jobs:
           no_output_timeout: 7m
       - restore_cache:
           keys:
+            - openclaw-compiled-plugins-win2022-x64-node24.15.0-npm11.17.0-pnpm12.1.0-{{ checksum ".circleci-runtime-keys/plugins.txt" }}
+      - restore_cache:
+          keys:
             - openclaw-compiled-full-win2022-x64-node24.15.0-npm11.17.0-pnpm12.1.0-{{ checksum ".circleci-runtime-keys/full.txt" }}
       - run:
-          name: Validate full hit or build remainder and snapshot (40m phase, 30m plugins)
+          name: Validate or install published plugins and snapshot (40m phase, 30m install)
+          command: .\.circleci\run-build.ps1 runtime-published
+          no_output_timeout: 42m
+      # Only a successful published install/validated hit may save this stage.
+      - save_cache:
+          key: openclaw-compiled-plugins-win2022-x64-node24.15.0-npm11.17.0-pnpm12.1.0-{{ checksum ".circleci-runtime-keys/plugins.txt" }}
+          paths:
+            - '.circleci-runtime-cache/plugins'
+      - run:
+          name: Validate full hit or build local remainder and snapshot (40m phase)
           command: .\.circleci\run-build.ps1 runtime-remainder
           no_output_timeout: 42m
       - save_cache:
@@ -108,7 +120,7 @@ jobs:
             - '.circleci-runtime-cache/full'
       - save_cache: *save-downloads-runtime
       - run:
-          name: Export verified runtime workspace (5m)
+          name: Export verified runtime workspace (5m, reuse snapshot)
           command: .\.circleci\run-build.ps1 export-runtime
           no_output_timeout: 7m
       - persist_to_workspace:
@@ -161,7 +173,7 @@ jobs:
           command: .\.circleci\run-build.ps1 package
           no_output_timeout: 17m
       - save_cache:
-          key: win2022-x64-downloads-v1-node24.15.0-npm11.17.0-pnpm12.1.0-{{ checksum ".circleci/run-build.ps1" }}-{{ checksum "package.json" }}-{{ .BuildNum }}-package
+          key: win2022-x64-downloads-v2-node24.15.0-npm11.17.0-pnpm12.1.0-{{ .BuildNum }}-{{ .Environment.CIRCLE_JOB }}
           paths:
             - 'C:/lobsterai-cache/npm/_cacache'
             - 'C:/lobsterai-cache/electron'
