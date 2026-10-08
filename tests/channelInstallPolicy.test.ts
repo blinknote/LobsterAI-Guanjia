@@ -169,11 +169,11 @@ describe('web installer build flags', () => {
 
     expect(plain.status).toBe(0);
     expect(plain.stdout).toContain(
-      'artifact=LobsterAI-WebSetup-${arch}-${version}-dictbind.${ext}',
+      'artifact=LobsterAI-Dev-WebSetup-${arch}-${version}-dictbind.${ext}',
     );
     expect(silent.status).toBe(0);
     expect(silent.stdout).toContain(
-      'artifact=LobsterAI-WebSetup-${arch}-${version}-dictbind-silent.${ext}',
+      'artifact=LobsterAI-Dev-WebSetup-${arch}-${version}-dictbind-silent.${ext}',
     );
   });
 

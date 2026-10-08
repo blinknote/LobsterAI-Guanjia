@@ -14,7 +14,6 @@ import { reportConversationMessageAction } from './conversationAnalytics';
 import ImagePreviewModal, { type ImagePreviewSource } from './ImagePreviewModal';
 import { MessageCopyButton } from './MessageActionButton';
 import {
-  getMessageModelLabel,
   MEDIA_TOKEN_DISPLAY_RE,
   messageMetaClassName,
 } from './messageDisplayUtils';
@@ -69,7 +68,6 @@ const AssistantMessageItem: React.FC<{
   mapDisplayText,
   showCopyButton = false,
   onFork,
-  turnMetadata,
   completedGoal,
   planConfirmationMessageId,
   onConfirmPlan,
@@ -85,7 +83,6 @@ const AssistantMessageItem: React.FC<{
     displayContent,
     proposedPlan.planText,
   ].filter((part): part is string => Boolean(part)).join('\n\n');
-  const modelLabel = getMessageModelLabel(turnMetadata);
   const goalCompletionDuration = completedGoal
     ? formatCoworkGoalCompletionDuration(completedGoal)
     : null;
@@ -166,7 +163,6 @@ const AssistantMessageItem: React.FC<{
                   </span>
                 )}
                 <span>{formatMessageDateTime(message.timestamp)}</span>
-                {modelLabel && <span>{modelLabel}</span>}
                 {onFork && (
                   <ForkButton
                     message={message}
@@ -218,7 +214,6 @@ const AssistantMessageItem: React.FC<{
             </span>
           )}
           <span>{formatMessageDateTime(message.timestamp)}</span>
-          {modelLabel && <span>{modelLabel}</span>}
           {onFork && (
             <ForkButton
               message={message}

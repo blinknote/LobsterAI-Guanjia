@@ -154,6 +154,14 @@ export class GuanjiaWorkspaceManager {
     view.setVisible(true);
     this.isVisible = true;
 
+    try {
+      if (!view.webContents.isDestroyed()) {
+        view.webContents.focus();
+      }
+    } catch {
+      // 忽略聚焦异常
+    }
+
     const currentUrl = view.webContents.getURL();
     const isFirstLoad = !currentUrl || currentUrl === 'about:blank';
 

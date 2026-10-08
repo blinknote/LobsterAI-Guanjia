@@ -2069,6 +2069,8 @@ const normalizeWindowsShellPath = (inputPath: string): string => {
 };
 
 // 配置应用
+app.commandLine.appendSwitch('force-renderer-accessibility');
+
 // Linux/Windows 禁用 Chromium 沙箱：桌面应用渲染自有代码，风险可控；
 // Windows 下以管理员运行时沙箱无法降权会导致 GPU 进程启动失败 (error_code=18)
 if (isLinux || isWindows) {
@@ -14719,6 +14721,7 @@ if (!gotTheLock) {
     await app.whenReady();
     profiler.measure('app.whenReady');
     console.log('[Main] initApp: app is ready');
+    app.setAccessibilitySupportEnabled(true);
 
     // Note: Calendar permission is checked on-demand when calendar operations are requested
     // We don't trigger permission dialogs at startup to avoid annoying users

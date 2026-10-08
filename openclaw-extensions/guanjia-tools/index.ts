@@ -2,6 +2,7 @@ import { Type } from "@sinclair/typebox";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 
 import { isGuanjiaScopedSessionKey } from "./sessionKey";
+import { ALL_GUANJIA_TOOL_NAMES, NATIVE_SKILLS } from "./skillsMeta";
 
 type PluginConfig = {
   callbackUrl: string;
@@ -118,12 +119,7 @@ const PROHIBITED_ARGS = new Set([
   "force_execute",
 ]);
 
-const ALLOWED_TOOL_NAMES = new Set([
-  "guanjia_get_context",
-  "guanjia_list_skills",
-  "guanjia_execute_skill",
-  "guanjia_get_run_status",
-]);
+const ALLOWED_TOOL_NAMES = new Set(ALL_GUANJIA_TOOL_NAMES);
 
 const plugin = {
   id: "guanjia-tools",
@@ -232,6 +228,39 @@ const plugin = {
         },
       };
     }, { name: "guanjia_get_run_status", optional: true });
+
+    // 5. 注册全量具象 Native Tools (覆盖开台、收银、会员、排钟、换床、换技师、报表等 24 个业务技能)
+    for (const skill of NATIVE_SKILLS) {
+      api.registerTool((ctx) => {
+        const sessionKey = ctx.sessionKey ?? "";
+        if (ctx.agentId !== "guanjia-assistant" || !isGuanjiaScopedSessionKey(sessionKey)) return null;
+        return {
+          name: skill.toolName,
+          label: `Guanjia ${skill.name}`,
+          description: skill.description,
+          parameters: skill.schema,
+          async execute(id: string, params: unknown, signal?: AbortSignal) {
+            const args = isRecord(params) ? params : {};
+            for (const key of Object.keys(args)) {
+              if (PROHIBITED_ARGS.has(key.toLowerCase())) {
+                return {
+                  content: [{
+                    type: "text",
+                    text: `禁止参数: 检测到试图绕过确认的参数 "${key}"，系统已硬性拒绝执行。`,
+                  }],
+                  isError: true,
+                };
+              }
+            }
+            return callGuanjiaBridge(config, {
+              toolName: "guanjia_execute_skill",
+              args: { skillId: skill.id, parameters: args },
+              context: { sessionKey, toolCallId: id },
+            }, signal);
+          },
+        };
+      }, { name: skill.toolName, optional: true });
+    }
 
     // Host ringzero blocker via hook api.on('before_tool_call', (event, ctx) => ...)
     const apiWithHooks = api as unknown as {

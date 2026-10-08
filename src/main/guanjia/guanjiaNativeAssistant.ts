@@ -290,7 +290,20 @@ export function registerGuanjiaNativeAssistantHandlers(options: NativeAssistantR
       if (run.run_id !== params.runId) throw new Error('确认响应运行编号不符');
       const status = run.status === 'succeeded' ? 'completed' : run.status === 'failed' ? 'failed' : run.status === 'in_progress' ? 'in_progress' : 'unknown';
       binding.action.status = status === 'completed' ? 'confirmed' : status; binding.action.rawDetails = publicData(run) as Record<string, unknown>; pushPending();
-      return { success: status === 'completed', runId: params.runId, status, data: publicData(run) };
+      const success = status === 'completed';
+      let errorDetail: string | undefined;
+      if (!success) {
+        if (typeof run.error === 'string' && run.error.trim()) {
+          errorDetail = run.error.trim();
+        } else if (record(run.error) && typeof run.error.message === 'string' && run.error.message.trim()) {
+          errorDetail = run.error.message.trim();
+        } else if (typeof run.reply === 'string' && run.reply.trim()) {
+          errorDetail = run.reply.trim();
+        } else if (typeof run.message === 'string' && run.message.trim()) {
+          errorDetail = run.message.trim();
+        }
+      }
+      return { success, runId: params.runId, status, data: publicData(run), ...(errorDetail ? { error: errorDetail } : {}) };
     } catch (error) {
       const unknown = binding?.action?.status === 'in_progress' || (error instanceof GuanjiaBusinessApiError && error.unknownOutcome); if (binding?.action && unknown) binding.action.status = 'unknown'; pushPending();
       return { success: false, runId: params?.runId ?? '', status: unknown ? 'unknown' : 'failed', error: error instanceof Error ? error.message : '确认结果尚未核验' };

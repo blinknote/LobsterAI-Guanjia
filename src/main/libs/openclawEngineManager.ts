@@ -56,7 +56,7 @@ import { isSystemProxyEnabled, resolveSystemProxyUrlForTargets, setActiveSystemP
 type GatewayProcess = ChildProcess;
 
 const DEFAULT_OPENCLAW_VERSION = '2026.2.23';
-const DEFAULT_GATEWAY_PORT = 18789;
+const DEFAULT_GATEWAY_PORT = 19789;
 const GATEWAY_PORT_SCAN_LIMIT = 80;
 const GATEWAY_BOOT_TIMEOUT_MS = 300 * 1000;
 const GATEWAY_MAX_RESTART_ATTEMPTS = 5;

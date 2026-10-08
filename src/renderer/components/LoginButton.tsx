@@ -54,9 +54,20 @@ const businessRoleLabels: Record<string, GuanjiaI18nKey> = {
   admin: 'guanjiaRoleAdmin',
   super_admin: 'guanjiaRoleSuperAdmin',
   manager: 'guanjiaRoleManager',
+  store_manager: 'guanjiaRoleManager',
+  tenant_admin: 'guanjiaRoleTenantAdmin',
+  therapist: 'guanjiaRoleTherapist',
   frontdesk: 'guanjiaRoleFrontdesk',
-  cashier: 'guanjiaRoleFrontdesk',
+  cashier: 'guanjiaRoleCashier',
   employee: 'guanjiaRoleEmployee',
+};
+
+const getRoleLabel = (role?: string): string => {
+  if (!role) {
+    return tGuanjia('guanjiaRoleUnrecognized');
+  }
+  const key = businessRoleLabels[role];
+  return key ? tGuanjia(key) : role;
 };
 
 const ACCOUNT_MENU_ANALYTICS_SOURCE = 'home_account_menu';
@@ -638,7 +649,7 @@ const UserMenu: React.FC<UserMenuProps> = ({
             <div className="text-[11px] text-secondary flex items-center justify-between">
               <span>{tGuanjia('guanjiaEmployeeNo')}: {guanjiaSession.user?.employeeNo}</span>
               <span className="rounded bg-surface-raised px-1 py-0.5 text-[10px] font-medium text-foreground">
-                {tGuanjia(businessRoleLabels[guanjiaSession.user?.role || ''] || 'guanjiaRoleUnrecognized')}
+                {getRoleLabel(guanjiaSession.user?.role)}
               </span>
             </div>
             <div className="mt-1 flex items-center gap-3">
@@ -1183,7 +1194,7 @@ aria-label={tGuanjia('guanjiaAccountMenu')}
             <div className="text-xs text-secondary flex items-center justify-between">
               <span>{tGuanjia('guanjiaEmployeeNo')}: {guanjiaSession.user?.employeeNo}</span>
               <span className="rounded bg-surface-raised px-1.5 py-0.5 text-[11px] font-medium text-foreground">
-                {tGuanjia(businessRoleLabels[guanjiaSession.user?.role || ''] || 'guanjiaRoleUnrecognized')}
+                {getRoleLabel(guanjiaSession.user?.role)}
               </span>
             </div>
             {guanjiaSession.store?.name && (

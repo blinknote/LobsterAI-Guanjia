@@ -243,6 +243,7 @@ export const GuanjiaIpcChannel = {
 
   // 模型路由与预扣退费
   GetCreditBalance: 'guanjia:model:get-balance',
+  GetClientModelConfig: 'guanjia:model:get-client-model-config',
   RouteAndInvokeModel: 'guanjia:model:route-and-invoke',
   GetLedgerRecords: 'guanjia:model:get-ledger',
 

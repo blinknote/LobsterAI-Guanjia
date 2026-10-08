@@ -1,7 +1,7 @@
 {
-  "appId": "com.lobsterai.app",
-  "productName": "LobsterAI",
-  "executableName": "LobsterAI",
+  "appId": "com.lobsterai.dev.app",
+  "productName": "LobsterAI-Dev",
+  "executableName": "LobsterAI-Dev",
   "directories": {
     "output": "release"
   },
@@ -65,8 +65,8 @@
   ],
   "protocols": [
     {
-      "name": "LobsterAI",
-      "schemes": ["lobsterai"]
+      "name": "LobsterAI-Dev",
+      "schemes": ["lobsterai-dev"]
     }
   ],
   "mac": {

@@ -1,0 +1,314 @@
+import { Type, type TSchema } from "@sinclair/typebox";
+
+export interface NativeSkillMeta {
+  id: string;
+  name: string;
+  toolName: string;
+  description: string;
+  schema: TSchema;
+}
+
+export const NATIVE_SKILLS: NativeSkillMeta[] = [
+  {
+    id: "service_ticket_open",
+    name: "快速开台派工与房态锁定",
+    toolName: "guanjia_service_ticket_open",
+    description: "为到店客户快速开台派工：自动分配或指定房间床位、校验床位空闲状态并置为在钟(serving)、匹配服务项目标准时长与价格、分配轮牌或点钟技师并置为忙碌，生成服务工单。",
+    schema: Type.Object({
+      service_name: Type.String({ description: "服务项目名称，如：全身经络推拿、中药足道养生" }),
+      bed_name: Type.Optional(Type.String({ description: "房间或床位号，如：牡丹厅1号床，留空则自动分配空闲床位" })),
+      therapist_name: Type.Optional(Type.String({ description: "指定技师姓名或工号，留空则按轮牌自动安排" })),
+      customer_name: Type.Optional(Type.String({ description: "客户姓名或称呼，如：王女士、散客" })),
+      customer_phone: Type.Optional(Type.String({ description: "客户手机号，用于关联会员档案" })),
+      is_designated: Type.Optional(Type.String({ description: "是否点钟指定，如：是 / 否" })),
+      remark: Type.Optional(Type.String({ description: "开台备注说明" })),
+    }),
+  },
+  {
+    id: "query_empty_beds",
+    name: "查看空闲床位",
+    toolName: "guanjia_query_empty_beds",
+    description: "实时查询门店全部房间与空闲床位列表，统计当前空闲、使用中及清洁中床位，为前台开台提供实时房态指引。",
+    schema: Type.Object({
+      room_name: Type.Optional(Type.String({ description: "按房间名称或编号筛选，例如：牡丹厅" })),
+    }),
+  },
+  {
+    id: "query_active_tickets",
+    name: "查看在钟服务",
+    toolName: "guanjia_query_active_tickets",
+    description: "实时查询门店内当前正在服务的所有工单列表，查看房间床位、服务客户、当班技师、已服务时长及预计下钟时间。",
+    schema: Type.Object({
+      therapist_name: Type.Optional(Type.String({ description: "按技师姓名筛选，例如：李技师" })),
+      bed_name: Type.Optional(Type.String({ description: "按床位或房间筛选，例如：牡丹厅1号床" })),
+      status: Type.Optional(Type.String({ description: "工单状态：serving(在钟) 或 pending_checkout(待结账)" })),
+    }),
+  },
+  {
+    id: "member_profile_query",
+    name: "会员全景资产与消费查询",
+    toolName: "guanjia_member_profile_query",
+    description: "一键穿透会员储值卡账户、本金与赠金余额、剩余次卡、历史到店消费频次与上次消费时间。",
+    schema: Type.Object({
+      query_text: Type.String({ description: "输入会员手机号、卡号或姓名" }),
+    }),
+  },
+  {
+    id: "pos_cash_checkout",
+    name: "智能通用收银结账",
+    toolName: "guanjia_pos_cash_checkout",
+    description: "支持次卡核销扣次、储值卡余额、微信、支付宝及现金全渠道结账，自动核验会员资产、绑定技师核算业绩提成并生成扣款账单。",
+    schema: Type.Object({
+      item_name: Type.String({ description: "服务项目名称，例如：全身经络推拿" }),
+      therapist_name: Type.String({ description: "服务技师工号或姓名，核算提成与关联工单" }),
+      pay_method: Type.String({ description: "支付方式：times(次卡), balance(储值卡), wechat, alipay, cash" }),
+      phone_or_card: Type.Optional(Type.String({ description: "会员手机号或卡号，次卡核销或储值卡扣款时必填" })),
+      received_amount: Type.Optional(Type.Number({ description: "实收结算金额，次卡核销填0或留空" })),
+      quantity: Type.Optional(Type.Number({ description: "钟数或数量，默认 1" })),
+      ticket_id: Type.Optional(Type.Number({ description: "关联在钟工单ID，用于下钟闭环" })),
+      customer_name: Type.Optional(Type.String({ description: "客户称呼" })),
+    }),
+  },
+  {
+    id: "pos_member_recharge",
+    name: "储值卡快速充值办理",
+    toolName: "guanjia_pos_member_recharge",
+    description: "通过会员手机号或卡号，执行会员卡储值充值、赠金入账，并生成充值凭证。",
+    schema: Type.Object({
+      phone_or_card: Type.String({ description: "会员手机号或卡号" }),
+      amount: Type.Number({ description: "充值本金金额，例如：1000.00" }),
+      pay_method: Type.String({ description: "支付方式：cash / wechat / alipay" }),
+      sales_employees: Type.Optional(Type.String({ description: "经办或销售员工姓名或工号" })),
+      gift_points: Type.Optional(Type.Number({ description: "赠送积分数" })),
+    }),
+  },
+  {
+    id: "pos_order_refund",
+    name: "订单退款与卡余额冲正",
+    toolName: "guanjia_pos_order_refund",
+    description: "依据原订单号执行资金退款与原路冲正，保障资金安全并输出退款凭据。",
+    schema: Type.Object({
+      order_no: Type.String({ description: "原订单编号，例如：SC012026..." }),
+      refund_amount: Type.Number({ description: "退款金额，需小于或等于原支付金额" }),
+      refund_reason: Type.String({ description: "退款原因说明" }),
+    }),
+  },
+  {
+    id: "service_ticket_add_clock",
+    name: "在钟服务加钟",
+    toolName: "guanjia_service_ticket_add_clock",
+    description: "对门店内当前正在服务的在钟工单进行加钟，顺延预估下钟时间并更新技师提成。",
+    schema: Type.Object({
+      bed_name: Type.Optional(Type.String({ description: "床位或房间名称，如：牡丹厅1号床" })),
+      add_minutes: Type.Optional(Type.Number({ description: "加钟时长(分钟)，如：30、45、60" })),
+      service_name: Type.Optional(Type.String({ description: "加钟新服务项目" })),
+      therapist_name: Type.Optional(Type.String({ description: "技师姓名或工号" })),
+      customer_name: Type.Optional(Type.String({ description: "客户姓名" })),
+      ticket_id: Type.Optional(Type.Number({ description: "工单ID" })),
+      remark: Type.Optional(Type.String({ description: "加钟说明" })),
+    }),
+  },
+  {
+    id: "service_ticket_change_item",
+    name: "在钟服务换项",
+    toolName: "guanjia_service_ticket_change_item",
+    description: "在钟服务期间为客户更换服务项目，重新核算项目价格、服务时长与预计下钟时间。",
+    schema: Type.Object({
+      new_service_name: Type.String({ description: "新服务项目名称，如：中药足道养生" }),
+      bed_name: Type.Optional(Type.String({ description: "当前床位或房间名称" })),
+      therapist_name: Type.Optional(Type.String({ description: "技师姓名" })),
+      customer_name: Type.Optional(Type.String({ description: "客户姓名" })),
+      ticket_id: Type.Optional(Type.Number({ description: "工单ID" })),
+      reason: Type.Optional(Type.String({ description: "换项原因" })),
+    }),
+  },
+  {
+    id: "service_ticket_change_therapist",
+    name: "在钟中途更换技师",
+    toolName: "guanjia_service_ticket_change_therapist",
+    description: "在钟服务期间中途更换服务技师，原技师与接替技师按工时比例分割提成，新技师自动置为忙碌。",
+    schema: Type.Object({
+      new_therapist_name: Type.String({ description: "新接替技师姓名或工号，如：李技师、008号" }),
+      bed_name: Type.Optional(Type.String({ description: "当前床位或房间名称" })),
+      customer_name: Type.Optional(Type.String({ description: "客户姓名" })),
+      ticket_id: Type.Optional(Type.Number({ description: "工单ID" })),
+      reason: Type.Optional(Type.String({ description: "换人原因" })),
+    }),
+  },
+  {
+    id: "service_ticket_change_bed",
+    name: "在钟换房换床",
+    toolName: "guanjia_service_ticket_change_bed",
+    description: "在钟服务期间调换房间或床位，原子释放原床位并占用目标新床位，确保房态大盘实时一致。",
+    schema: Type.Object({
+      new_bed_name: Type.String({ description: "目标新床位或房间号，如：兰花厅2号床" }),
+      bed_name: Type.Optional(Type.String({ description: "原床位或房间名称" })),
+      customer_name: Type.Optional(Type.String({ description: "客户姓名" })),
+      ticket_id: Type.Optional(Type.Number({ description: "工单ID" })),
+      reason: Type.Optional(Type.String({ description: "换床原因" })),
+    }),
+  },
+  {
+    id: "service_ticket_complete",
+    name: "服务完工下钟",
+    toolName: "guanjia_service_ticket_complete",
+    description: "在钟服务完工下钟，释放技师回轮牌队尾，释放床位并标记为待清洁，工单自动转为待结账状态。",
+    schema: Type.Object({
+      bed_name: Type.Optional(Type.String({ description: "床位或房间名称，如：牡丹厅1号床" })),
+      therapist_name: Type.Optional(Type.String({ description: "技师姓名或工号" })),
+      ticket_id: Type.Optional(Type.Number({ description: "服务工单ID" })),
+      remark: Type.Optional(Type.String({ description: "下钟说明" })),
+    }),
+  },
+  {
+    id: "queue_smart_assign",
+    name: "智能排钟派单与上下钟",
+    toolName: "guanjia_queue_smart_assign",
+    description: "结合当前门店在岗技师队列，执行智能轮牌派单或指定点钟，实时联动排钟看板。",
+    schema: Type.Object({
+      customer_name: Type.String({ description: "客户姓名或房号，例如：802包厢 张先生" }),
+      service_name: Type.String({ description: "服务项目名称，例如：特色全身推拿" }),
+      therapist_name: Type.Optional(Type.String({ description: "指定技师(留空则自动轮排)" })),
+      is_designated: Type.Optional(Type.String({ description: "是否点钟：否 / 是" })),
+    }),
+  },
+  {
+    id: "pos_therapist_complete_clock",
+    name: "技师自助下钟",
+    toolName: "guanjia_pos_therapist_complete_clock",
+    description: "技师在服务完成后通过语音或AI对话直接下钟，系统自动将技师排入队尾并将床位标记为待清洁。",
+    schema: Type.Object({
+      therapist_name: Type.Optional(Type.String({ description: "技师姓名或工号，技师本人留空即可" })),
+    }),
+  },
+  {
+    id: "member_quick_register",
+    name: "快速会员建档与办卡",
+    toolName: "guanjia_member_quick_register",
+    description: "录入新客户基本档案，自动生成门店唯一会员卡号，支持首充办卡并生成入会礼遇。",
+    schema: Type.Object({
+      member_name: Type.String({ description: "会员姓名" }),
+      phone: Type.String({ description: "手机号码" }),
+      sales_employees: Type.String({ description: "经办员工姓名或工号" }),
+      pay_method: Type.Optional(Type.String({ description: "首充支付渠道：cash, wechat, alipay" })),
+      initial_amount: Type.Optional(Type.Number({ description: "首次储值金额" })),
+      gender: Type.Optional(Type.String({ description: "性别：男 / 女" })),
+    }),
+  },
+  {
+    id: "booking_schedule_create",
+    name: "客户预约快速登记",
+    toolName: "guanjia_booking_schedule_create",
+    description: "录入客户预约到店时间与指定项目/技师，写入预约排期库并生成预约通知函。",
+    schema: Type.Object({
+      customer_name: Type.String({ description: "客户姓名" }),
+      phone: Type.String({ description: "联系电话" }),
+      appointment_date: Type.String({ description: "预约日期，YYYY-MM-DD，如：2026-10-10" }),
+      appointment_time: Type.String({ description: "预约时间，HH:MM，如：14:30" }),
+      service_name: Type.String({ description: "预约项目名称" }),
+      therapist_name: Type.Optional(Type.String({ description: "指定技师姓名" })),
+      remark: Type.Optional(Type.String({ description: "客户需求备注" })),
+    }),
+  },
+  {
+    id: "item_center_manage",
+    name: "项目管理中心与智能调价",
+    toolName: "guanjia_item_center_manage",
+    description: "查询服务项目、新增或修改项目标准时长与零售价、启停或下架项目。",
+    schema: Type.Object({
+      action: Type.String({ description: "操作动作：query / create / update / change_status" }),
+      item_name: Type.Optional(Type.String({ description: "项目名称" })),
+      item_id: Type.Optional(Type.Number({ description: "项目ID" })),
+      duration: Type.Optional(Type.Number({ description: "服务时长(分钟)" })),
+      price: Type.Optional(Type.Number({ description: "零售价格(元)" })),
+      status: Type.Optional(Type.Number({ description: "状态：0=禁用, 1=启用, 2=下架" })),
+    }),
+  },
+  {
+    id: "chain_store_query",
+    name: "查询连锁门店列表",
+    toolName: "guanjia_chain_store_query",
+    description: "查询当前连锁下的所有门店列表及基本信息。",
+    schema: Type.Object({
+      keyword: Type.Optional(Type.String({ description: "门店名称或编码关键词搜索" })),
+    }),
+  },
+  {
+    id: "chain_store_create",
+    name: "连锁创建新门店",
+    toolName: "guanjia_chain_store_create",
+    description: "连锁管理创建新门店，支持设置门店名称、门店编码、地址、联系电话、营业时间。",
+    schema: Type.Object({
+      name: Type.String({ description: "门店名称，例如：青盛堂旗舰店" }),
+      store_code: Type.Optional(Type.String({ description: "门店编码" })),
+      address: Type.Optional(Type.String({ description: "门店地址" })),
+      phone: Type.Optional(Type.String({ description: "联系电话" })),
+      business_hours: Type.Optional(Type.String({ description: "营业时间" })),
+    }),
+  },
+  {
+    id: "chain_employee_create",
+    name: "连锁创建员工账号",
+    toolName: "guanjia_chain_employee_create",
+    description: "连锁管理在指定门店创建员工账号（支持店长、收银前台、理疗技师）。",
+    schema: Type.Object({
+      real_name: Type.String({ description: "员工真实姓名" }),
+      employee_no: Type.String({ description: "员工登录工号" }),
+      role: Type.String({ description: "角色：store_manager(店长), cashier(收银), therapist(技师)" }),
+      store_id: Type.Optional(Type.Number({ description: "目标门店ID" })),
+      phone: Type.Optional(Type.String({ description: "手机号" })),
+      initial_password: Type.Optional(Type.String({ description: "初始密码" })),
+    }),
+  },
+  {
+    id: "marketing_campaign_design",
+    name: "智能营销策划与文案生成",
+    toolName: "guanjia_marketing_campaign_design",
+    description: "根据主推项目、优惠力度与目标客群，一键生成朋友圈文案、促销短信模板与前台推介话术。",
+    schema: Type.Object({
+      theme: Type.String({ description: "活动主题，如：秋季养生焕新季" }),
+      target_services: Type.String({ description: "主推项目，如：全身推拿、肩颈疏通" }),
+      discount_info: Type.Optional(Type.String({ description: "优惠力度" })),
+      target_audience: Type.Optional(Type.String({ description: "目标客群" })),
+    }),
+  },
+  {
+    id: "dormant_member_activation",
+    name: "沉睡会员唤醒与召回方案",
+    toolName: "guanjia_dormant_member_activation",
+    description: "智能扫描门店沉睡客户数据，生成分层关怀方案、回访话术与专属回归权益建议。",
+    schema: Type.Object({
+      dormant_days: Type.Optional(Type.Number({ description: "沉睡天数阈值，默认30天" })),
+      focus_channel: Type.Optional(Type.String({ description: "触达渠道：微信社群、一对一回访" })),
+    }),
+  },
+  {
+    id: "business_insight_diagnostic",
+    name: "门店经营与排钟智能诊断",
+    toolName: "guanjia_business_insight_diagnostic",
+    description: "深度分析门店近期营收、客单价结构与技师负荷，输出经营健康度诊断与排班调优策略。",
+    schema: Type.Object({
+      time_range: Type.Optional(Type.String({ description: "分析周期：今日、本周或本月" })),
+      diagnostic_focus: Type.Optional(Type.String({ description: "侧重方向：营收提升、排钟平衡" })),
+    }),
+  },
+  {
+    id: "customer_care_greeting",
+    name: "客户到店关怀与回访话术",
+    toolName: "guanjia_customer_care_greeting",
+    description: "针对具体客户服务体验与身体状态，生成个性化养生禁忌、到店关怀及次日回访建议。",
+    schema: Type.Object({
+      customer_name: Type.String({ description: "客户姓名或称呼" }),
+      service_name: Type.String({ description: "体验项目" }),
+      body_condition: Type.Optional(Type.String({ description: "客户身体反馈" })),
+    }),
+  },
+];
+
+export const ALL_GUANJIA_TOOL_NAMES: string[] = [
+  "guanjia_get_context",
+  "guanjia_list_skills",
+  "guanjia_execute_skill",
+  "guanjia_get_run_status",
+  ...NATIVE_SKILLS.map((s) => s.toolName),
+];

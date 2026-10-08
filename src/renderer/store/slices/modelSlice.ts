@@ -102,6 +102,7 @@ interface ModelState {
   defaultSelectedModel: Model;
   selectedModelByAgent: Record<string, Model>;
   availableModels: Model[];
+  backupServerModels?: Model[] | null;
 }
 
 /**
@@ -160,6 +161,7 @@ const initialState: ModelState = {
   ) || availableModels[0],
   selectedModelByAgent: {},
   availableModels: availableModels,
+  backupServerModels: null,
 };
 
 const modelSlice = createSlice({
@@ -219,6 +221,41 @@ const modelSlice = createSlice({
       // 同步 per-agent 选中模型
       syncSelectedModelByAgent(state.selectedModelByAgent, state.availableModels);
     },
+    setSystemBuiltinModelOnly: (
+      state,
+      action: PayloadAction<{ model_name: string; display_name: string } | null>,
+    ) => {
+      if (action.payload) {
+        if (!state.backupServerModels) {
+          state.backupServerModels = [...state.availableModels];
+        }
+        const sysModel: Model = {
+          id: action.payload.model_name,
+          name: action.payload.display_name,
+          provider: 'system_builtin',
+          providerKey: 'system_builtin',
+          isServerModel: false,
+          accessible: true,
+          supportsToolCalling: true,
+          agenticReady: true,
+        };
+        state.availableModels = [sysModel];
+        state.defaultSelectedModel = sysModel;
+        availableModels = state.availableModels;
+        syncSelectedModelByAgent(state.selectedModelByAgent, state.availableModels);
+      } else if (state.backupServerModels) {
+        state.availableModels = [...state.backupServerModels];
+        state.backupServerModels = null;
+        availableModels = state.availableModels;
+        if (state.availableModels.length > 0) {
+          state.defaultSelectedModel = selectPreferredAccessibleModel(
+            state.availableModels,
+            state.defaultSelectedModel,
+          );
+        }
+        syncSelectedModelByAgent(state.selectedModelByAgent, state.availableModels);
+      }
+    },
   },
 });
 
@@ -228,6 +265,7 @@ export const {
   clearAgentSelectedModel,
   setAvailableModels,
   setServerModels,
+  setSystemBuiltinModelOnly,
   clearServerModels,
 } = modelSlice.actions;
 export default modelSlice.reducer;

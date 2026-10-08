@@ -1,6 +1,7 @@
 import { BrowserWindow, ipcMain, IpcMainInvokeEvent, Rectangle } from 'electron';
 
 import type { CoworkStore } from '../coworkStore';
+import { requestGuanjiaBusinessApi } from './guanjiaBusinessApi';
 import { GuanjiaDesktopAuthCoordinator } from './guanjiaDesktopAuthCoordinator';
 import { GuanjiaSession } from './guanjiaSession';
 import { GuanjiaWorkspaceManager } from './guanjiaWorkspaceManager';
@@ -65,6 +66,24 @@ export function registerGuanjiaIpcHandlers(options?: RegisterGuanjiaHandlersOpti
     const targetWin = options?.getMainWindow ? options.getMainWindow() : BrowserWindow.getFocusedWindow();
     if (targetWin && !targetWin.isDestroyed()) {
       targetWin.webContents.send(GuanjiaSession.CANONICAL_CHANNEL, snapshot);
+    }
+  });
+
+  handle(GuanjiaIpcChannel.GetClientModelConfig, async () => {
+    try {
+      const session = GuanjiaSession.getInstance();
+      const snap = session.getSnapshot();
+      if (snap.status !== 'authenticated') {
+        return { success: false, error: '未认证' };
+      }
+      const res = await requestGuanjiaBusinessApi({
+        path: '/api/c/ai/client-model-config',
+        method: 'GET',
+        expectedGeneration: snap.generation,
+      });
+      return { success: true, data: res };
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) };
     }
   });
 

@@ -1604,6 +1604,8 @@ contextBridge.exposeInMainWorld('electron', {
       ipcRenderer.invoke(GuanjiaIpcChannel.GetContext) as Promise<unknown>,
     executeAction: (payload: unknown) =>
       ipcRenderer.invoke(GuanjiaIpcChannel.ExecuteAction, payload) as Promise<unknown>,
+    getClientModelConfig: () =>
+      ipcRenderer.invoke(GuanjiaIpcChannel.GetClientModelConfig) as Promise<{ success: boolean; data?: any; error?: string }>,
     getAuditLogs: () =>
       ipcRenderer.invoke(GuanjiaIpcChannel.GetAuditLogs) as Promise<unknown>,
     native: {

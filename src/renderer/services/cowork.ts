@@ -69,6 +69,7 @@ import {
   updateSteerStatus,
   updateToolUseMediaStatus,
 } from '../store/slices/coworkSlice';
+import { setSystemBuiltinModelOnly } from '../store/slices/modelSlice';
 import { clearActiveSkills, setActiveSkillIds } from '../store/slices/skillSlice';
 import type {
   CoworkApiConfig,
@@ -624,6 +625,24 @@ class CoworkService {
           store.dispatch(setStreaming(false));
           store.dispatch(clearCurrentSession());
           void this.loadSessions();
+        }
+        if (snap.status === 'authenticated') {
+          if (typeof window !== 'undefined' && window.electron?.guanjia?.getClientModelConfig) {
+            void window.electron.guanjia.getClientModelConfig().then((cfg) => {
+              if (cfg?.success && cfg.data) {
+                if (cfg.data.hide_youdao_models && cfg.data.model_name) {
+                  store.dispatch(setSystemBuiltinModelOnly({
+                    model_name: cfg.data.model_name,
+                    display_name: cfg.data.display_name || `管家系统内置大模型 (${cfg.data.model_name})`,
+                  }));
+                } else {
+                  store.dispatch(setSystemBuiltinModelOnly(null));
+                }
+              }
+            }).catch(() => {});
+          }
+        } else {
+          store.dispatch(setSystemBuiltinModelOnly(null));
         }
       }
     });

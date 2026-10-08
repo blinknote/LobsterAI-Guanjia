@@ -1,6 +1,7 @@
 import React from 'react';
 
 import { tGuanjia } from '../../services/guanjiaI18n';
+import { useGuanjiaSession } from '../../services/guanjiaSession';
 
 export type GuanjiaCardStatus = 'idle' | 'active' | 'pending';
 
@@ -9,6 +10,8 @@ export interface GuanjiaSidebarCardProps {
   isActive?: boolean;
   /** 显式指定状态，未传则依据 isActive 与 todoCount 计算 */
   status?: GuanjiaCardStatus;
+  /** 是否已登录（可选，未传则依据 guanjiaSession 自动判断） */
+  isLoggedIn?: boolean;
   /** 门店名称 */
   storeName?: string | null;
   /** 待办事项数量，未获取或未知时为 null/undefined，不以 0 冒充 */
@@ -29,12 +32,17 @@ export interface GuanjiaSidebarCardProps {
 export const GuanjiaSidebarCard: React.FC<GuanjiaSidebarCardProps> = ({
   isActive = false,
   status: propStatus,
+  isLoggedIn: propIsLoggedIn,
   storeName,
   todoCount,
   onClick,
   onAskAssistant,
   className = '',
 }) => {
+  const guanjiaSession = useGuanjiaSession();
+  const isSessionLoggedIn = guanjiaSession.status === 'authenticated' && Boolean(guanjiaSession.user);
+  const isConnected = propIsLoggedIn !== undefined ? propIsLoggedIn : isSessionLoggedIn;
+
   // 计算当前卡片状态
   const computedStatus: GuanjiaCardStatus = React.useMemo(() => {
     if (propStatus) return propStatus;
@@ -47,8 +55,12 @@ export const GuanjiaSidebarCard: React.FC<GuanjiaSidebarCardProps> = ({
   const ariaLabel = React.useMemo(() => {
     const storeInfo = storeName ? `，门店${storeName}` : '';
     switch (computedStatus) {
-      case 'idle':
-        return `${tGuanjia('guanjiaWorkspaceTitle')}，${tGuanjia('guanjiaSidebarCardIdle')}${storeInfo}`;
+      case 'idle': {
+        const idleText = isConnected
+          ? tGuanjia('guanjiaSidebarCardConnected')
+          : tGuanjia('guanjiaSidebarCardIdle');
+        return `${tGuanjia('guanjiaWorkspaceTitle')}，${idleText}${storeInfo}`;
+      }
       case 'active':
         return `${tGuanjia('guanjiaWorkspaceTitle')}，${tGuanjia('guanjiaSidebarCardActive')}${storeInfo}`;
       case 'pending':
@@ -58,7 +70,7 @@ export const GuanjiaSidebarCard: React.FC<GuanjiaSidebarCardProps> = ({
       default:
         return `${tGuanjia('guanjiaWorkspaceTitle')}${storeInfo}`;
     }
-  }, [computedStatus, storeName, todoCount]);
+  }, [computedStatus, isConnected, storeName, todoCount]);
 
   // 键盘操作响应
   const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
@@ -106,7 +118,7 @@ export const GuanjiaSidebarCard: React.FC<GuanjiaSidebarCardProps> = ({
         {/* 状态徽标 */}
         {computedStatus === 'idle' && (
           <span className="shrink-0 rounded px-1.5 py-0.5 text-[11px] font-medium text-blue-600 dark:text-blue-400">
-            {tGuanjia('guanjiaSidebarCardIdle')}
+            {isConnected ? tGuanjia('guanjiaSidebarCardConnected') : tGuanjia('guanjiaSidebarCardIdle')}
           </span>
         )}
         {computedStatus === 'active' && (

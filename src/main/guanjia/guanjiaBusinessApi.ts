@@ -8,7 +8,8 @@ export type AllowedGuanjiaApiPath =
   | '/api/c/ai/skills/installed'
   | '/api/c/ai/skills/execute'
   | '/api/c/ai/skills/runs/get'
-  | '/api/c/ai/skills/runs/confirm';
+  | '/api/c/ai/skills/runs/confirm'
+  | '/api/c/ai/client-model-config';
 
 export type GuanjiaBusinessApiPath = AllowedGuanjiaApiPath;
 
@@ -18,6 +19,7 @@ export const ALLOWED_GUANJIA_API_PATHS: ReadonlySet<string> = new Set([
   '/api/c/ai/skills/execute',
   '/api/c/ai/skills/runs/get',
   '/api/c/ai/skills/runs/confirm',
+  '/api/c/ai/client-model-config',
 ]);
 
 export const PROHIBITED_CATALOG_SKILL_IDS: ReadonlySet<string> = new Set([
