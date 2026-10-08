@@ -1,0 +1,36 @@
+version: 2.1
+
+jobs:
+  build-windows:
+    machine:
+      image: windows-server-2022-gui:current
+    resource_class: windows.medium
+    shell: powershell.exe -ExecutionPolicy Bypass
+    environment:
+      CSC_IDENTITY_AUTO_DISCOVERY: "false"
+      NODE_OPTIONS: "--max-old-space-size=6144"
+    steps:
+      - checkout
+      - run:
+          name: Setup Toolchain (Node 24.15.0, npm, pnpm)
+          command: .\.circleci\run-build.ps1 install-toolchain
+      - run:
+          name: Build LobsterAI Windows x64
+          command: .\.circleci\run-build.ps1 build
+      - run:
+          name: Collect and Verify Artifacts
+          command: .\.circleci\run-build.ps1 artifacts
+      - store_artifacts:
+          path: artifacts/windows
+          destination: windows-x64
+
+workflows:
+  build:
+    jobs:
+      - build-windows:
+          filters:
+            branches:
+              only:
+                - feat/smartbutler-integration
+            tags:
+              ignore: /.*/
