@@ -34,10 +34,23 @@ jobs:
           key: win2022-x64-toolchain-v2-node24.15.0-npm11.17.0-pnpm12.1.0
           paths:
             - 'C:/tools/node-v24.15.0-win-x64'
+      - run: &dependency-cache-keys
+          name: Generate exact dependency-cache key before restore
+          command: .\.circleci\run-build.ps1 dependency-cache-keys
+          no_output_timeout: 2m
+      - restore_cache: &restore-dependencies
+          keys:
+            - lobster-dependencies-win2022-x64-node24.15.0-npm11.17.0-pnpm12.1.0-v1-{{ checksum ".circleci-dependency-keys/root.txt" }}
       - run: &dependencies
-          name: Install dependencies (10m)
+          name: Validate dependency cache or install (10m install, absolute job deadline)
           command: .\.circleci\run-build.ps1 dependencies
-          no_output_timeout: 12m
+          no_output_timeout: 57m
+      - save_cache:
+          key: lobster-dependencies-win2022-x64-node24.15.0-npm11.17.0-pnpm12.1.0-v1-{{ checksum ".circleci-dependency-keys/root.txt" }}
+          paths:
+            - 'node_modules'
+            - 'package-lock.json'
+            - '.circleci-dependency-cache/manifest.json'
       - run:
           name: Generate exact compiled-cache keys before restore
           command: .\.circleci\run-build.ps1 runtime-cache-keys
@@ -84,6 +97,8 @@ jobs:
       - restore_cache: *restore-downloads
       - run: *install-toolchain
       - save_cache: *save-toolchain
+      - run: *dependency-cache-keys
+      - restore_cache: *restore-dependencies
       - run: *dependencies
       - run:
           name: Generate exact compiled-cache keys before import and restore
@@ -141,6 +156,8 @@ jobs:
       - restore_cache: *restore-downloads
       - run: *install-toolchain
       - save_cache: *save-toolchain
+      - run: *dependency-cache-keys
+      - restore_cache: *restore-dependencies
       - run: *dependencies
       - attach_workspace:
           at: '.circleci-workspace'
@@ -153,21 +170,62 @@ jobs:
           command: .\.circleci\run-build.ps1 verify-installer
           no_output_timeout: 4m
       - run:
-          name: Setup Python runtime (5m)
+          name: Generate exact Python resource-cache key
+          command: .\.circleci\run-build.ps1 resource-cache-keys
+          no_output_timeout: 2m
+      - restore_cache:
+          keys:
+            - lobster-python-win2022-x64-node24.15.0-v1-{{ checksum ".circleci-resource-keys/python.txt" }}
+      - run:
+          name: Validate Python resource cache and run setup health check (5m setup)
           command: .\.circleci\run-build.ps1 python
-          no_output_timeout: 7m
+          no_output_timeout: 57m
+      - save_cache:
+          key: lobster-python-win2022-x64-node24.15.0-v1-{{ checksum ".circleci-resource-keys/python.txt" }}
+          paths:
+            - 'resources/python-win'
+            - 'resources/python-win-runtime.zip'
+            - '.circleci-resource-cache/python.json'
       - run:
-          name: Build renderer and main via npm run build (10m)
+          name: Generate exact client and skills output-cache keys
+          command: .\.circleci\run-build.ps1 output-cache-keys
+          no_output_timeout: 57m
+      - restore_cache:
+          keys:
+            - lobster-client-win2022-x64-node24.15.0-npm11.17.0-v1-{{ checksum ".circleci-output-keys/client.txt" }}
+      - run:
+          name: Validate client output cache or build (10m build)
           command: .\.circleci\run-build.ps1 build-client
-          no_output_timeout: 12m
+          no_output_timeout: 57m
       - run:
-          name: Compile Electron (5m)
+          name: Reuse validated Electron output or compile and capture (5m compile)
           command: .\.circleci\run-build.ps1 compile-electron
-          no_output_timeout: 7m
+          no_output_timeout: 57m
+      - save_cache:
+          key: lobster-client-win2022-x64-node24.15.0-npm11.17.0-v1-{{ checksum ".circleci-output-keys/client.txt" }}
+          paths:
+            - 'dist'
+            - 'dist-electron'
+            - '.circleci-output-cache/client.json'
+      - restore_cache:
+          keys:
+            - lobster-skills-win2022-x64-node24.15.0-npm11.17.0-v1-{{ checksum ".circleci-output-keys/skills.txt" }}
       - run:
-          name: Build skills (5m)
+          name: Validate skills cache or build and prepare pptx dependencies (5m each)
           command: .\.circleci\run-build.ps1 skills
-          no_output_timeout: 7m
+          no_output_timeout: 57m
+      - save_cache:
+          key: lobster-skills-win2022-x64-node24.15.0-npm11.17.0-v1-{{ checksum ".circleci-output-keys/skills.txt" }}
+          paths:
+            - 'SKILLs/web-search/node_modules'
+            - 'SKILLs/web-search/dist'
+            - 'SKILLs/web-search/package-lock.json'
+            - 'SKILLs/imap-smtp-email/node_modules'
+            - 'SKILLs/imap-smtp-email/package-lock.json'
+            - 'SKILLs/pptx/node_modules'
+            - 'SKILLs/pptx/package-lock.json'
+            - 'SKILLs/technology-news-search/scripts/vendor/rss-parser.bundle.js'
+            - '.circleci-output-cache/skills.json'
       - run:
           name: Package unsigned Windows x64 (15m, publish never)
           command: .\.circleci\run-build.ps1 package

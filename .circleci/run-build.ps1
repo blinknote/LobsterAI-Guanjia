@@ -277,7 +277,15 @@ function Invoke-BuildAction {
         # npm run preserves nested/pre/post lifecycle hooks (including prebuild).
         switch ($Stage) {
             "install-toolchain" { Install-NodeToolchain }
-            "dependencies" { Invoke-CommandWithHardTimeout -Command "npm install" -TimeoutMinutes 10 }
+            "dependency-cache-keys" { Invoke-CommandWithHardTimeout -Command "node .circleci\dependency-cache.cjs keys" -TimeoutMinutes 1 }
+            "dependencies" {
+                Invoke-CommandWithHardTimeout -Command "node .circleci\dependency-cache.cjs restore" -TimeoutMinutes 55
+                $state = Get-Content -LiteralPath ".circleci-dependency-state.json" -Raw | ConvertFrom-Json
+                if (-not $state.ready) {
+                    Invoke-CommandWithHardTimeout -Command "npm install" -TimeoutMinutes 10
+                    Invoke-CommandWithHardTimeout -Command "node .circleci\dependency-cache.cjs capture --install-succeeded" -TimeoutMinutes 55
+                }
+            }
             "runtime-cache-keys" { Invoke-CommandWithHardTimeout -Command "node .circleci\runtime-workspace.cjs cache-keys" -TimeoutMinutes 1 }
             "runtime-core" { Prepare-RuntimeCore }
             "runtime-published" { Prepare-RuntimePublished }
@@ -293,10 +301,51 @@ function Invoke-BuildAction {
                 Invoke-CommandWithHardTimeout -Command "node scripts\sync-openclaw-runtime-current.cjs win-x64" -TimeoutMinutes 2
             }
             "verify-installer" { Invoke-CommandWithHardTimeout -Command "npm run verify:installer-patches" -TimeoutMinutes 2 }
-            "python" { Invoke-CommandWithHardTimeout -Command "npm run setup:python-runtime" -TimeoutMinutes 5 }
-            "build-client" { Invoke-CommandWithHardTimeout -Command "npm run build" -TimeoutMinutes 10 }
-            "compile-electron" { Invoke-CommandWithHardTimeout -Command "npm run compile:electron" -TimeoutMinutes 5 }
-            "skills" { Invoke-CommandWithHardTimeout -Command "npm run build:skills" -TimeoutMinutes 5 }
+            "resource-cache-keys" { Invoke-CommandWithHardTimeout -Command "node .circleci\resource-cache.cjs keys python" -TimeoutMinutes 1 }
+            "python" {
+                Invoke-CommandWithHardTimeout -Command "node .circleci\resource-cache.cjs restore python" -TimeoutMinutes 55
+                # Setup also health-checks a validated hot runtime; never skip it.
+                Invoke-CommandWithHardTimeout -Command "npm run setup:python-runtime" -TimeoutMinutes 5
+                Invoke-CommandWithHardTimeout -Command "node .circleci\resource-cache.cjs capture python" -TimeoutMinutes 55
+            }
+            "output-cache-keys" {
+                Invoke-CommandWithHardTimeout -Command "node .circleci\output-cache.cjs keys" -TimeoutMinutes 55
+            }
+            "build-client" {
+                Invoke-CommandWithHardTimeout -Command "node .circleci\output-cache.cjs restore client" -TimeoutMinutes 55
+                $state = Get-Content -LiteralPath ".circleci-output-state-client.json" -Raw | ConvertFrom-Json
+                if ($state.ready) {
+                    # Refresh current-build metadata even when compiled output is reused.
+                    Invoke-CommandWithHardTimeout -Command "npm run prebuild" -TimeoutMinutes 1
+                } else {
+                    Invoke-CommandWithHardTimeout -Command "npm run build" -TimeoutMinutes 10
+                }
+            }
+            "compile-electron" {
+                $state = Get-Content -LiteralPath ".circleci-output-state-client.json" -Raw | ConvertFrom-Json
+                if (-not $state.ready) {
+                    Invoke-CommandWithHardTimeout -Command "npm run compile:electron" -TimeoutMinutes 5
+                    Invoke-CommandWithHardTimeout -Command "node .circleci\output-cache.cjs capture client --build-succeeded --compile-succeeded" -TimeoutMinutes 55
+                }
+            }
+            "skills" {
+                Invoke-CommandWithHardTimeout -Command "node .circleci\output-cache.cjs restore skills" -TimeoutMinutes 55
+                $state = Get-Content -LiteralPath ".circleci-output-state-skills.json" -Raw | ConvertFrom-Json
+                if (-not $state.ready) {
+                    Invoke-CommandWithHardTimeout -Command "npm run build:skills" -TimeoutMinutes 5
+                    # Preserve the packaging hook's plain install and existing-tree skip.
+                    if (-not (Test-Path -LiteralPath "SKILLs\pptx\node_modules")) {
+                        Invoke-CommandWithHardTimeout -Command "npm install --prefix SKILLs/pptx" -TimeoutMinutes 5
+                    }
+                }
+                foreach ($marker in @(".connection", ".server.log", ".server.pid")) {
+                    $markerPath = Join-Path "SKILLs\web-search" $marker
+                    if (Test-Path -LiteralPath $markerPath) { Remove-Item -LiteralPath $markerPath -Force }
+                }
+                if (-not $state.ready) {
+                    Invoke-CommandWithHardTimeout -Command "node .circleci\output-cache.cjs capture skills --build-succeeded --pptx-install-succeeded" -TimeoutMinutes 55
+                }
+            }
             "package" {
                 Invoke-CommandWithHardTimeout -Command "node_modules\.bin\electron-builder.cmd --win --x64 --config scripts/electron-builder-config.cjs --publish never" -TimeoutMinutes 15
             }
@@ -320,12 +369,12 @@ switch ($Action) {
     "collect-artifacts-internal" { Collect-Artifacts }
     "all" {
         Initialize-BuildBudget
-        foreach ($stage in @("install-toolchain", "dependencies", "runtime-cache-keys", "runtime-core", "runtime-published", "runtime-remainder", "verify-installer", "python", "build-client", "compile-electron", "skills", "package", "artifacts")) {
+        foreach ($stage in @("install-toolchain", "dependency-cache-keys", "dependencies", "runtime-cache-keys", "runtime-core", "runtime-published", "runtime-remainder", "verify-installer", "resource-cache-keys", "python", "output-cache-keys", "build-client", "compile-electron", "skills", "package", "artifacts")) {
             Invoke-BuildAction $stage
         }
     }
     "build" {
-        foreach ($stage in @("dependencies", "runtime-cache-keys", "runtime-core", "runtime-published", "runtime-remainder", "verify-installer", "python", "build-client", "compile-electron", "skills", "package")) {
+        foreach ($stage in @("dependency-cache-keys", "dependencies", "runtime-cache-keys", "runtime-core", "runtime-published", "runtime-remainder", "verify-installer", "resource-cache-keys", "python", "output-cache-keys", "build-client", "compile-electron", "skills", "package")) {
             Invoke-BuildAction $stage
         }
     }
