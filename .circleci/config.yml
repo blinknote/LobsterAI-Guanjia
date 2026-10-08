@@ -76,9 +76,9 @@ jobs:
             - 'C:/lobsterai-cache/pnpm-store'
             - 'C:/lobsterai-cache/electron-builder'
       - run:
-          name: Export verified current-commit core workspace (5m, reuse snapshot)
+          name: Export verified current-commit core workspace (job deadline, reuse snapshot)
           command: .\.circleci\run-build.ps1 export-core
-          no_output_timeout: 7m
+          no_output_timeout: 57m
       - persist_to_workspace:
           root: '.circleci-workspace'
           paths:
@@ -135,9 +135,9 @@ jobs:
             - '.circleci-runtime-cache/full'
       - save_cache: *save-downloads-runtime
       - run:
-          name: Export verified runtime workspace (5m, reuse snapshot)
+          name: Export verified runtime workspace (job deadline, reuse snapshot)
           command: .\.circleci\run-build.ps1 export-runtime
-          no_output_timeout: 7m
+          no_output_timeout: 57m
       - persist_to_workspace:
           root: '.circleci-workspace'
           paths:

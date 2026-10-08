@@ -115,22 +115,68 @@ function nonempty(file) {
   if (!stat.isFile() || stat.size === 0) throw new Error(`Missing/empty required file: ${file}`);
 }
 
+function assertContained(baseDir, targetPath, label) {
+  const relative = path.relative(baseDir, path.resolve(baseDir, targetPath));
+  if (relative.startsWith('..') || path.isAbsolute(relative)) {
+    throw new Error(`Unsafe plugin entry: ${label}`);
+  }
+  const realBase = fs.realpathSync(baseDir);
+  const realTarget = fs.realpathSync(path.resolve(baseDir, targetPath));
+  const realRel = path.relative(realBase, realTarget);
+  if (realRel.startsWith('..') || path.isAbsolute(realRel)) {
+    throw new Error(`Unsafe plugin entry: ${label}`);
+  }
+}
+
 function validateCompiledPlugin(pluginDir, bundled = false, allowSourceEntry = false) {
   for (const file of ['package.json', 'openclaw.plugin.json']) nonempty(path.join(pluginDir, file));
   readJson(path.join(pluginDir, 'openclaw.plugin.json'));
   const pkg = readJson(path.join(pluginDir, 'package.json'));
-  const entries = bundled ? pkg.openclaw?.runtimeExtensions : pkg.openclaw?.extensions;
-  if (!Array.isArray(entries) || entries.length === 0) {
+  const extensions = pkg.openclaw?.extensions;
+  if (!Array.isArray(extensions) || extensions.length === 0) {
     throw new Error(`Plugin has no compiled entry metadata: ${pluginDir}`);
   }
-  for (const entry of entries) {
-    const extensionPattern = allowSourceEntry ? /\.(?:js|mjs|cjs|ts|mts|cts)$/ : /\.(?:js|mjs|cjs)$/;
-    if (typeof entry !== 'string' || !extensionPattern.test(entry)) {
-      throw new Error(`Plugin entry is not compiled: ${pluginDir} (${entry})`);
+
+  for (const entry of extensions) {
+    if (typeof entry !== 'string' || !/\.(?:js|mjs|cjs|ts|mts|cts)$/.test(entry)) {
+      throw new Error(`Plugin entry has invalid extension: ${pluginDir} (${entry})`);
     }
     const relative = path.relative(pluginDir, path.resolve(pluginDir, entry));
-    if (relative.startsWith('..') || path.isAbsolute(relative)) throw new Error(`Unsafe plugin entry: ${entry}`);
-    nonempty(path.join(pluginDir, entry));
+    if (relative.startsWith('..') || path.isAbsolute(relative)) {
+      throw new Error(`Unsafe plugin entry: ${entry}`);
+    }
+  }
+
+  const runtimeExtensions = pkg.openclaw?.runtimeExtensions;
+  const hasRuntimeExtensions = Array.isArray(runtimeExtensions) && runtimeExtensions.length > 0;
+
+  if (bundled && !hasRuntimeExtensions) {
+    throw new Error(`Bundled plugin requires explicit compiled runtime entry: ${pluginDir}`);
+  }
+
+  if (hasRuntimeExtensions) {
+    if (runtimeExtensions.length !== extensions.length) {
+      throw new Error(`Plugin runtimeExtensions length (${runtimeExtensions.length}) does not match extensions (${extensions.length}): ${pluginDir}`);
+    }
+    for (const rEntry of runtimeExtensions) {
+      if (typeof rEntry !== 'string' || !/\.(?:js|mjs|cjs)$/.test(rEntry)) {
+        throw new Error(`Plugin runtime entry is not compiled JS: ${pluginDir} (${rEntry})`);
+      }
+      assertContained(pluginDir, rEntry, rEntry);
+      const resolvedPath = path.join(pluginDir, rEntry);
+      nonempty(resolvedPath);
+    }
+    return pkg;
+  }
+
+  for (const entry of extensions) {
+    const pattern = allowSourceEntry ? /\.(?:js|mjs|cjs|ts|mts|cts)$/ : /\.(?:js|mjs|cjs)$/;
+    if (!pattern.test(entry)) {
+      throw new Error(`Plugin entry is not compiled: ${pluginDir} (${entry})`);
+    }
+    assertContained(pluginDir, entry, entry);
+    const resolvedPath = path.join(pluginDir, entry);
+    nonempty(resolvedPath);
   }
   return pkg;
 }
@@ -267,16 +313,22 @@ function assertIdentity(manifest, identity) {
 }
 
 async function checkArchive(files, identity) {
+  const start = Date.now();
+  console.log(`[runtime-workspace] Checking archive for stage "${identity.stage}"...`);
   const manifest = readJson(files.manifestFile);
   assertIdentity(manifest, identity);
   nonempty(files.archive);
   if (!/^[a-f0-9]{64}$/.test(manifest.archiveSha256 || '')
     || await sha256(files.archive) !== manifest.archiveSha256) throw new Error('Runtime archive SHA256 mismatch.');
   await tar.list({ file: files.archive, strict: true, onReadEntry: validateEntry });
+  const duration = ((Date.now() - start) / 1000).toFixed(1);
+  console.log(`[runtime-workspace] Archive check completed for stage "${identity.stage}" in ${duration}s.`);
   return manifest;
 }
 
 async function exportArchive(files, identity, originBuildCommit = commit) {
+  const start = Date.now();
+  console.log(`[runtime-workspace] Exporting archive for stage "${identity.stage}"...`);
   const openclawCommit = validateRuntime(identity.stage);
   validateLinks();
   fs.mkdirSync(files.dir, { recursive: true });
@@ -291,9 +343,13 @@ async function exportArchive(files, identity, originBuildCommit = commit) {
   await tar.list({ file: files.archive, strict: true, onReadEntry: validateEntry });
   writeJson(files.manifestFile, { ...identity, openclawCommit, originBuildCommit,
     archiveSha256: await sha256(files.archive) });
+  const duration = ((Date.now() - start) / 1000).toFixed(1);
+  console.log(`[runtime-workspace] Archive exported for stage "${identity.stage}" in ${duration}s.`);
 }
 
 async function importArchive(files, identity, replaceOwnedStage = null) {
+  const start = Date.now();
+  console.log(`[runtime-workspace] Importing archive for stage "${identity.stage}"...`);
   const manifest = await checkArchive(files, identity);
   const parent = path.dirname(runtime);
   fs.mkdirSync(parent, { recursive: true });
@@ -321,6 +377,8 @@ async function importArchive(files, identity, replaceOwnedStage = null) {
   } finally {
     fs.rmSync(staging, { recursive: true, force: true });
   }
+  const duration = ((Date.now() - start) / 1000).toFixed(1);
+  console.log(`[runtime-workspace] Archive import completed for stage "${identity.stage}" in ${duration}s.`);
   return manifest;
 }
 
@@ -428,10 +486,16 @@ async function main() {
   console.log(`Runtime ${action} verified: ${commit} (${toolchain.target})`);
 }
 
-main().catch(error => {
-  console.error(error.stack || error);
-  if (['prepare-core', 'prepare-plugins', 'prepare-full'].includes(process.argv[2])) {
-    console.error('Compiled cache rejected; no fallback. Inspect the error and bump CACHE_EPOCH in .circleci/runtime-workspace.cjs to retire immutable corrupt caches.');
-  }
-  process.exitCode = 1;
-});
+module.exports = {
+  validateCompiledPlugin,
+};
+
+if (require.main === module) {
+  main().catch(error => {
+    console.error(error.stack || error);
+    if (['prepare-core', 'prepare-plugins', 'prepare-full'].includes(process.argv[2])) {
+      console.error('Compiled cache rejected; no fallback. Inspect the error and bump CACHE_EPOCH in .circleci/runtime-workspace.cjs to retire immutable corrupt caches.');
+    }
+    process.exitCode = 1;
+  });
+}

@@ -18,6 +18,9 @@ const CLIENT_REQUIRED_FILES = [
   'dist/library-thumbnail.html',
   'dist-electron/main.js',
   'dist-electron/preload.js',
+  'dist-electron/browserAnnotationPreload.js',
+  'dist-electron/agentBrowserCredentialPreload.js',
+  'dist-electron/manualCredentialCapturePreload.js',
   'dist-electron/guanjiaPreload.js',
 ];
 const SKILLS_PATHS = [
@@ -41,11 +44,33 @@ const SKILLS_COLD_MISS_FORBIDDEN = [
 ];
 
 const hash = value => crypto.createHash('sha256').update(value).digest('hex');
-const statePath = kind => path.join(ROOT, `.circleci-output-state-${kind}.json`);
-const manifestPath = kind => path.join(ROOT, '.circleci-output-cache', `${kind}.json`);
+const exists = file => { try { fs.lstatSync(file); return true; } catch (error) {
+  if (error.code === 'ENOENT') return false;
+  throw error;
+} };
+const readJson = file => JSON.parse(fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, ''));
+const statePath = kind => `.circleci-output-state-${kind}.json`;
+const manifestPath = kind => `.circleci-output-cache/${kind}.json`;
+
+function safePath(relative) {
+  const normalized = path.isAbsolute(relative) ? path.relative(ROOT, relative).split(path.sep).join('/') : relative;
+  const parts = normalized.split('/');
+  let current = ROOT;
+  for (const [index, part] of parts.entries()) {
+    current = path.join(current, part);
+    if (!exists(current)) continue;
+    const stat = fs.lstatSync(current);
+    if (stat.isSymbolicLink() || (index < parts.length - 1 && !stat.isDirectory())) {
+      throw new Error(`Output cache path is redirected: ${relative}`);
+    }
+  }
+  return current;
+}
+
 const writeJson = (file, data) => {
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.writeFileSync(file, JSON.stringify(data, null, 2) + '\n');
+  const target = safePath(file);
+  fs.mkdirSync(path.dirname(target), { recursive: true });
+  fs.writeFileSync(target, JSON.stringify(data, null, 2) + '\n');
 };
 
 function checkEnvGuard() {
@@ -69,7 +94,7 @@ function checkToolchain() {
   if (process.platform !== TARGET.platform || process.arch !== TARGET.arch || process.versions.node !== TARGET.node) {
     throw new Error('Output cache requires Windows x64 and Node 24.15.0. Use fingerprint for diagnostics.');
   }
-  const app = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
+  const app = readJson(safePath('package.json'));
   if (app.devDependencies?.electron !== TARGET.electron) {
     throw new Error('Output cache Electron version pin does not match.');
   }
@@ -83,27 +108,29 @@ function getKeyfrom() {
 }
 
 function getDepInfo(dryRun) {
-  const depStateFile = path.join(ROOT, '.circleci-dependency-state.json');
-  const depManifestFile = path.join(ROOT, '.circleci-dependency-cache/manifest.json');
-  const lockFile = path.join(ROOT, 'package-lock.json');
-  if (!fs.existsSync(lockFile)) throw new Error('Missing package-lock.json');
+  const depStateFile = safePath('.circleci-dependency-state.json');
+  const depManifestFile = safePath('.circleci-dependency-cache/manifest.json');
+  const lockFile = safePath('package-lock.json');
+  if (!exists(lockFile)) throw new Error('Missing package-lock.json');
   const currentLockDigest = hashFile(lockFile);
 
-  if (dryRun && (!fs.existsSync(depManifestFile) || !fs.existsSync(depStateFile))) {
+  if (dryRun && (!exists(depManifestFile) || !exists(depStateFile))) {
     return { key: 'dry-run-dep-key', treeSha256: 'dry-run-tree-sha', rootLockSha256: currentLockDigest };
   }
-  if (!fs.existsSync(depStateFile) || !fs.existsSync(depManifestFile)) {
+  if (!exists(depStateFile) || !exists(depManifestFile)) {
     throw new Error('Dependency cache must be restored and verified before output cache operations');
   }
-  const depState = JSON.parse(fs.readFileSync(depStateFile, 'utf8'));
+  const depState = readJson(depStateFile);
   if (!depState.ready) throw new Error('Dependency state is not ready');
-  const manifest = JSON.parse(fs.readFileSync(depManifestFile, 'utf8'));
-  const key = fs.readFileSync(path.join(ROOT, '.circleci-dependency-keys/root.txt'), 'utf8').trim();
-  const hidden = path.join(ROOT, 'node_modules/.package-lock.json');
+  const manifest = readJson(depManifestFile);
+  const keyFile = safePath('.circleci-dependency-keys/root.txt');
+  if (!exists(keyFile)) throw new Error('Missing dependency key file');
+  const key = fs.readFileSync(keyFile, 'utf8').trim();
+  const hidden = safePath('node_modules/.package-lock.json');
   if (manifest.schema !== 1 || manifest.successfulInstall !== true || manifest.key !== key
     || manifest.nativePhase !== 'npm-install-pre-package' || !manifest.installed
     || manifest.installed.rootLockSha256 !== currentLockDigest
-    || manifest.installed.hiddenLockSha256 !== (fs.existsSync(hidden) ? hashFile(hidden) : null)) {
+    || manifest.installed.hiddenLockSha256 !== (exists(hidden) ? hashFile(hidden) : null)) {
     throw new Error('Root package-lock.json digest does not match restored dependency manifest');
   }
   return {
@@ -186,13 +213,13 @@ async function restore(kind, dryRun = false) {
   if (!dryRun) checkToolchain();
   writeJson(statePath(kind), { ready: false });
   const current = fingerprint(kind, dryRun);
-  const manifestFile = manifestPath(kind);
-  if (!fs.existsSync(manifestFile)) {
+  const manifestFile = safePath(manifestPath(kind));
+  if (!exists(manifestFile)) {
     checkColdMiss(kind);
     console.log(`[output-cache] ${kind}: cold miss; original build required.`);
     return;
   }
-  const saved = JSON.parse(fs.readFileSync(manifestFile, 'utf8'));
+  const saved = readJson(manifestFile);
   if (saved.schema !== SCHEMA || saved.epoch !== OUTPUT_EPOCH || saved.kind !== kind
     || saved.key !== current.key || stable(saved.identity) !== stable(current.identity)) {
     throw new Error(`${kind} output cache identity mismatch`);
@@ -239,10 +266,11 @@ function generateKeys(dryRun = false) {
   if (!dryRun) checkToolchain();
   const clientFp = fingerprint('client', dryRun);
   const skillsFp = fingerprint('skills', dryRun);
-  const keysDir = path.join(ROOT, '.circleci-output-keys');
-  fs.mkdirSync(keysDir, { recursive: true });
-  fs.writeFileSync(path.join(keysDir, 'client.txt'), clientFp.key + '\n');
-  fs.writeFileSync(path.join(keysDir, 'skills.txt'), skillsFp.key + '\n');
+  const clientFile = safePath('.circleci-output-keys/client.txt');
+  const skillsFile = safePath('.circleci-output-keys/skills.txt');
+  fs.mkdirSync(path.dirname(clientFile), { recursive: true });
+  fs.writeFileSync(clientFile, clientFp.key + '\n');
+  fs.writeFileSync(skillsFile, skillsFp.key + '\n');
   console.log(`[output-cache] Output keys written: client (${clientFp.key}), skills (${skillsFp.key})`);
 }
 
@@ -279,6 +307,10 @@ async function main() {
 module.exports = { fingerprint, restore, capture, generateKeys };
 if (require.main === module) {
   main().catch(err => {
+    const [, kind] = process.argv.slice(2);
+    if (['restore', 'capture'].includes(process.argv[2]) && ['client', 'skills'].includes(kind)) {
+      try { writeJson(statePath(kind), { ready: false }); } catch { /* Do not write through an unsafe path. */ }
+    }
     console.error(`[output-cache] ERROR: ${err.message}`);
     process.exitCode = 1;
   });

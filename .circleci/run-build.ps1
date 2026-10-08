@@ -238,7 +238,7 @@ function Prepare-RuntimeCore {
         # from the cold core build; neither is transferred to the remainder job.
         Invoke-CommandWithHardTimeout -Command "npm run openclaw:bundle" -TimeoutMinutes 5
     }
-    Invoke-CommandWithHardTimeout -Command "node .circleci\runtime-workspace.cjs capture-core" -TimeoutMinutes 5
+    Invoke-CommandWithHardTimeout -Command "node .circleci\runtime-workspace.cjs capture-core" -TimeoutMinutes 55
 }
 
 function Prepare-RuntimePublished {
@@ -249,7 +249,7 @@ function Prepare-RuntimePublished {
     if (-not $state.pluginsReady) {
         Invoke-CommandWithHardTimeout -Command "npm run openclaw:plugins" -TimeoutMinutes 30
     }
-    Invoke-CommandWithHardTimeout -Command "node .circleci\runtime-workspace.cjs capture-plugins" -TimeoutMinutes 5
+    Invoke-CommandWithHardTimeout -Command "node .circleci\runtime-workspace.cjs capture-plugins" -TimeoutMinutes 55
 }
 
 function Prepare-RuntimeRemainder {
@@ -261,7 +261,7 @@ function Prepare-RuntimeRemainder {
         # Published plugins are already captured; retain local build hooks.
         Invoke-CommandWithHardTimeout -Command "npm run openclaw:extensions:local && npm run openclaw:precompile && npm run openclaw:channel-deps && npm run openclaw:prune" -TimeoutMinutes 30
     }
-    Invoke-CommandWithHardTimeout -Command "node .circleci\runtime-workspace.cjs capture-full" -TimeoutMinutes 5
+    Invoke-CommandWithHardTimeout -Command "node .circleci\runtime-workspace.cjs capture-full" -TimeoutMinutes 55
 }
 
 function Invoke-BuildAction {
@@ -290,12 +290,12 @@ function Invoke-BuildAction {
             "runtime-core" { Prepare-RuntimeCore }
             "runtime-published" { Prepare-RuntimePublished }
             "runtime-remainder" { Prepare-RuntimeRemainder }
-            "export-core" { Invoke-CommandWithHardTimeout -Command "node .circleci\runtime-workspace.cjs export-core" -TimeoutMinutes 5 }
+            "export-core" { Invoke-CommandWithHardTimeout -Command "node .circleci\runtime-workspace.cjs export-core" -TimeoutMinutes 55 }
             "import-core" {
                 Invoke-CommandWithHardTimeout -Command "node .circleci\runtime-workspace.cjs import-core" -TimeoutMinutes 55
                 Invoke-CommandWithHardTimeout -Command "node scripts\sync-openclaw-runtime-current.cjs win-x64" -TimeoutMinutes 2
             }
-            "export-runtime" { Invoke-CommandWithHardTimeout -Command "node .circleci\runtime-workspace.cjs export" -TimeoutMinutes 5 }
+            "export-runtime" { Invoke-CommandWithHardTimeout -Command "node .circleci\runtime-workspace.cjs export" -TimeoutMinutes 55 }
             "import-runtime" {
                 Invoke-CommandWithHardTimeout -Command "node .circleci\runtime-workspace.cjs import" -TimeoutMinutes 55
                 Invoke-CommandWithHardTimeout -Command "node scripts\sync-openclaw-runtime-current.cjs win-x64" -TimeoutMinutes 2

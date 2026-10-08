@@ -235,9 +235,27 @@ function inspectInstalled() {
     nativePhase: 'npm-install-pre-package' };
 }
 
+// Every owned path has a fixed relative name. Reject redirected ancestors before
+// reading/writing/removing anything; treeDigest also checks internal links.
+function safePath(relative) {
+  const normalized = path.isAbsolute(relative) ? path.relative(ROOT, relative).split(path.sep).join('/') : relative;
+  const parts = normalized.split('/');
+  let current = ROOT;
+  for (const [index, part] of parts.entries()) {
+    current = path.join(current, part);
+    if (!exists(current)) continue;
+    const stat = fs.lstatSync(current);
+    if (stat.isSymbolicLink() || (index < parts.length - 1 && !stat.isDirectory())) {
+      throw new Error(`Dependency cache path is redirected: ${relative}`);
+    }
+  }
+  return current;
+}
+
 function writeJson(relative, value) {
-  fs.mkdirSync(path.dirname(absolute(relative)), { recursive: true });
-  fs.writeFileSync(absolute(relative), JSON.stringify(value, null, 2) + '\n');
+  const file = safePath(relative);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, JSON.stringify(value, null, 2) + '\n');
 }
 
 async function main(command, args) {
@@ -249,19 +267,20 @@ async function main(command, args) {
   if (command === 'fingerprint') { console.log(JSON.stringify(current, null, 2)); return; }
   checkToolchain();
   if (command === 'keys') {
-    fs.mkdirSync(absolute('.circleci-dependency-keys'), { recursive: true });
-    fs.writeFileSync(absolute('.circleci-dependency-keys/root.txt'), current.key + '\n');
+    const file = safePath('.circleci-dependency-keys/root.txt');
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, current.key + '\n');
     console.log('[DependencyCache] Exact root key generated'); return;
   }
   writeJson(STATE, { ready: false });
   if (command === 'restore') {
-    const marker = exists(absolute(MANIFEST));
+    const marker = exists(safePath(MANIFEST));
     const tree = exists(absolute('node_modules'));
     const lock = exists(absolute('package-lock.json'));
     if (!marker && !tree && !lock) { console.log('[DependencyCache] Miss'); return; }
     if (!marker || !tree || !lock) throw new Error('Partial dependency cache; refusing install fallback');
-    if (!fs.lstatSync(absolute(MANIFEST)).isFile()) throw new Error('Dependency marker must be a concrete file');
-    const saved = readJson(absolute(MANIFEST));
+    if (!fs.lstatSync(safePath(MANIFEST)).isFile()) throw new Error('Dependency marker must be a concrete file');
+    const saved = readJson(safePath(MANIFEST));
     if (saved.schema !== SCHEMA || saved.key !== current.key || stable(saved.identity) !== stable(current.identity)
       || saved.successfulInstall !== true || saved.nativePhase !== 'npm-install-pre-package') {
       throw new Error('Dependency cache identity mismatch');
@@ -282,5 +301,8 @@ async function main(command, args) {
 
 module.exports = { stable, hashFile, treeDigest };
 if (require.main === module) main(process.argv[2], process.argv.slice(3)).catch(error => {
+  if (['restore', 'capture'].includes(process.argv[2])) {
+    try { writeJson(STATE, { ready: false }); } catch { /* Do not write through an unsafe path. */ }
+  }
   console.error(`[DependencyCache] ${error.message}`); process.exitCode = 1;
 });
