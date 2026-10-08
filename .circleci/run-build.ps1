@@ -141,8 +141,15 @@ function Build-LobsterAI {
     Write-Host "==> Installing dependencies (npm install)..."
     Invoke-CommandWithHardTimeout -Command "npm install" -TimeoutMinutes 10
 
+    # Artifact-only CI builds must not inherit certificate signing credentials.
+    Get-ChildItem Env: | Where-Object { $_.Name -like "CSC_*" -or $_.Name -like "WIN_CSC_*" } | ForEach-Object {
+        Remove-Item -LiteralPath "Env:$($_.Name)"
+    }
+    $env:CSC_IDENTITY_AUTO_DISCOVERY = "false"
+    $env:LOBSTERAI_UNSIGNED_WINDOWS = "1"
+
     Write-Host "==> Building Windows package (dist:win -- --publish never with signing disabled)..."
-    Invoke-CommandWithHardTimeout -Command "npm run dist:win -- --publish never --config.win.sign=null --config.afterSign=null" -TimeoutMinutes 50
+    Invoke-CommandWithHardTimeout -Command "npm run dist:win -- --publish never" -TimeoutMinutes 50
 }
 
 function Collect-Artifacts {

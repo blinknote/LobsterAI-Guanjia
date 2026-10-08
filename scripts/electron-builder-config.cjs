@@ -115,6 +115,23 @@ config.win = {
   sign: path.join(__dirname, 'win-sign.cjs'),
 };
 
+if (process.env.LOBSTERAI_UNSIGNED_WINDOWS === '1') {
+  // No certificate or custom signer makes WinPackager.sign return false,
+  // while resource/icon editing and installer hooks remain enabled.
+  config.win.sign = null;
+  config.afterSign = null;
+  config.win.forceCodeSigning = false;
+  delete config.win.certificateFile;
+  delete config.win.certificatePassword;
+  delete config.win.certificateSha1;
+  delete config.win.certificateSubjectName;
+  delete config.win.cscLink;
+  delete config.cscLink;
+  // Clear links here too, after electron-builder has loaded dotenv files.
+  delete process.env.CSC_LINK;
+  delete process.env.WIN_CSC_LINK;
+}
+
 delete config.extraResources;
 
 config.dmg = {
