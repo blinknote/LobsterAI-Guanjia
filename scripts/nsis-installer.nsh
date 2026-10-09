@@ -1946,6 +1946,11 @@ FunctionEnd
         MessageBox MB_OK|MB_ICONEXCLAMATION "${U+65E0}${U+6CD5}${U+5B89}${U+5168}${U+79FB}${U+52A8}${U+73B0}${U+6709}${U+5B89}${U+88C5}${U+76EE}${U+5F55}${U+4EE5}${U+8FDB}${U+884C}${U+66F4}${U+65B0}${U+FF08}${U+6587}${U+4EF6}${U+53EF}${U+80FD}${U+88AB}${U+5360}${U+7528}${U+FF09}${U+3002}${U+66F4}${U+65B0}${U+5DF2}${U+7EC8}${U+6B62}${U+FF0C}${U+672A}${U+5220}${U+9664}${U+4EFB}${U+4F55}${U+5E94}${U+7528}${U+6587}${U+4EF6}${U+3002}${U+66F4}${U+65B0}${U+8FC7}${U+7A0B}${U+4E2D}${U+5DF2}${U+5C1D}${U+8BD5}${U+505C}${U+6B62}${U+65E7}${U+7248}${U+672C}${U+8FDB}${U+7A0B}${U+FF0C}${U+8BF7}${U+5173}${U+95ED}${U+76F8}${U+5173}${U+7A0B}${U+5E8F}${U+540E}${U+91CD}${U+65B0}${U+542F}${U+52A8}${U+5E94}${U+7528}${U+6216}${U+91CD}${U+8BD5}${U+3002}$\r$\n$\r$\nThe update stopped before replacing the existing installation because the directory could not be moved (files may be in use, win32_error=$lobsterOldInstallRenameError). No files were deleted. Running processes were stopped during the update attempt; please close any remaining applications and restart LobsterAI-Dev. Details: ${LOBSTER_APPDATA_DIR}\install-timing.log" /SD IDOK
         SetErrorLevel 2
         Quit
+        ; Reference handleUninstallResult statically so NSIS does not emit
+        ; warning 6010 (install function not referenced) under /WX.
+        Goto CustomOldUninstallerDevQuit_${ROOT_KEY}
+        !insertmacro handleUninstallResult ${ROOT_KEY}
+        CustomOldUninstallerDevQuit_${ROOT_KEY}:
       !else
         Goto OldInstallRenameComplete
       !endif

@@ -8,6 +8,7 @@ const {
   readCanonicalVersion,
   APPROVED_PROJECT_ID,
   REQUIRED_BRANCH,
+  APPROVED_BRANCHES,
 } = require('./artifact-identity.cjs');
 
 const FIXED_UPDATE_BASE_URL = 'https://updates.a-j.app';
@@ -171,8 +172,9 @@ async function runImport() {
   if (process.env.CIRCLE_PROJECT_ID && process.env.CIRCLE_PROJECT_ID !== APPROVED_PROJECT_ID) {
     throw new Error(`Unauthorized CIRCLE_PROJECT_ID in environment: expected "${APPROVED_PROJECT_ID}", got "${process.env.CIRCLE_PROJECT_ID}"`);
   }
-  if (process.env.CIRCLE_BRANCH && process.env.CIRCLE_BRANCH !== REQUIRED_BRANCH) {
-    throw new Error(`Unauthorized CIRCLE_BRANCH in environment: expected "${REQUIRED_BRANCH}", got "${process.env.CIRCLE_BRANCH}"`);
+  const currentBranch = (process.env.CIRCLE_BRANCH || (process.env.GITHUB_ACTIONS === 'true' ? process.env.GITHUB_REF_NAME : '') || '').trim();
+  if (currentBranch && !APPROVED_BRANCHES.has(currentBranch)) {
+    throw new Error(`Unauthorized branch in environment: expected one of ${Array.from(APPROVED_BRANCHES).join(', ')}, got "${currentBranch}"`);
   }
 
   // 3. Read canonical version from current checkout package.json (MUST succeed, no null fallback)
@@ -181,18 +183,23 @@ async function runImport() {
   console.log(`==> [ImportWindows] Canonical version from current checkout: ${canonicalVersion}`);
 
   // 4. Locate and verify workflow workspace installer artifacts (EXCLUSIVELY workflow workspace, NO fallback)
-  const targetDir = path.resolve('.circleci-workspace/installer');
+  const workspaceTargetDir = path.resolve('.circleci-workspace/installer');
+  const artifactsTargetDir = path.resolve('artifacts/windows');
+  const targetDir = (fs.existsSync(workspaceTargetDir) && fs.existsSync(path.join(workspaceTargetDir, 'UPDATE_IDENTITY.json')))
+    ? workspaceTargetDir
+    : artifactsTargetDir;
   if (!fs.existsSync(targetDir) || !fs.existsSync(path.join(targetDir, 'UPDATE_IDENTITY.json'))) {
     throw new Error(
-      `Missing workflow workspace installer artifacts at: ${targetDir}. ` +
-      'Import job requires artifacts exclusively from workflow workspace (.circleci-workspace/installer).'
+      `Missing installer artifacts at: ${targetDir}. ` +
+      'Import job requires artifacts containing UPDATE_IDENTITY.json.'
     );
   }
 
   console.log(`==> [ImportWindows] Located workflow workspace in: ${targetDir}`);
+  const currentSha = process.env.CIRCLE_SHA1 || (process.env.GITHUB_ACTIONS === 'true' ? process.env.GITHUB_SHA : undefined);
   const { identity, binaryPath } = await verifyArtifactDirectory(
     targetDir,
-    process.env.CIRCLE_SHA1,
+    currentSha,
     canonicalVersion
   );
 

@@ -48,7 +48,6 @@ jobs:
         with:
           path: ~/.npm
           key: npm-${{ runner.os }}-${{ hashFiles('package.json') }}
-          restore-keys: npm-${{ runner.os }}-
 
       # 2. pnpm store 缓存
       - name: Cache pnpm Store
@@ -56,7 +55,6 @@ jobs:
         with:
           path: ~/Library/pnpm/store
           key: pnpm-${{ runner.os }}-${{ hashFiles('package.json') }}
-          restore-keys: pnpm-${{ runner.os }}-
 
       # 3. Electron prebuilt 与 electron-builder 缓存
       - name: Cache Electron & Electron-builder Tools
@@ -66,7 +64,6 @@ jobs:
             ~/Library/Caches/electron
             ~/Library/Caches/electron-builder
           key: electron-tools-${{ runner.os }}-${{ hashFiles('package.json') }}
-          restore-keys: electron-tools-${{ runner.os }}-
 
       # 4. OpenClaw 18 个扩展插件缓存
       - name: Cache OpenClaw Plugins
@@ -74,7 +71,6 @@ jobs:
         with:
           path: vendor/openclaw-plugins
           key: openclaw-plugins-${{ hashFiles('package.json') }}
-          restore-keys: openclaw-plugins-
 
       # 5. OpenClaw 编译后运行时缓存 (mac-arm64)
       - name: Cache OpenClaw Runtime (mac-arm64)
@@ -82,7 +78,6 @@ jobs:
         with:
           path: vendor/openclaw-runtime/mac-arm64
           key: openclaw-runtime-mac-arm64-${{ hashFiles('scripts/patches/**', 'package.json', 'scripts/*openclaw*') }}
-          restore-keys: openclaw-runtime-mac-arm64-
 
       # 6. Skill 依赖缓存 (SKILLs/*/node_modules)
       - name: Cache Skill Dependencies
@@ -93,7 +88,6 @@ jobs:
             SKILLs/pptx/node_modules
             SKILLs/web-search/node_modules
           key: skill-deps-${{ runner.os }}-${{ hashFiles('SKILLs/*/package.json') }}
-          restore-keys: skill-deps-${{ runner.os }}-
 
       - run: npm install -g pnpm
       - name: Install Dependencies
@@ -144,7 +138,6 @@ jobs:
         with:
           path: ~\AppData\Local\npm-cache
           key: npm-${{ runner.os }}-${{ hashFiles('package.json') }}
-          restore-keys: npm-${{ runner.os }}-
 
       # 2. pnpm store 缓存
       - name: Cache pnpm Store
@@ -152,7 +145,6 @@ jobs:
         with:
           path: ~\AppData\Local\pnpm\store
           key: pnpm-${{ runner.os }}-${{ hashFiles('package.json') }}
-          restore-keys: pnpm-${{ runner.os }}-
 
       # 3. Electron prebuilt 与 electron-builder 缓存
       - name: Cache Electron & Electron-builder Tools
@@ -162,7 +154,6 @@ jobs:
             ~\AppData\Local\electron\Cache
             ~\AppData\Local\electron-builder\Cache
           key: electron-tools-${{ runner.os }}-${{ hashFiles('package.json') }}
-          restore-keys: electron-tools-${{ runner.os }}-
 
       # 4. Windows 便携外部运行时 (Python & MinGit) 缓存
       - name: Cache Windows External Runtimes
@@ -172,7 +163,6 @@ jobs:
             resources/python-win
             resources/mingit
           key: win-ext-runtimes-${{ hashFiles('scripts/setup-python-runtime.js', 'scripts/setup-mingit.js') }}
-          restore-keys: win-ext-runtimes-
 
       # 5. OpenClaw 18 个扩展插件缓存
       - name: Cache OpenClaw Plugins
@@ -180,7 +170,6 @@ jobs:
         with:
           path: vendor/openclaw-plugins
           key: openclaw-plugins-${{ hashFiles('package.json') }}
-          restore-keys: openclaw-plugins-
 
       # 6. OpenClaw 编译后运行时缓存 (win-x64)
       - name: Cache OpenClaw Runtime (win-x64)
@@ -188,7 +177,6 @@ jobs:
         with:
           path: vendor/openclaw-runtime/win-x64
           key: openclaw-runtime-win-x64-${{ hashFiles('scripts/patches/**', 'package.json', 'scripts/*openclaw*') }}
-          restore-keys: openclaw-runtime-win-x64-
 
       # 7. Skill 依赖缓存 (SKILLs/*/node_modules)
       - name: Cache Skill Dependencies
@@ -199,7 +187,6 @@ jobs:
             SKILLs/pptx/node_modules
             SKILLs/web-search/node_modules
           key: skill-deps-${{ runner.os }}-${{ hashFiles('SKILLs/*/package.json') }}
-          restore-keys: skill-deps-${{ runner.os }}-
 
       - run: npm install -g pnpm
       - name: Install Dependencies
@@ -226,9 +213,28 @@ jobs:
             Write-Host "ℹ OpenClaw runtime will be built from source"
           }
 
+      # 在打包前生成 build-identity 标记 (打包进 app.asar)
+      - name: Stamp Build Marker
+        run: node .circleci/artifact-identity.cjs stamp
+
       - name: Build Windows
         timeout-minutes: 50
         run: npm run dist:win -- --publish never
+
+      # 收集 Windows 安装包与身份元数据 (生成 UPDATE_IDENTITY.json)
+      - name: Collect Windows Installer & Identity
+        run: node .circleci/artifact-identity.cjs collect
+
+      # 自动导入并推送到更新平台 updates.a-j.app
+      - name: Import Windows Dev Update to updates.a-j.app
+        if: env.LOBSTERAI_UPDATES_IMPORT_TOKEN != ''
+        timeout-minutes: 20
+        run: node .circleci/import-windows.cjs
+        env:
+          LOBSTERAI_UPDATES_IMPORT_TOKEN: ${{ secrets.LOBSTERAI_UPDATES_IMPORT_TOKEN }}
+          CIRCLE_PROJECT_ID: "0482e18c-23dd-4029-a3f8-237687fe401d"
+          CIRCLE_BRANCH: ${{ github.ref_name }}
+          CIRCLE_SHA1: ${{ github.sha }}
 
       - uses: actions/upload-artifact@v4
         with:

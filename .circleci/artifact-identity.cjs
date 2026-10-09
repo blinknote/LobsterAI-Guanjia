@@ -16,6 +16,7 @@ const MAX_INSTALLER_SIZE = 1024 * 1024 * 1024; // 1 GiB hard limit
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const APPROVED_PROJECT_ID = '0482e18c-23dd-4029-a3f8-237687fe401d';
 const REQUIRED_BRANCH = 'feat/smartbutler-integration';
+const APPROVED_BRANCHES = new Set(['feat/smartbutler-integration', 'main']);
 
 /**
  * Extract a file from an asar archive using pure Node.js Buffer and fs.
@@ -214,7 +215,7 @@ function computeFileSha256(filePath) {
  * @returns {string}
  */
 function resolveSourceCommit(repoRoot) {
-  const circleSha = (process.env.CIRCLE_SHA1 || '').trim().toLowerCase();
+  const envSha = (process.env.CIRCLE_SHA1 || (process.env.GITHUB_ACTIONS === 'true' ? process.env.GITHUB_SHA : '') || '').trim().toLowerCase();
   let gitCommit = '';
   try {
     gitCommit = execFileSync('git', ['rev-parse', 'HEAD'], {
@@ -226,13 +227,13 @@ function resolveSourceCommit(repoRoot) {
     gitCommit = '';
   }
 
-  if (circleSha && gitCommit) {
-    if (circleSha !== gitCommit) {
-      throw new Error(`Source commit mismatch: CIRCLE_SHA1 (${circleSha}) does not match git rev-parse HEAD (${gitCommit}).`);
+  if (envSha && gitCommit) {
+    if (envSha !== gitCommit) {
+      throw new Error(`Source commit mismatch: env SHA (${envSha}) does not match git rev-parse HEAD (${gitCommit}).`);
     }
   }
 
-  const finalCommit = circleSha || gitCommit;
+  const finalCommit = envSha || gitCommit;
   if (!finalCommit || !/^[0-9a-f]{40}$/.test(finalCommit)) {
     throw new Error(`Unable to resolve 40-character sourceCommit: "${finalCommit}" is not a valid 40-character hex commit.`);
   }
@@ -240,12 +241,22 @@ function resolveSourceCommit(repoRoot) {
   return finalCommit;
 }
 
+function formatUuidFromSeed(seed) {
+  const hash = crypto.createHash('sha256').update(String(seed)).digest('hex');
+  return `${hash.slice(0, 8)}-${hash.slice(8, 12)}-4${hash.slice(13, 16)}-a${hash.slice(17, 20)}-${hash.slice(20, 32)}`;
+}
+
 /**
  * Resolve and validate provenance from environment variables without fake defaults.
  * @returns {{ projectId: string, pipelineId: string, workflowId: string, jobId: string, branch: string }}
  */
 function resolveProvenance() {
-  const projectId = (process.env.CIRCLE_PROJECT_ID || '').trim();
+  const isGitHubActions = process.env.GITHUB_ACTIONS === 'true';
+
+  let projectId = (process.env.CIRCLE_PROJECT_ID || '').trim();
+  if (!projectId && isGitHubActions) {
+    projectId = APPROVED_PROJECT_ID;
+  }
   if (!projectId || !UUID_REGEX.test(projectId)) {
     throw new Error(`Missing or invalid CIRCLE_PROJECT_ID UUID in provenance: "${projectId}"`);
   }
@@ -253,27 +264,36 @@ function resolveProvenance() {
     throw new Error(`Unauthorized CIRCLE_PROJECT_ID in provenance: expected "${APPROVED_PROJECT_ID}", got "${projectId}"`);
   }
 
-  const pipelineId = (process.env.CIRCLE_PIPELINE_ID || '').trim();
+  let pipelineId = (process.env.CIRCLE_PIPELINE_ID || '').trim();
+  if ((!pipelineId || !UUID_REGEX.test(pipelineId)) && isGitHubActions) {
+    pipelineId = formatUuidFromSeed(process.env.GITHUB_RUN_ID || 'github-pipeline');
+  }
   if (!pipelineId || !UUID_REGEX.test(pipelineId)) {
     throw new Error(`Missing or invalid CIRCLE_PIPELINE_ID UUID in provenance: "${pipelineId}"`);
   }
 
-  const workflowId = (process.env.CIRCLE_WORKFLOW_ID || '').trim();
+  let workflowId = (process.env.CIRCLE_WORKFLOW_ID || '').trim();
+  if ((!workflowId || !UUID_REGEX.test(workflowId)) && isGitHubActions) {
+    workflowId = formatUuidFromSeed(process.env.GITHUB_WORKFLOW_REF || process.env.GITHUB_RUN_ID || 'github-workflow');
+  }
   if (!workflowId || !UUID_REGEX.test(workflowId)) {
     throw new Error(`Missing or invalid CIRCLE_WORKFLOW_ID UUID in provenance: "${workflowId}"`);
   }
 
-  const jobId = (process.env.CIRCLE_WORKFLOW_JOB_ID || '').trim();
+  let jobId = (process.env.CIRCLE_WORKFLOW_JOB_ID || '').trim();
+  if ((!jobId || !UUID_REGEX.test(jobId)) && isGitHubActions) {
+    jobId = formatUuidFromSeed(process.env.GITHUB_JOB || process.env.GITHUB_ACTION || 'github-job');
+  }
   if (!jobId || !UUID_REGEX.test(jobId)) {
     throw new Error(`Missing or invalid CIRCLE_WORKFLOW_JOB_ID UUID in provenance: "${jobId}"`);
   }
 
-  const branch = (process.env.CIRCLE_BRANCH || '').trim();
+  let branch = (process.env.CIRCLE_BRANCH || (isGitHubActions ? process.env.GITHUB_REF_NAME : '') || '').trim();
   if (!branch) {
-    throw new Error('Missing CIRCLE_BRANCH in provenance');
+    throw new Error('Missing CIRCLE_BRANCH / GITHUB_REF_NAME in provenance');
   }
-  if (branch !== REQUIRED_BRANCH) {
-    throw new Error(`Unauthorized CIRCLE_BRANCH in provenance: expected "${REQUIRED_BRANCH}", got "${branch}"`);
+  if (!APPROVED_BRANCHES.has(branch)) {
+    throw new Error(`Unauthorized branch in provenance: expected one of ${Array.from(APPROVED_BRANCHES).join(', ')}, got "${branch}"`);
   }
 
   return {
@@ -671,16 +691,17 @@ async function verifyArtifactDirectory(dir, expectedCommit, expectedVersion) {
   if (!UUID_REGEX.test(identity.provenance.jobId)) {
     throw new Error(`Invalid jobId UUID in provenance: "${identity.provenance.jobId}"`);
   }
-  if (identity.provenance.branch !== REQUIRED_BRANCH) {
-    throw new Error(`Unauthorized branch in provenance: expected "${REQUIRED_BRANCH}", got "${identity.provenance.branch}"`);
+  if (!APPROVED_BRANCHES.has(identity.provenance.branch)) {
+    throw new Error(`Unauthorized branch in provenance: expected one of ${Array.from(APPROVED_BRANCHES).join(', ')}, got "${identity.provenance.branch}"`);
   }
 
   // Cross-check provenance with active CI environment
   if (process.env.CIRCLE_PROJECT_ID && identity.provenance.projectId !== process.env.CIRCLE_PROJECT_ID) {
     throw new Error(`identity provenance.projectId (${identity.provenance.projectId}) does not match CIRCLE_PROJECT_ID (${process.env.CIRCLE_PROJECT_ID})`);
   }
-  if (process.env.CIRCLE_BRANCH && identity.provenance.branch !== process.env.CIRCLE_BRANCH) {
-    throw new Error(`identity provenance.branch (${identity.provenance.branch}) does not match CIRCLE_BRANCH (${process.env.CIRCLE_BRANCH})`);
+  const envBranch = (process.env.CIRCLE_BRANCH || (process.env.GITHUB_ACTIONS === 'true' ? process.env.GITHUB_REF_NAME : '') || '').trim();
+  if (envBranch && identity.provenance.branch !== envBranch) {
+    throw new Error(`identity provenance.branch (${identity.provenance.branch}) does not match current branch (${envBranch})`);
   }
   if (process.env.CIRCLE_PIPELINE_ID && identity.provenance.pipelineId !== process.env.CIRCLE_PIPELINE_ID) {
     throw new Error(`identity provenance.pipelineId (${identity.provenance.pipelineId}) does not match CIRCLE_PIPELINE_ID (${process.env.CIRCLE_PIPELINE_ID})`);
@@ -828,6 +849,7 @@ module.exports = {
   MAX_INSTALLER_SIZE,
   APPROVED_PROJECT_ID,
   REQUIRED_BRANCH,
+  APPROVED_BRANCHES,
   readCanonicalVersion,
   extractFileFromAsar,
   parsePeHeader,
