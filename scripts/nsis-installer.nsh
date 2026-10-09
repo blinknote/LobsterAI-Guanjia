@@ -11,6 +11,28 @@
   !include "${PROJECT_DIR}\build-tar\win-installer-payload-size.nsh"
 !endif
 
+; Dev build detection:
+; Requires exact configured identity from electron-builder:
+; BOTH APP_ID == "com.lobsterai.dev.app" AND PRODUCT_NAME == "LobsterAI-Dev".
+; No environment variable alone may approve a mismatched product.
+!ifdef APP_ID
+!ifdef PRODUCT_NAME
+  !if "${APP_ID}" == "com.lobsterai.dev.app"
+  !if "${PRODUCT_NAME}" == "LobsterAI-Dev"
+    !define LOBSTERAI_DEV_BUILD 1
+  !endif
+  !endif
+!endif
+!endif
+
+; Target-isolated AppData root for timing logs, migration state and backups.
+; Formal builds use $APPDATA\LobsterAI; Dev builds strictly use $APPDATA\LobsterAI-Dev.
+!ifdef LOBSTERAI_DEV_BUILD
+  !define LOBSTER_APPDATA_DIR "$APPDATA\LobsterAI-Dev"
+!else
+  !define LOBSTER_APPDATA_DIR "$APPDATA\LobsterAI"
+!endif
+
 ; Free-space headroom on top of the measured payload sizes: NTFS cluster
 ; slack across tens of thousands of staged files, log/registry churn, and
 ; general safety. All staging space math is done in MB because NSIS
@@ -536,7 +558,11 @@ FunctionEnd
   System::Call 'kernel32::GetTickCount()i .r7'
   ; The survivor helper below and every log write in this macro need the
   ; directory, including on the helper-not-found path.
-  CreateDirectory "$APPDATA\LobsterAI"
+  !ifdef LOBSTERAI_DEV_BUILD
+    CreateDirectory "$APPDATA\LobsterAI-Dev"
+  !else
+    CreateDirectory "$APPDATA\LobsterAI"
+  !endif
   StrCmp $lobsterTrustedPowerShellPath "" StopLobsterAIProcessesDone
   ; The path-prefix sweep in both helpers below needs the install root and
   ; this process id. Both travel through the child environment, not string
@@ -545,15 +571,23 @@ FunctionEnd
   ; reaches.
   System::Call 'Kernel32::SetEnvironmentVariable(t "LOBSTERAI_STOP_ROOT", t "$INSTDIR")i'
   System::Call 'Kernel32::SetEnvironmentVariable(t "LOBSTERAI_STOP_SELF_PID", t "$lobsterCurrentProcessPid")i'
+  !ifdef LOBSTERAI_DEV_BUILD
+    System::Call 'Kernel32::SetEnvironmentVariable(t "LOBSTERAI_STOP_IS_DEV", t "1")i'
+  !else
+    System::Call 'Kernel32::SetEnvironmentVariable(t "LOBSTERAI_STOP_IS_DEV", t "0")i'
+  !endif
   Push '"$lobsterTrustedPowerShellPath" -NoProfile -NonInteractive -Command "\
     $$root = $$env:LOBSTERAI_STOP_ROOT;\
     if ($$root -and -not $$root.EndsWith([char]92)) { $$root = $$root + [char]92 };\
     $$selfPid = $$env:LOBSTERAI_STOP_SELF_PID;\
+    $$isDev = $$env:LOBSTERAI_STOP_IS_DEV -eq \"1\";\
     $$sweep = $$root -and $$root.Length -gt 3;\
     for ($$i = 0; $$i -lt 30; $$i++) {\
       $$procs = @();\
+      if (-not $$isDev) {\
       $$procs += Get-Process -Name LobsterAI -ErrorAction SilentlyContinue;\
       $$procs += Get-Process node -ErrorAction SilentlyContinue | Where-Object { $$_.Path -like \"*LobsterAI*\" };\
+      };\
       if ($$sweep) { $$procs += Get-Process -ErrorAction SilentlyContinue | Where-Object { $$fp = $$null; try { $$fp = $$_.Path } catch { }; $$fp -and $$fp.StartsWith($$root, [System.StringComparison]::OrdinalIgnoreCase) -and $$_.Id.ToString() -ne $$selfPid } };\
       if ($$procs.Count -eq 0) { exit 0 };\
       $$procs | Stop-Process -Force -ErrorAction SilentlyContinue;\
@@ -575,17 +609,24 @@ FunctionEnd
   ; string interpolation: the log path contains the user profile directory,
   ; which may hold shell metacharacters. Helper exit code = survivor count at
   ; re-check time; 0 means the blockers died right after the verdict.
-  System::Call 'Kernel32::SetEnvironmentVariable(t "LOBSTERAI_STOP_LOG_PATH", t "$APPDATA\LobsterAI\install-timing.log")i'
+  !ifdef LOBSTERAI_DEV_BUILD
+    System::Call 'Kernel32::SetEnvironmentVariable(t "LOBSTERAI_STOP_LOG_PATH", t "$APPDATA\LobsterAI-Dev\install-timing.log")i'
+  !else
+    System::Call 'Kernel32::SetEnvironmentVariable(t "LOBSTERAI_STOP_LOG_PATH", t "$APPDATA\LobsterAI\install-timing.log")i'
+  !endif
   System::Call 'Kernel32::SetEnvironmentVariable(t "LOBSTERAI_STOP_ATTEMPT_ID", t "$lobsterInstallerAttemptId")i'
   Push '"$lobsterTrustedPowerShellPath" -NoProfile -NonInteractive -Command "\
     $$ts = Get-Date -Format \"yyyy-MM-dd HH:mm:ss\";\
     $$root = $$env:LOBSTERAI_STOP_ROOT;\
     if ($$root -and -not $$root.EndsWith([char]92)) { $$root = $$root + [char]92 };\
     $$selfPid = $$env:LOBSTERAI_STOP_SELF_PID;\
+    $$isDev = $$env:LOBSTERAI_STOP_IS_DEV -eq \"1\";\
     $$sweep = $$root -and $$root.Length -gt 3;\
     $$procs = @();\
+      if (-not $$isDev) {\
     $$procs += Get-Process -Name LobsterAI -ErrorAction SilentlyContinue;\
     $$procs += Get-Process node -ErrorAction SilentlyContinue | Where-Object { $$_.Path -like \"*LobsterAI*\" };\
+      };\
     if ($$sweep) { $$procs += Get-Process -ErrorAction SilentlyContinue | Where-Object { $$fp = $$null; try { $$fp = $$_.Path } catch { }; $$fp -and $$fp.StartsWith($$root, [System.StringComparison]::OrdinalIgnoreCase) -and $$_.Id.ToString() -ne $$selfPid } };\
     foreach ($$p in $$procs) {\
       $$fp = \"unknown\";\
@@ -597,7 +638,7 @@ FunctionEnd
   Pop $1
   System::Call 'Kernel32::SetEnvironmentVariable(t "LOBSTERAI_STOP_LOG_PATH", t "")i'
   System::Call 'Kernel32::SetEnvironmentVariable(t "LOBSTERAI_STOP_ATTEMPT_ID", t "")i'
-  FileOpen $9 "$APPDATA\LobsterAI\install-timing.log" a
+  FileOpen $9 "${LOBSTER_APPDATA_DIR}\install-timing.log" a
   FileSeek $9 0 END
   !insertmacro GetTimestamp $8
   !ifdef BUILD_UNINSTALLER
@@ -613,11 +654,12 @@ FunctionEnd
 
   StopLobsterAIProcessesLog:
   ; Clearing variables that were never set (helper-not-found path) is a no-op.
+  System::Call 'Kernel32::SetEnvironmentVariable(t "LOBSTERAI_STOP_IS_DEV", t "")i'
   System::Call 'Kernel32::SetEnvironmentVariable(t "LOBSTERAI_STOP_ROOT", t "")i'
   System::Call 'Kernel32::SetEnvironmentVariable(t "LOBSTERAI_STOP_SELF_PID", t "")i'
   System::Call 'kernel32::GetTickCount()i .r6'
   IntOp $5 $6 - $7
-  FileOpen $9 "$APPDATA\LobsterAI\install-timing.log" a
+  FileOpen $9 "${LOBSTER_APPDATA_DIR}\install-timing.log" a
   FileSeek $9 0 END
   !insertmacro GetTimestamp $8
   !ifdef BUILD_UNINSTALLER
@@ -663,12 +705,21 @@ FunctionEnd
   ${If} ${Silent}
     StrCpy $lobsterUiMode "silent"
   ${EndIf}
-  CreateDirectory "$APPDATA\LobsterAI"
-  FileOpen $9 "$APPDATA\LobsterAI\install-timing.log" a
+  !ifdef LOBSTERAI_DEV_BUILD
+    CreateDirectory "$APPDATA\LobsterAI-Dev"
+    FileOpen $9 "$APPDATA\LobsterAI-Dev\install-timing.log" a
+    FileSeek $9 0 END
+    !insertmacro GetTimestamp $8
+    FileWrite $9 "$8 phase=custom-init-start attempt_id=$lobsterInstallerAttemptId installer_version=${VERSION} invocation_source=$lobsterInvocationSource updated_flag=$lobsterUpdatedFlag ui_mode=$lobsterUiMode silent_source=$lobsterSilentSource launcher_fallback=$lobsterLauncherFallback instdir=$INSTDIR appdata=$APPDATA$\r$\n"
+    FileClose $9
+  !else
+    CreateDirectory "$APPDATA\LobsterAI"
+    FileOpen $9 "${LOBSTER_APPDATA_DIR}\install-timing.log" a
   FileSeek $9 0 END
   !insertmacro GetTimestamp $8
   FileWrite $9 "$8 phase=custom-init-start attempt_id=$lobsterInstallerAttemptId installer_version=${VERSION} invocation_source=$lobsterInvocationSource updated_flag=$lobsterUpdatedFlag ui_mode=$lobsterUiMode silent_source=$lobsterSilentSource launcher_fallback=$lobsterLauncherFallback instdir=$INSTDIR appdata=$APPDATA$\r$\n"
   FileClose $9
+  !endif
 !macroend
 
 !ifndef BUILD_UNINSTALLER
@@ -899,7 +950,7 @@ FunctionEnd
     IfFileExists "$INSTDIR\.lobsterai-staging" 0 LobsterStagingRelocateCreateFailed
     StrCpy $appPackageStagingDir "$INSTDIR\.lobsterai-staging"
     DetailPrint "[Installer] Staging installation payload on the install drive"
-    FileOpen $9 "$APPDATA\LobsterAI\install-timing.log" a
+    FileOpen $9 "${LOBSTER_APPDATA_DIR}\install-timing.log" a
     FileSeek $9 0 END
     !insertmacro GetTimestamp $8
     FileWrite $9 "$8 phase=staging-drive-selected attempt_id=$lobsterInstallerAttemptId drive=$3 mode=install-dir free_mb=$5 needed_mb=$6 plugins_drive=$4 plugins_free_mb=$2 plugins_needed_mb=$1 staging=$appPackageStagingDir$\r$\n"
@@ -910,7 +961,7 @@ FunctionEnd
     ; Could not create the relocated staging directory. Keep the default so
     ; behavior matches previous installers; payload validation still stops a
     ; truncated staging tree afterwards.
-    FileOpen $9 "$APPDATA\LobsterAI\install-timing.log" a
+    FileOpen $9 "${LOBSTER_APPDATA_DIR}\install-timing.log" a
     FileSeek $9 0 END
     !insertmacro GetTimestamp $8
     FileWrite $9 "$8 phase=staging-drive-selected attempt_id=$lobsterInstallerAttemptId drive=$4 mode=plugins-dir result=relocate-create-failed free_mb=$2 needed_mb=$1$\r$\n"
@@ -920,7 +971,7 @@ FunctionEnd
     LobsterStagingQueryFailed:
     ; Never turn a failed probe into an install blocker. Extraction plus the
     ; staged-payload validation remain the authority on success.
-    FileOpen $9 "$APPDATA\LobsterAI\install-timing.log" a
+    FileOpen $9 "${LOBSTER_APPDATA_DIR}\install-timing.log" a
     FileSeek $9 0 END
     !insertmacro GetTimestamp $8
     FileWrite $9 "$8 phase=staging-drive-selected attempt_id=$lobsterInstallerAttemptId drive=$4 mode=plugins-dir result=query-failed free_mb=$2 needed_mb=$1$\r$\n"
@@ -928,18 +979,18 @@ FunctionEnd
     Goto LobsterStagingSelected
 
     LobsterStagingNoRoom:
-    FileOpen $9 "$APPDATA\LobsterAI\install-timing.log" a
+    FileOpen $9 "${LOBSTER_APPDATA_DIR}\install-timing.log" a
     FileSeek $9 0 END
     !insertmacro GetTimestamp $8
     FileWrite $9 "$8 phase=staging-preflight-insufficient attempt_id=$lobsterInstallerAttemptId plugins_drive=$4 plugins_free_mb=$2 staging_needed_mb=$1 install_drive=$3 install_free_mb=$5 install_needed_mb=$6 action=abort-install$\r$\n"
     FileClose $9
     !insertmacro customBeforeInstallerQuit "staging-space-insufficient"
-    MessageBox MB_OK|MB_ICONEXCLAMATION "${U+78C1}${U+76D8}${U+7A7A}${U+95F4}${U+4E0D}${U+8DB3}${U+FF0C}${U+65E0}${U+6CD5}${U+5B89}${U+88C5} LobsterAI${U+3002}${U+8BF7}${U+6E05}${U+7406}${U+78C1}${U+76D8}${U+7A7A}${U+95F4}${U+540E}${U+91CD}${U+8BD5}${U+3002}$\r$\n$\r$\nThere is not enough free disk space to install LobsterAI: drive $4 has $2 MB free but staging the installation needs about $1 MB, and installing to drive $3 would need about $6 MB free there. Free up disk space and run the installer again. Details: $APPDATA\LobsterAI\install-timing.log" /SD IDOK
+    MessageBox MB_OK|MB_ICONEXCLAMATION "${U+78C1}${U+76D8}${U+7A7A}${U+95F4}${U+4E0D}${U+8DB3}${U+FF0C}${U+65E0}${U+6CD5}${U+5B89}${U+88C5} LobsterAI${U+3002}${U+8BF7}${U+6E05}${U+7406}${U+78C1}${U+76D8}${U+7A7A}${U+95F4}${U+540E}${U+91CD}${U+8BD5}${U+3002}$\r$\n$\r$\nThere is not enough free disk space to install LobsterAI: drive $4 has $2 MB free but staging the installation needs about $1 MB, and installing to drive $3 would need about $6 MB free there. Free up disk space and run the installer again. Details: ${LOBSTER_APPDATA_DIR}\install-timing.log" /SD IDOK
     SetErrorLevel 2
     Quit
 
     LobsterStagingDefaultOk:
-    FileOpen $9 "$APPDATA\LobsterAI\install-timing.log" a
+    FileOpen $9 "${LOBSTER_APPDATA_DIR}\install-timing.log" a
     FileSeek $9 0 END
     !insertmacro GetTimestamp $8
     FileWrite $9 "$8 phase=staging-drive-selected attempt_id=$lobsterInstallerAttemptId drive=$4 mode=plugins-dir free_mb=$2 needed_mb=$1$\r$\n"
@@ -968,7 +1019,7 @@ FunctionEnd
     StrCmp $appPackageStagingDir "" LobsterStagingCleanupDone
     StrCmp $appPackageStagingDir "$PLUGINSDIR" LobsterStagingCleanupDone
     RMDir /r "$appPackageStagingDir"
-    FileOpen $9 "$APPDATA\LobsterAI\install-timing.log" a
+    FileOpen $9 "${LOBSTER_APPDATA_DIR}\install-timing.log" a
     FileSeek $9 0 END
     !insertmacro GetTimestamp $8
     FileWrite $9 "$8 phase=staging-relocated-cleanup attempt_id=$lobsterInstallerAttemptId staging=$appPackageStagingDir$\r$\n"
@@ -1037,13 +1088,13 @@ FunctionEnd
 
     ${If} $1 == "ok"
     ${OrIf} $1 == "size-query-failed"
-      FileOpen $9 "$APPDATA\LobsterAI\install-timing.log" a
+      FileOpen $9 "${LOBSTER_APPDATA_DIR}\install-timing.log" a
       FileSeek $9 0 END
       !insertmacro GetTimestamp $8
       FileWrite $9 "$8 phase=payload-staging-validated attempt_id=$lobsterInstallerAttemptId mode=${MODE} result=$1 root=$0 tar_bytes=$2 expected_bytes=$3$\r$\n"
       FileClose $9
     ${Else}
-      FileOpen $9 "$APPDATA\LobsterAI\install-timing.log" a
+      FileOpen $9 "${LOBSTER_APPDATA_DIR}\install-timing.log" a
       FileSeek $9 0 END
       !insertmacro GetTimestamp $8
       FileWrite $9 "$8 phase=payload-staging-validation-failed attempt_id=$lobsterInstallerAttemptId mode=${MODE} reason=$1 root=$0 found_bytes=$2 expected_bytes=$3 action=abort-install$\r$\n"
@@ -1051,7 +1102,7 @@ FunctionEnd
       ; Never commit a partial app: restore the previous installation first,
       ; then report. /SD keeps silent (/S) installs from blocking on the box.
       !insertmacro customBeforeInstallerQuit "payload-staging-validation-failed"
-      MessageBox MB_OK|MB_ICONEXCLAMATION "${U+5B89}${U+88C5}${U+5305}${U+6570}${U+636E}${U+4E0D}${U+5B8C}${U+6574}${U+FF1A}${U+53EF}${U+80FD}${U+662F}${U+4E34}${U+65F6}${U+76EE}${U+5F55}${U+78C1}${U+76D8}${U+7A7A}${U+95F4}${U+4E0D}${U+8DB3}${U+6216}${U+5B89}${U+88C5}${U+5305}${U+4E0B}${U+8F7D}${U+4E0D}${U+5B8C}${U+6574}${U+3002}${U+8BF7}${U+6E05}${U+7406}${U+78C1}${U+76D8}${U+7A7A}${U+95F4}${U+540E}${U+91CD}${U+8BD5}${U+FF0C}${U+6216}${U+91CD}${U+65B0}${U+4E0B}${U+8F7D}${U+5B89}${U+88C5}${U+5305}${U+3002}$\r$\n$\r$\nThe LobsterAI installation stopped because the unpacked installer data is incomplete ($1). This usually means the drive holding the temporary directory ran out of space during extraction, or the installer download was truncated. Free up disk space on the temp drive or download the installer again. No partial application was committed. Details: $APPDATA\LobsterAI\install-timing.log" /SD IDOK
+      MessageBox MB_OK|MB_ICONEXCLAMATION "${U+5B89}${U+88C5}${U+5305}${U+6570}${U+636E}${U+4E0D}${U+5B8C}${U+6574}${U+FF1A}${U+53EF}${U+80FD}${U+662F}${U+4E34}${U+65F6}${U+76EE}${U+5F55}${U+78C1}${U+76D8}${U+7A7A}${U+95F4}${U+4E0D}${U+8DB3}${U+6216}${U+5B89}${U+88C5}${U+5305}${U+4E0B}${U+8F7D}${U+4E0D}${U+5B8C}${U+6574}${U+3002}${U+8BF7}${U+6E05}${U+7406}${U+78C1}${U+76D8}${U+7A7A}${U+95F4}${U+540E}${U+91CD}${U+8BD5}${U+FF0C}${U+6216}${U+91CD}${U+65B0}${U+4E0B}${U+8F7D}${U+5B89}${U+88C5}${U+5305}${U+3002}$\r$\n$\r$\nThe LobsterAI installation stopped because the unpacked installer data is incomplete ($1). This usually means the drive holding the temporary directory ran out of space during extraction, or the installer download was truncated. Free up disk space on the temp drive or download the installer again. No partial application was committed. Details: ${LOBSTER_APPDATA_DIR}\install-timing.log" /SD IDOK
       SetErrorLevel 2
       Quit
     ${EndIf}
@@ -1126,7 +1177,7 @@ FunctionEnd
       StrCpy $lobsterOldAppRelaunchError "old-footprint-not-verified"
 
     LobsterOldAppRelaunchLog:
-    FileOpen $9 "$APPDATA\LobsterAI\install-timing.log" a
+    FileOpen $9 "${LOBSTER_APPDATA_DIR}\install-timing.log" a
     FileSeek $9 0 END
     !insertmacro GetTimestamp $8
     FileWrite $9 "$8 phase=old-app-relaunch attempt_id=$lobsterInstallerAttemptId status=$lobsterOldAppRelaunchStatus result=$lobsterOldAppRelaunchError source=$lobsterOldInstallOriginalPath args=none$\r$\n"
@@ -1170,7 +1221,7 @@ FunctionEnd
     InitPluginsDir
     SetOutPath "$PLUGINSDIR"
 
-    FileOpen $9 "$APPDATA\LobsterAI\install-timing.log" a
+    FileOpen $9 "${LOBSTER_APPDATA_DIR}\install-timing.log" a
     FileSeek $9 0 END
     !insertmacro GetTimestamp $8
     FileWrite $9 "$8 phase=old-install-rollback-start attempt_id=$lobsterInstallerAttemptId reason=$lobsterOldInstallRollbackReason source=$lobsterOldInstallOriginalPath backup=$lobsterOldInstallBackupPath displaced=$lobsterOldInstallFailedPath$\r$\n"
@@ -1256,7 +1307,7 @@ FunctionEnd
     IfFileExists "$lobsterOldInstallBackupPath\*.*" 0 LobsterRollbackBackupChecked
       StrCpy $3 "true"
     LobsterRollbackBackupChecked:
-    FileOpen $9 "$APPDATA\LobsterAI\install-timing.log" a
+    FileOpen $9 "${LOBSTER_APPDATA_DIR}\install-timing.log" a
     FileSeek $9 0 END
     !insertmacro GetTimestamp $8
     FileWrite $9 "$8 phase=old-install-rollback-complete attempt_id=$lobsterInstallerAttemptId status=$lobsterOldInstallRollbackStatus reason=$lobsterOldInstallRollbackReason error=$lobsterOldInstallRollbackError elapsed_ms=$5 source_exists=$2 backup_exists=$3 displaced=$lobsterOldInstallFailedPath$\r$\n"
@@ -1291,7 +1342,7 @@ FunctionEnd
     Push $8
     Push $9
     !insertmacro EnsureInstallerAttemptId
-    FileOpen $9 "$APPDATA\LobsterAI\install-timing.log" a
+    FileOpen $9 "${LOBSTER_APPDATA_DIR}\install-timing.log" a
     FileSeek $9 0 END
     !insertmacro GetTimestamp $8
     FileWrite $9 "$8 phase=installer-quit attempt_id=$lobsterInstallerAttemptId reason=${REASON} ui_mode=$lobsterUiMode rename_status=$lobsterOldInstallRenameStatus$\r$\n"
@@ -1362,13 +1413,149 @@ FunctionEnd
     ; The fresh decision is read-only and precedes every external helper,
     ; process stop, legacy Skills action, old uninstaller and directory rename.
     !insertmacro DetectFreshOrPossibleExisting
-    FileOpen $9 "$APPDATA\LobsterAI\install-timing.log" a
+    FileOpen $9 "${LOBSTER_APPDATA_DIR}\install-timing.log" a
     FileSeek $9 0 END
     !insertmacro GetTimestamp $8
     FileWrite $9 "$8 phase=install-preflight-complete attempt_id=$lobsterInstallerAttemptId installer_version=${VERSION} invocation_source=$lobsterInvocationSource updated_flag=$lobsterUpdatedFlag ui_mode=$lobsterUiMode launcher_fallback=$lobsterLauncherFallback scenario=$lobsterInstallScenario instdir=$INSTDIR$\r$\n"
     FileClose $9
 
     StrCmp $lobsterInstallScenario "fresh-install" CustomCheckFreshInstall
+
+    !ifdef LOBSTERAI_DEV_BUILD
+      ; Dev guard for existing/non-empty targets: verify installation identity and prove
+      ; safe staging/swap eligibility BEFORE any process stopping, skills migration or rename.
+      StrLen $0 "$lobsterOldInstallOriginalPath"
+      IntCmp $0 3 DevPreflightRejectDriveRoot DevPreflightRejectDriveRoot 0
+      System::Call 'kernel32::GetFileAttributesW(w "$lobsterOldInstallOriginalPath") i .r0'
+      IntCmp $0 -1 DevPathAttributesChecked 0 0
+      IntOp $1 $0 & 0x400
+      IntCmp $1 0 DevPathAttributesChecked DevPreflightRejectReparseRoot DevPreflightRejectReparseRoot
+      DevPathAttributesChecked:
+
+      ; Formal collision lookup: real electron-builder GUID keys and legacy product keys
+      ClearErrors
+      ReadRegStr $0 HKCU "Software\a0c82b2d-91b7-551b-baa7-ea73950da4ee" InstallLocation
+      StrCmp $0 "" 0 DevCheckFormalConflict
+      ClearErrors
+      ReadRegStr $0 HKLM "Software\a0c82b2d-91b7-551b-baa7-ea73950da4ee" InstallLocation
+      StrCmp $0 "" 0 DevCheckFormalConflict
+      ClearErrors
+      ReadRegStr $0 HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\a0c82b2d-91b7-551b-baa7-ea73950da4ee" InstallLocation
+      StrCmp $0 "" 0 DevCheckFormalConflict
+      ClearErrors
+      ReadRegStr $0 HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\a0c82b2d-91b7-551b-baa7-ea73950da4ee" InstallLocation
+      StrCmp $0 "" 0 DevCheckFormalConflict
+      ClearErrors
+      ReadRegStr $0 HKCU "Software\LobsterAI" InstallLocation
+      StrCmp $0 "" 0 DevCheckFormalConflict
+      ClearErrors
+      ReadRegStr $0 HKLM "Software\LobsterAI" InstallLocation
+      StrCmp $0 "" 0 DevCheckFormalConflict
+      ClearErrors
+      ReadRegStr $0 HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\LobsterAI" InstallLocation
+      StrCmp $0 "" 0 DevCheckFormalConflict
+      ClearErrors
+      ReadRegStr $0 HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\LobsterAI" InstallLocation
+      StrCmp $0 "" DevFormalConflictDone 0
+      DevCheckFormalConflict:
+        GetFullPathName $1 "$0"
+        StrCmp $1 $lobsterOldInstallOriginalPathNormalized DevPreflightRejectFormalRootConflict DevFormalConflictDone
+      DevFormalConflictDone:
+
+      StrCpy $0 ""
+      ClearErrors
+      ReadRegStr $0 SHELL_CONTEXT "${INSTALL_REGISTRY_KEY}" InstallLocation
+      StrCmp $0 "" 0 DevCheckRegContextFound
+      ClearErrors
+      ReadRegStr $0 HKCU "${INSTALL_REGISTRY_KEY}" InstallLocation
+      StrCmp $0 "" 0 DevCheckRegContextFound
+      ClearErrors
+      ReadRegStr $0 HKLM "${INSTALL_REGISTRY_KEY}" InstallLocation
+      DevCheckRegContextFound:
+      StrCmp $0 "" DevPreflightRejectMissingReg
+      GetFullPathName $1 "$0"
+      StrCmp $1 $lobsterOldInstallOriginalPathNormalized 0 DevPreflightRejectPathMismatch
+
+      ${If} $installMode == "all"
+        ClearErrors
+        ReadRegStr $3 HKCU "${INSTALL_REGISTRY_KEY}" InstallLocation
+        StrCmp $3 "" DevDualRegCheckDone
+        ; Any per-user registration alongside machine install is an ambiguous/conflicting dual registration
+        Goto DevPreflightRejectDualReg
+        DevDualRegCheckDone:
+      ${EndIf}
+
+      IfFileExists "$lobsterOldInstallOriginalPath\${APP_EXECUTABLE_FILENAME}" 0 DevPreflightRejectExeMissing
+
+      ${If} "${APP_EXECUTABLE_FILENAME}" != "LobsterAI.exe"
+        IfFileExists "$lobsterOldInstallOriginalPath\LobsterAI.exe" DevPreflightRejectFormalRootConflict 0
+      ${EndIf}
+
+      IfFileExists "$lobsterOldInstallOriginalPath\${UNINSTALL_FILENAME}" 0 DevPreflightRejectUninstallerMissing
+
+      ClearErrors
+      ReadRegStr $4 SHELL_CONTEXT "${UNINSTALL_REGISTRY_KEY}" DisplayName
+      StrCmp $4 "" 0 DevCheckDisplayNameFound
+      ClearErrors
+      ReadRegStr $4 HKCU "${UNINSTALL_REGISTRY_KEY}" DisplayName
+      StrCmp $4 "" 0 DevCheckDisplayNameFound
+      ClearErrors
+      ReadRegStr $4 HKLM "${UNINSTALL_REGISTRY_KEY}" DisplayName
+      DevCheckDisplayNameFound:
+      StrCmp $4 "" DevPreflightRejectUninstallRegMissing
+
+      ; DisplayName actual product metadata check: must start with LobsterAI-Dev
+      StrCpy $5 $4 12
+      StrCmp $5 "LobsterAI-Dev" DevPreflightAccepted DevPreflightRejectDisplayNameMismatch
+
+      DevPreflightRejectMissingReg:
+        StrCpy $R3 "registered-install-missing"
+        Goto DevPreflightReject
+      DevPreflightRejectDriveRoot:
+        StrCpy $R3 "drive-root-not-permitted"
+        Goto DevPreflightReject
+      DevPreflightRejectReparseRoot:
+        StrCpy $R3 "reparse-point-not-permitted"
+        Goto DevPreflightReject
+      DevPreflightRejectPathMismatch:
+        StrCpy $R3 "install-location-mismatch"
+        Goto DevPreflightReject
+      DevPreflightRejectDualReg:
+        StrCpy $R3 "ambiguous-dual-registration"
+        Goto DevPreflightReject
+      DevPreflightRejectExeMissing:
+        StrCpy $R3 "dev-executable-missing"
+        Goto DevPreflightReject
+      DevPreflightRejectFormalRootConflict:
+        StrCpy $R3 "formal-install-root-conflict"
+        Goto DevPreflightReject
+      DevPreflightRejectUninstallerMissing:
+        StrCpy $R3 "dev-uninstaller-missing"
+        Goto DevPreflightReject
+      DevPreflightRejectUninstallRegMissing:
+        StrCpy $R3 "uninstall-registry-missing"
+        Goto DevPreflightReject
+      DevPreflightRejectDisplayNameMismatch:
+        StrCpy $R3 "uninstall-displayname-mismatch"
+        Goto DevPreflightReject
+
+      DevPreflightReject:
+        FileOpen $9 "${LOBSTER_APPDATA_DIR}\install-timing.log" a
+        FileSeek $9 0 END
+        !insertmacro GetTimestamp $8
+        FileWrite $9 "$8 phase=dev-install-preflight-rejected attempt_id=$lobsterInstallerAttemptId reason=$R3 instdir=$lobsterOldInstallOriginalPath app_id=${APP_ID} product=${PRODUCT_NAME} action=fail-closed-no-mutation$\r$\n"
+        FileClose $9
+        MessageBox MB_OK|MB_ICONEXCLAMATION "${U+68C0}${U+6D4B}${U+5230}${U+73B0}${U+6709}${U+5B89}${U+88C5}${U+65E0}${U+6CD5}${U+8FDB}${U+884C}${U+5B89}${U+5168}${U+81EA}${U+52A8}${U+8FC1}${U+79FB}${U+FF08}${U+5B89}${U+88C5}${U+76EE}${U+5F55}${U+672A}${U+53D7}${U+9A8C}${U+8BC1}${U+6216}${U+65E7}${U+5378}${U+8F7D}${U+7A0B}${U+5E8F}${U+4E0D}${U+53D7}${U+652F}${U+6301}${U+FF1A}$R3${U+FF09}${U+3002}${U+4E3A}${U+4FDD}${U+62A4}${U+6570}${U+636E}${U+5B89}${U+5168}${U+FF0C}${U+5B89}${U+88C5}${U+7A0B}${U+5E8F}${U+5DF2}${U+7EC8}${U+6B62}${U+FF0C}${U+672A}${U+4FEE}${U+6539}${U+6216}${U+5220}${U+9664}${U+4EFB}${U+4F55}${U+6570}${U+636E}${U+3002}${U+8BF7}${U+624B}${U+52A8}${U+5907}${U+4EFD}${U+6570}${U+636E}${U+5E76}${U+5B8C}${U+6210}${U+8FC1}${U+79FB}${U+540E}${U+91CD}${U+8BD5}${U+3002}$\r$\n$\r$\nLobsterAI-Dev detected that the existing installation cannot be safely migrated automatically (unverified installation directory or unsupported legacy uninstaller: $R3). To preserve data safety, installation was stopped without modifying or deleting any data. Please manually back up data, complete migration, and retry. Details: ${LOBSTER_APPDATA_DIR}\install-timing.log" /SD IDOK
+        SetErrorLevel 2
+        Quit
+
+      DevPreflightAccepted:
+        FileOpen $9 "${LOBSTER_APPDATA_DIR}\install-timing.log" a
+        FileSeek $9 0 END
+        !insertmacro GetTimestamp $8
+        FileWrite $9 "$8 phase=dev-install-preflight-validated attempt_id=$lobsterInstallerAttemptId instdir=$lobsterOldInstallOriginalPath app_id=${APP_ID} product=${PRODUCT_NAME} action=staging-swap-authorized$\r$\n"
+        FileClose $9
+    !endif
 
     ; Record the legacy source with a native, non-following attribute check
     ; before any external helper or process stop. This is advisory only: an
@@ -1389,14 +1576,14 @@ FunctionEnd
     LegacySkillsSourcePreflightInvalid:
       StrCpy $lobsterLegacySkillsStatus "legacy-source-invalid"
     LegacySkillsSourcePreflightLogged:
-    FileOpen $9 "$APPDATA\LobsterAI\install-timing.log" a
+    FileOpen $9 "${LOBSTER_APPDATA_DIR}\install-timing.log" a
     FileSeek $9 0 END
     !insertmacro GetTimestamp $8
     FileWrite $9 "$8 phase=legacy-skills-source-preflight attempt_id=$lobsterInstallerAttemptId status=$lobsterLegacySkillsStatus source=$INSTDIR\resources\SKILLs$\r$\n"
     FileClose $9
 
     !insertmacro ResolveTrustedPowerShell
-    FileOpen $9 "$APPDATA\LobsterAI\install-timing.log" a
+    FileOpen $9 "${LOBSTER_APPDATA_DIR}\install-timing.log" a
     FileSeek $9 0 END
     !insertmacro GetTimestamp $8
     FileWrite $9 "$8 phase=system-tool-resolved attempt_id=$lobsterInstallerAttemptId tool=powershell status=$lobsterTrustedPowerShellStatus source=$lobsterTrustedPowerShellSource path=$lobsterTrustedPowerShellPath$\r$\n"
@@ -1404,12 +1591,12 @@ FunctionEnd
 
     !insertmacro stopLobsterAIProcesses
     StrCmp $lobsterTargetProcessesStopStatus "success" TargetProcessesStopped
-      FileOpen $9 "$APPDATA\LobsterAI\install-timing.log" a
+      FileOpen $9 "${LOBSTER_APPDATA_DIR}\install-timing.log" a
       FileSeek $9 0 END
       !insertmacro GetTimestamp $8
       FileWrite $9 "$8 phase=install-failed-before-mutation attempt_id=$lobsterInstallerAttemptId failure_kind=process-stop-failed raw_status=$lobsterTargetProcessesStopStatus exit=$R2 action=old-install-untouched$\r$\n"
       FileClose $9
-      MessageBox MB_OK|MB_ICONEXCLAMATION "The LobsterAI update stopped before replacing the previous version because the old application processes could not be confirmed stopped. Please close LobsterAI and retry. Details: $APPDATA\LobsterAI\install-timing.log" /SD IDOK
+      MessageBox MB_OK|MB_ICONEXCLAMATION "The LobsterAI update stopped before replacing the previous version because the old application processes could not be confirmed stopped. Please close LobsterAI and retry. Details: ${LOBSTER_APPDATA_DIR}\install-timing.log" /SD IDOK
       SetErrorLevel 2
       Quit
     TargetProcessesStopped:
@@ -1447,7 +1634,11 @@ FunctionEnd
     SkillBackupSourceReady:
     DetailPrint "[Installer] Backing up user-created skills"
     ClearErrors
-    FileOpen $R0 "$APPDATA\LobsterAI\skill-migrate.log" w
+    !ifdef LOBSTERAI_DEV_BUILD
+      FileOpen $R0 "$APPDATA\LobsterAI-Dev\skill-migrate.log" w
+    !else
+      FileOpen $R0 "$APPDATA\LobsterAI\skill-migrate.log" w
+    !endif
     IfErrors BackupLogOpenFailed
       !insertmacro GetTimestamp $8
       FileWrite $R0 "$8 phase=backup-start attempt_id=$lobsterInstallerAttemptId instdir=$INSTDIR appdata=$APPDATA$\r$\n"
@@ -1458,7 +1649,11 @@ FunctionEnd
 
     ReadRegStr $4 SHELL_CONTEXT "${UNINSTALL_REGISTRY_KEY}" DisplayVersion
     System::Call 'Kernel32::SetEnvironmentVariable(t "LOBSTERAI_SKILL_SOURCE", t "$INSTDIR\resources\SKILLs")i'
-    System::Call 'Kernel32::SetEnvironmentVariable(t "LOBSTERAI_SKILL_BACKUP_ROOT", t "$APPDATA\LobsterAI\skills-backup")i'
+    !ifdef LOBSTERAI_DEV_BUILD
+      System::Call 'Kernel32::SetEnvironmentVariable(t "LOBSTERAI_SKILL_BACKUP_ROOT", t "$APPDATA\LobsterAI-Dev\skills-backup")i'
+    !else
+      System::Call 'Kernel32::SetEnvironmentVariable(t "LOBSTERAI_SKILL_BACKUP_ROOT", t "$APPDATA\LobsterAI\skills-backup")i'
+    !endif
     System::Call 'Kernel32::SetEnvironmentVariable(t "LOBSTERAI_INSTALL_ATTEMPT_ID", t "$lobsterInstallerAttemptId")i'
     System::Call 'Kernel32::SetEnvironmentVariable(t "LOBSTERAI_OLD_VERSION", t "$4")i'
     Push '"$lobsterTrustedPowerShellPath" -NoProfile -NonInteractive -Command "\
@@ -1589,10 +1784,10 @@ FunctionEnd
     SkillBackupResultLog:
     System::Call 'kernel32::GetTickCount()i .r6'
     IntOp $5 $6 - $7
-    FileOpen $9 "$APPDATA\LobsterAI\install-timing.log" a
+    FileOpen $9 "${LOBSTER_APPDATA_DIR}\install-timing.log" a
     FileSeek $9 0 END
     !insertmacro GetTimestamp $8
-    FileWrite $9 "$8 phase=skill-backup-complete attempt_id=$lobsterInstallerAttemptId status=$lobsterLegacySkillsStatus exit=$R2 elapsed_ms=$5 backup=$APPDATA\LobsterAI\skills-backup\$lobsterInstallerAttemptId$\r$\n"
+    FileWrite $9 "$8 phase=skill-backup-complete attempt_id=$lobsterInstallerAttemptId status=$lobsterLegacySkillsStatus exit=$R2 elapsed_ms=$5 backup=${LOBSTER_APPDATA_DIR}\skills-backup\$lobsterInstallerAttemptId$\r$\n"
     FileClose $9
 
     ; User-created skills live inside the installation tree. If their backup
@@ -1606,21 +1801,25 @@ FunctionEnd
       ; disk immediately before any destructive step. If it vanished (e.g.
       ; antivirus quarantine), fail closed now while the old install is still
       ; intact instead of discovering the loss at restore time.
-      IfFileExists "$APPDATA\LobsterAI\skills-backup\$lobsterInstallerAttemptId\backup-manifest.json" SkillBackupValidated
+      !ifdef LOBSTERAI_DEV_BUILD
+        IfFileExists "$APPDATA\LobsterAI-Dev\skills-backup\$lobsterInstallerAttemptId\backup-manifest.json" SkillBackupValidated
+      !else
+        IfFileExists "$APPDATA\LobsterAI\skills-backup\$lobsterInstallerAttemptId\backup-manifest.json" SkillBackupValidated
+      !endif
       StrCpy $lobsterLegacySkillsStatus "legacy-backup-verify-failed"
-      FileOpen $9 "$APPDATA\LobsterAI\install-timing.log" a
+      FileOpen $9 "${LOBSTER_APPDATA_DIR}\install-timing.log" a
       FileSeek $9 0 END
       !insertmacro GetTimestamp $8
-      FileWrite $9 "$8 phase=skill-backup-manifest-postcheck-missing attempt_id=$lobsterInstallerAttemptId manifest=$APPDATA\LobsterAI\skills-backup\$lobsterInstallerAttemptId\backup-manifest.json$\r$\n"
+      FileWrite $9 "$8 phase=skill-backup-manifest-postcheck-missing attempt_id=$lobsterInstallerAttemptId manifest=${LOBSTER_APPDATA_DIR}\skills-backup\$lobsterInstallerAttemptId\backup-manifest.json$\r$\n"
       FileClose $9
     SkillBackupFailedAbort:
-      FileOpen $9 "$APPDATA\LobsterAI\install-timing.log" a
+      FileOpen $9 "${LOBSTER_APPDATA_DIR}\install-timing.log" a
       FileSeek $9 0 END
       !insertmacro GetTimestamp $8
       FileWrite $9 "$8 phase=skill-backup-failed-abort attempt_id=$lobsterInstallerAttemptId status=$lobsterLegacySkillsStatus exit=$R2 action=old-install-preserved$\r$\n"
       FileClose $9
       Call lobsterTryRelaunchOldApp
-      MessageBox MB_OK|MB_ICONEXCLAMATION "The LobsterAI update stopped because legacy user skills could not be safely inspected or backed up (status=$lobsterLegacySkillsStatus). The previous installation was not replaced. Please retry the update. Details: $APPDATA\LobsterAI\install-timing.log" /SD IDOK
+      MessageBox MB_OK|MB_ICONEXCLAMATION "The LobsterAI update stopped because legacy user skills could not be safely inspected or backed up (status=$lobsterLegacySkillsStatus). The previous installation was not replaced. Please retry the update. Details: ${LOBSTER_APPDATA_DIR}\install-timing.log" /SD IDOK
       SetErrorLevel 2
       Quit
     SkillBackupValidated:
@@ -1670,7 +1869,7 @@ FunctionEnd
     InitPluginsDir
     SetOutPath "$PLUGINSDIR"
 
-    FileOpen $9 "$APPDATA\LobsterAI\install-timing.log" a
+    FileOpen $9 "${LOBSTER_APPDATA_DIR}\install-timing.log" a
     FileSeek $9 0 END
     !insertmacro GetTimestamp $8
     FileWrite $9 "$8 phase=old-install-rename-start attempt_id=$lobsterInstallerAttemptId instdir=$lobsterOldInstallOriginalPath registered_instdir=$lobsterOldInstallRegisteredPath current_directory=$lobsterOldInstallCurrentDirectory install_mode=$installMode$\r$\n"
@@ -1730,12 +1929,26 @@ FunctionEnd
       Goto OldInstallRenameComplete
 
     OldInstallRenameAttemptFailed:
-      FileOpen $9 "$APPDATA\LobsterAI\install-timing.log" a
+      FileOpen $9 "${LOBSTER_APPDATA_DIR}\install-timing.log" a
       FileSeek $9 0 END
       !insertmacro GetTimestamp $8
       FileWrite $9 "$8 phase=old-install-rename-attempt attempt_id=$lobsterInstallerAttemptId attempt=$lobsterOldInstallRenameAttempts result=failed win32_error=$lobsterOldInstallRenameError$\r$\n"
       FileClose $9
-      IntCmp $lobsterOldInstallRenameAttempts 3 OldInstallRenameComplete OldInstallRenameRetry OldInstallRenameComplete
+      IntCmp $lobsterOldInstallRenameAttempts 3 OldInstallRenameAttemptsExhausted OldInstallRenameRetry OldInstallRenameAttemptsExhausted
+
+    OldInstallRenameAttemptsExhausted:
+      !ifdef LOBSTERAI_DEV_BUILD
+        FileOpen $9 "${LOBSTER_APPDATA_DIR}\install-timing.log" a
+        FileSeek $9 0 END
+        !insertmacro GetTimestamp $8
+        FileWrite $9 "$8 phase=dev-old-install-rename-failed attempt_id=$lobsterInstallerAttemptId attempts=$lobsterOldInstallRenameAttempts win32_error=$lobsterOldInstallRenameError action=fail-closed-prior-process-stop$\r$\n"
+        FileClose $9
+        MessageBox MB_OK|MB_ICONEXCLAMATION "${U+65E0}${U+6CD5}${U+5B89}${U+5168}${U+79FB}${U+52A8}${U+73B0}${U+6709}${U+5B89}${U+88C5}${U+76EE}${U+5F55}${U+4EE5}${U+8FDB}${U+884C}${U+66F4}${U+65B0}${U+FF08}${U+6587}${U+4EF6}${U+53EF}${U+80FD}${U+88AB}${U+5360}${U+7528}${U+FF09}${U+3002}${U+66F4}${U+65B0}${U+5DF2}${U+7EC8}${U+6B62}${U+FF0C}${U+672A}${U+5220}${U+9664}${U+4EFB}${U+4F55}${U+5E94}${U+7528}${U+6587}${U+4EF6}${U+3002}${U+66F4}${U+65B0}${U+8FC7}${U+7A0B}${U+4E2D}${U+5DF2}${U+5C1D}${U+8BD5}${U+505C}${U+6B62}${U+65E7}${U+7248}${U+672C}${U+8FDB}${U+7A0B}${U+FF0C}${U+8BF7}${U+5173}${U+95ED}${U+76F8}${U+5173}${U+7A0B}${U+5E8F}${U+540E}${U+91CD}${U+65B0}${U+542F}${U+52A8}${U+5E94}${U+7528}${U+6216}${U+91CD}${U+8BD5}${U+3002}$\r$\n$\r$\nThe update stopped before replacing the existing installation because the directory could not be moved (files may be in use, win32_error=$lobsterOldInstallRenameError). No files were deleted. Running processes were stopped during the update attempt; please close any remaining applications and restart LobsterAI-Dev. Details: ${LOBSTER_APPDATA_DIR}\install-timing.log" /SD IDOK
+        SetErrorLevel 2
+        Quit
+      !else
+        Goto OldInstallRenameComplete
+      !endif
 
     OldInstallRenameRetry:
       Sleep 250
@@ -1751,12 +1964,12 @@ FunctionEnd
       ; rollback could not restore a single authoritative old tree. Freeze the
       ; attempt with every recovery source preserved; never fall through into
       ; stock uninstall/install while filesystem ownership is ambiguous.
-      FileOpen $9 "$APPDATA\LobsterAI\install-timing.log" a
+      FileOpen $9 "${LOBSTER_APPDATA_DIR}\install-timing.log" a
       FileSeek $9 0 END
       !insertmacro GetTimestamp $8
       FileWrite $9 "$8 phase=old-install-rename-verification-abort attempt_id=$lobsterInstallerAttemptId outcome=recovery-required rollback_status=$lobsterOldInstallRollbackStatus rollback_error=$lobsterOldInstallRollbackError source=$lobsterOldInstallOriginalPath backup=$lobsterOldInstallBackupPath$\r$\n"
       FileClose $9
-      MessageBox MB_OK|MB_ICONEXCLAMATION "The LobsterAI installation stopped because the previous installation move could not be verified and automatic recovery did not complete. No recovery copy was deleted. Restart Windows before retrying. Details: $APPDATA\LobsterAI\install-timing.log" /SD IDOK
+      MessageBox MB_OK|MB_ICONEXCLAMATION "The LobsterAI installation stopped because the previous installation move could not be verified and automatic recovery did not complete. No recovery copy was deleted. Restart Windows before retrying. Details: ${LOBSTER_APPDATA_DIR}\install-timing.log" /SD IDOK
       SetErrorLevel 3
       Quit
 
@@ -1764,12 +1977,12 @@ FunctionEnd
       ; lobsterRollbackOldInstall has already restored and, when its strict
       ; gates allow it, relaunched the old application. This attempt must end
       ; here instead of invoking the stock uninstaller against that live tree.
-      FileOpen $9 "$APPDATA\LobsterAI\install-timing.log" a
+      FileOpen $9 "${LOBSTER_APPDATA_DIR}\install-timing.log" a
       FileSeek $9 0 END
       !insertmacro GetTimestamp $8
       FileWrite $9 "$8 phase=old-install-rename-verification-abort attempt_id=$lobsterInstallerAttemptId outcome=restored rollback_status=$lobsterOldInstallRollbackStatus relaunch_status=$lobsterOldAppRelaunchStatus source=$lobsterOldInstallOriginalPath$\r$\n"
       FileClose $9
-      MessageBox MB_OK|MB_ICONEXCLAMATION "The LobsterAI installation stopped because the previous installation move could not be verified. The previous version was restored. Please retry the installation. Details: $APPDATA\LobsterAI\install-timing.log" /SD IDOK
+      MessageBox MB_OK|MB_ICONEXCLAMATION "The LobsterAI installation stopped because the previous installation move could not be verified. The previous version was restored. Please retry the installation. Details: ${LOBSTER_APPDATA_DIR}\install-timing.log" /SD IDOK
       SetErrorLevel 2
       Quit
 
@@ -1785,7 +1998,7 @@ FunctionEnd
     IfFileExists "$lobsterOldInstallBackupPath\*.*" 0 OldInstallRenameBackupChecked
       StrCpy $3 "true"
     OldInstallRenameBackupChecked:
-    FileOpen $9 "$APPDATA\LobsterAI\install-timing.log" a
+    FileOpen $9 "${LOBSTER_APPDATA_DIR}\install-timing.log" a
     FileSeek $9 0 END
     !insertmacro GetTimestamp $8
     FileWrite $9 "$8 phase=old-install-rename-complete attempt_id=$lobsterInstallerAttemptId status=$lobsterOldInstallRenameStatus reason=$lobsterOldInstallRenameReason attempts=$lobsterOldInstallRenameAttempts win32_error=$lobsterOldInstallRenameError elapsed_ms=$5 source_exists=$2 backup_exists=$3 backup_path=$lobsterOldInstallBackupPath cleanup_mode=deferred$\r$\n"
@@ -1798,11 +2011,55 @@ FunctionEnd
     Goto CustomCheckInstallerDone
 
     CustomCheckFreshInstall:
+      !ifdef LOBSTERAI_DEV_BUILD
+        ; Formal collision check on fresh install: target must not match registered formal install
+        ClearErrors
+        ReadRegStr $0 HKCU "Software\a0c82b2d-91b7-551b-baa7-ea73950da4ee" InstallLocation
+        StrCmp $0 "" 0 DevFreshFormalCheck
+        ClearErrors
+        ReadRegStr $0 HKLM "Software\a0c82b2d-91b7-551b-baa7-ea73950da4ee" InstallLocation
+        StrCmp $0 "" 0 DevFreshFormalCheck
+        ClearErrors
+        ReadRegStr $0 HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\a0c82b2d-91b7-551b-baa7-ea73950da4ee" InstallLocation
+        StrCmp $0 "" 0 DevFreshFormalCheck
+        ClearErrors
+        ReadRegStr $0 HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\a0c82b2d-91b7-551b-baa7-ea73950da4ee" InstallLocation
+        StrCmp $0 "" 0 DevFreshFormalCheck
+        ClearErrors
+        StrLen $0 "$lobsterOldInstallOriginalPath"
+        IntCmp $0 3 DevFreshFormalCollision DevFreshFormalCollision 0
+        ClearErrors
+        ReadRegStr $0 HKCU "Software\LobsterAI" InstallLocation
+        StrCmp $0 "" 0 DevFreshFormalCheck
+        ClearErrors
+        ReadRegStr $0 HKLM "Software\LobsterAI" InstallLocation
+        StrCmp $0 "" 0 DevFreshFormalCheck
+        ClearErrors
+        ReadRegStr $0 HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\LobsterAI" InstallLocation
+        StrCmp $0 "" 0 DevFreshFormalCheck
+        ClearErrors
+        ReadRegStr $0 HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\LobsterAI" InstallLocation
+        StrCmp $0 "" DevFreshFormalCheckDone 0
+        DevFreshFormalCheck:
+          GetFullPathName $1 "$0"
+          StrCmp $1 $lobsterOldInstallOriginalPathNormalized DevFreshFormalCollision DevFreshFormalCheckDone
+        DevFreshFormalCollision:
+          StrCpy $R3 "formal-install-root-conflict"
+          FileOpen $9 "${LOBSTER_APPDATA_DIR}\install-timing.log" a
+          FileSeek $9 0 END
+          !insertmacro GetTimestamp $8
+          FileWrite $9 "$8 phase=dev-install-preflight-rejected attempt_id=$lobsterInstallerAttemptId reason=$R3 instdir=$lobsterOldInstallOriginalPath action=fail-closed-fresh-formal-collision$\r$\n"
+          FileClose $9
+          MessageBox MB_OK|MB_ICONEXCLAMATION "${U+68C0}${U+6D4B}${U+5230}${U+73B0}${U+6709}${U+5B89}${U+88C5}${U+65E0}${U+6CD5}${U+8FDB}${U+884C}${U+5B89}${U+5168}${U+81EA}${U+52A8}${U+8FC1}${U+79FB}${U+FF08}${U+5B89}${U+88C5}${U+76EE}${U+5F55}${U+672A}${U+53D7}${U+9A8C}${U+8BC1}${U+6216}${U+65E7}${U+5378}${U+8F7D}${U+7A0B}${U+5E8F}${U+4E0D}${U+53D7}${U+652F}${U+6301}${U+FF1A}$R3${U+FF09}${U+3002}${U+4E3A}${U+4FDD}${U+62A4}${U+6570}${U+636E}${U+5B89}${U+5168}${U+FF0C}${U+5B89}${U+88C5}${U+7A0B}${U+5E8F}${U+5DF2}${U+7EC8}${U+6B62}${U+FF0C}${U+672A}${U+4FEE}${U+6539}${U+6216}${U+5220}${U+9664}${U+4EFB}${U+4F55}${U+6570}${U+636E}${U+3002}${U+8BF7}${U+624B}${U+52A8}${U+5907}${U+4EFD}${U+6570}${U+636E}${U+5E76}${U+5B8C}${U+6210}${U+8FC1}${U+79FB}${U+540E}${U+91CD}${U+8BD5}${U+3002}$\r$\n$\r$\nLobsterAI-Dev detected that the installation target conflicts with the registered formal LobsterAI directory ($R3). Installation was stopped without modifying or deleting any data. Details: ${LOBSTER_APPDATA_DIR}\install-timing.log" /SD IDOK
+          SetErrorLevel 2
+          Quit
+        DevFreshFormalCheckDone:
+      !endif
       StrCpy $lobsterTargetProcessesStopStatus "not-required-fresh-install"
       StrCpy $lobsterLegacySkillsStatus "legacy-not-applicable-fresh-install"
       StrCpy $lobsterOldInstallRenameStatus "not-required"
       StrCpy $lobsterOldInstallRenameReason "fresh-install"
-      FileOpen $9 "$APPDATA\LobsterAI\install-timing.log" a
+      FileOpen $9 "${LOBSTER_APPDATA_DIR}\install-timing.log" a
       FileSeek $9 0 END
       !insertmacro GetTimestamp $8
       FileWrite $9 "$8 phase=fresh-install-old-flow-skipped attempt_id=$lobsterInstallerAttemptId process_stop=skipped legacy_skills=skipped old_staging=skipped$\r$\n"
@@ -1838,15 +2095,25 @@ FunctionEnd
     ${AndIf} $lobsterOldUninstallCandidatePathNormalized == $lobsterOldInstallOriginalPathNormalized
       ClearErrors
       StrCpy $R0 0
-      FileOpen $9 "$APPDATA\LobsterAI\install-timing.log" a
+      FileOpen $9 "${LOBSTER_APPDATA_DIR}\install-timing.log" a
       FileSeek $9 0 END
       !insertmacro GetTimestamp $8
       FileWrite $9 "$8 phase=old-uninstaller-skipped attempt_id=$lobsterInstallerAttemptId root=${ROOT_KEY} reason=rename-success registered_instdir=$lobsterOldUninstallCandidatePath backup_path=$lobsterOldInstallBackupPath$\r$\n"
       FileClose $9
     ${Else}
+      !ifdef LOBSTERAI_DEV_BUILD
+        FileOpen $9 "${LOBSTER_APPDATA_DIR}\install-timing.log" a
+        FileSeek $9 0 END
+        !insertmacro GetTimestamp $8
+        FileWrite $9 "$8 phase=dev-old-uninstaller-blocked attempt_id=$lobsterInstallerAttemptId root=${ROOT_KEY} registered_instdir=$lobsterOldUninstallCandidatePath rename_status=$lobsterOldInstallRenameStatus action=fail-closed$\r$\n"
+        FileClose $9
+        MessageBox MB_OK|MB_ICONEXCLAMATION "${U+65E7}${U+7248}${U+5378}${U+8F7D}${U+7A0B}${U+5E8F}${U+4E0D}${U+53D7}${U+652F}${U+6301}${U+FF0C}${U+5DF2}${U+7EC8}${U+6B62}${U+81EA}${U+52A8}${U+66F4}${U+65B0}${U+3002}${U+672A}${U+4FEE}${U+6539}${U+6216}${U+5220}${U+9664}${U+4EFB}${U+4F55}${U+6570}${U+636E}${U+3002}${U+8BF7}${U+624B}${U+52A8}${U+5907}${U+4EFD}${U+6570}${U+636E}${U+5E76}${U+5B8C}${U+6210}${U+8FC1}${U+79FB}${U+540E}${U+91CD}${U+8BD5}${U+3002}$\r$\n$\r$\nLegacy Dev uninstaller is blocked from running to protect system isolation. Installation was stopped without modifying or deleting any data. Please manually back up data, complete migration, and retry. Details: ${LOBSTER_APPDATA_DIR}\install-timing.log" /SD IDOK
+        SetErrorLevel 2
+        Quit
+      !else
       System::Call 'kernel32::GetTickCount()i .r4'
       StrCpy $lobsterOldUninstallStartTick $4
-      FileOpen $9 "$APPDATA\LobsterAI\install-timing.log" a
+      FileOpen $9 "${LOBSTER_APPDATA_DIR}\install-timing.log" a
       FileSeek $9 0 END
       !insertmacro GetTimestamp $8
       FileWrite $9 "$8 phase=old-uninstaller-start attempt_id=$lobsterInstallerAttemptId root=${ROOT_KEY} registered_instdir=$lobsterOldUninstallCandidatePath rename_status=$lobsterOldInstallRenameStatus$\r$\n"
@@ -1863,7 +2130,7 @@ FunctionEnd
       CustomOldUninstallerReturned_${ROOT_KEY}:
       System::Call 'kernel32::GetTickCount()i .r6'
       IntOp $5 $6 - $lobsterOldUninstallStartTick
-      FileOpen $9 "$APPDATA\LobsterAI\install-timing.log" a
+      FileOpen $9 "${LOBSTER_APPDATA_DIR}\install-timing.log" a
       FileSeek $9 0 END
       !insertmacro GetTimestamp $8
       FileWrite $9 "$8 phase=old-uninstaller-returned attempt_id=$lobsterInstallerAttemptId root=${ROOT_KEY} status=$lobsterOldUninstallLaunchStatus exit=$R0 elapsed_ms=$5$\r$\n"
@@ -1887,11 +2154,12 @@ FunctionEnd
 
       System::Call 'kernel32::GetTickCount()i .r6'
       IntOp $5 $6 - $lobsterOldUninstallStartTick
-      FileOpen $9 "$APPDATA\LobsterAI\install-timing.log" a
+      FileOpen $9 "${LOBSTER_APPDATA_DIR}\install-timing.log" a
       FileSeek $9 0 END
       !insertmacro GetTimestamp $8
       FileWrite $9 "$8 phase=old-uninstaller-complete attempt_id=$lobsterInstallerAttemptId root=${ROOT_KEY} status=handled exit=$R0 elapsed_ms=$5$\r$\n"
       FileClose $9
+      !endif
     ${EndIf}
   !macroend
 
@@ -1902,7 +2170,7 @@ FunctionEnd
   !macro customAfterUninstallOldVersions
     DetailPrint "[Installer] Applying Windows Defender install-scope exclusion"
     !insertmacro ResolveTrustedPowerShell
-    FileOpen $9 "$APPDATA\LobsterAI\install-timing.log" a
+    FileOpen $9 "${LOBSTER_APPDATA_DIR}\install-timing.log" a
     FileSeek $9 0 END
     !insertmacro GetTimestamp $8
     FileWrite $9 "$8 phase=defender-exclusion-start attempt_id=$lobsterInstallerAttemptId point=post-old-uninstaller rename_status=$lobsterOldInstallRenameStatus helper_status=$lobsterTrustedPowerShellStatus$\r$\n"
@@ -1951,7 +2219,7 @@ FunctionEnd
     DefenderPostUninstallLog:
     System::Call 'kernel32::GetTickCount()i .r6'
     IntOp $5 $6 - $7
-    FileOpen $9 "$APPDATA\LobsterAI\install-timing.log" a
+    FileOpen $9 "${LOBSTER_APPDATA_DIR}\install-timing.log" a
     FileSeek $9 0 END
     !insertmacro GetTimestamp $8
     FileWrite $9 "$8 phase=defender-exclusion-complete attempt_id=$lobsterInstallerAttemptId point=post-old-uninstaller exit=$R2 elapsed_ms=$5 output=$1$\r$\n"
@@ -1973,7 +2241,7 @@ FunctionEnd
     !insertmacro EnsureInstallerAttemptId
     System::Call 'kernel32::GetTickCount()i .r0'
     StrCpy $lobsterWebAcquireStartTick $0
-    FileOpen $9 "$APPDATA\LobsterAI\install-timing.log" a
+    FileOpen $9 "${LOBSTER_APPDATA_DIR}\install-timing.log" a
     FileSeek $9 0 END
     !insertmacro GetTimestamp $8
     FileWrite $9 "$8 phase=web-package-acquire-start attempt_id=$lobsterInstallerAttemptId$\r$\n"
@@ -1990,7 +2258,7 @@ FunctionEnd
     Push $9
     System::Call 'kernel32::GetTickCount()i .r0'
     IntOp $1 $0 - $lobsterWebAcquireStartTick
-    FileOpen $9 "$APPDATA\LobsterAI\install-timing.log" a
+    FileOpen $9 "${LOBSTER_APPDATA_DIR}\install-timing.log" a
     FileSeek $9 0 END
     !insertmacro GetTimestamp $8
     FileWrite $9 "$8 phase=web-package-acquire-complete attempt_id=$lobsterInstallerAttemptId source=${SOURCE} elapsed_ms=$1 file=$packageFile$\r$\n"
@@ -2008,7 +2276,7 @@ FunctionEnd
     Push $9
     System::Call 'kernel32::GetTickCount()i .r0'
     StrCpy $lobsterWebVerifyStartTick $0
-    FileOpen $9 "$APPDATA\LobsterAI\install-timing.log" a
+    FileOpen $9 "${LOBSTER_APPDATA_DIR}\install-timing.log" a
     FileSeek $9 0 END
     !insertmacro GetTimestamp $8
     FileWrite $9 "$8 phase=web-package-verify-start attempt_id=$lobsterInstallerAttemptId attempt=$webDownloadAttempt$\r$\n"
@@ -2025,7 +2293,7 @@ FunctionEnd
     Push $9
     System::Call 'kernel32::GetTickCount()i .r0'
     IntOp $1 $0 - $lobsterWebVerifyStartTick
-    FileOpen $9 "$APPDATA\LobsterAI\install-timing.log" a
+    FileOpen $9 "${LOBSTER_APPDATA_DIR}\install-timing.log" a
     FileSeek $9 0 END
     !insertmacro GetTimestamp $8
     FileWrite $9 "$8 phase=web-package-verify-complete attempt_id=$lobsterInstallerAttemptId attempt=$webDownloadAttempt result=${RESULT} elapsed_ms=$1$\r$\n"
@@ -2046,7 +2314,7 @@ FunctionEnd
     Push $9
     System::Call 'kernel32::GetTickCount()i .r0'
     StrCpy $lobsterWebDownloadStartTick $0
-    FileOpen $9 "$APPDATA\LobsterAI\install-timing.log" a
+    FileOpen $9 "${LOBSTER_APPDATA_DIR}\install-timing.log" a
     FileSeek $9 0 END
     !insertmacro GetTimestamp $8
     FileWrite $9 "$8 phase=web-package-download-start attempt_id=$lobsterInstallerAttemptId attempt=$webDownloadAttempt mode=${MODE} arch=$packageArch url=$packageUrl dest=$PLUGINSDIR\package.7z$\r$\n"
@@ -2068,7 +2336,7 @@ FunctionEnd
     StrCpy $2 "${STATUS}"
     System::Call 'kernel32::GetTickCount()i .r0'
     IntOp $1 $0 - $lobsterWebDownloadStartTick
-    FileOpen $9 "$APPDATA\LobsterAI\install-timing.log" a
+    FileOpen $9 "${LOBSTER_APPDATA_DIR}\install-timing.log" a
     FileSeek $9 0 END
     !insertmacro GetTimestamp $8
     FileWrite $9 "$8 phase=web-package-download-exit attempt_id=$lobsterInstallerAttemptId attempt=$webDownloadAttempt mode=${MODE} elapsed_ms=$1 status=$2$\r$\n"
@@ -2086,7 +2354,7 @@ FunctionEnd
     Push $9
     System::Call 'kernel32::GetTickCount()i .r0'
     StrCpy $lobsterPackageMaterializeStartTick $0
-    FileOpen $9 "$APPDATA\LobsterAI\install-timing.log" a
+    FileOpen $9 "${LOBSTER_APPDATA_DIR}\install-timing.log" a
     FileSeek $9 0 END
     !insertmacro GetTimestamp $8
     FileWrite $9 "$8 phase=payload-materialize-start attempt_id=$lobsterInstallerAttemptId arch=$packageArch dest=$appPackageStagingDir\app-$packageArch.${COMPRESSION_METHOD}$\r$\n"
@@ -2103,7 +2371,7 @@ FunctionEnd
     Push $9
     System::Call 'kernel32::GetTickCount()i .r0'
     IntOp $1 $0 - $lobsterPackageMaterializeStartTick
-    FileOpen $9 "$APPDATA\LobsterAI\install-timing.log" a
+    FileOpen $9 "${LOBSTER_APPDATA_DIR}\install-timing.log" a
     FileSeek $9 0 END
     !insertmacro GetTimestamp $8
     FileWrite $9 "$8 phase=payload-materialize-complete attempt_id=$lobsterInstallerAttemptId arch=$packageArch elapsed_ms=$1$\r$\n"
@@ -2120,7 +2388,7 @@ FunctionEnd
     Push $9
     System::Call 'kernel32::GetTickCount()i .r0'
     StrCpy $lobsterPackageExtractStartTick $0
-    FileOpen $9 "$APPDATA\LobsterAI\install-timing.log" a
+    FileOpen $9 "${LOBSTER_APPDATA_DIR}\install-timing.log" a
     FileSeek $9 0 END
     !insertmacro GetTimestamp $8
     FileWrite $9 "$8 phase=payload-7z-extract-start attempt_id=$lobsterInstallerAttemptId mode=${MODE} arch=$packageArch source=${SOURCE} dest=$OUTDIR$\r$\n"
@@ -2137,7 +2405,7 @@ FunctionEnd
     Push $9
     System::Call 'kernel32::GetTickCount()i .r0'
     IntOp $1 $0 - $lobsterPackageExtractStartTick
-    FileOpen $9 "$APPDATA\LobsterAI\install-timing.log" a
+    FileOpen $9 "${LOBSTER_APPDATA_DIR}\install-timing.log" a
     FileSeek $9 0 END
     !insertmacro GetTimestamp $8
     FileWrite $9 "$8 phase=payload-7z-extract-complete attempt_id=$lobsterInstallerAttemptId mode=${MODE} arch=$packageArch result=${RESULT} elapsed_ms=$1$\r$\n"
@@ -2158,7 +2426,7 @@ FunctionEnd
     Push $9
     System::Call 'kernel32::GetTickCount()i .r0'
     StrCpy $lobsterPackageCopyStartTick $0
-    FileOpen $9 "$APPDATA\LobsterAI\install-timing.log" a
+    FileOpen $9 "${LOBSTER_APPDATA_DIR}\install-timing.log" a
     FileSeek $9 0 END
     !insertmacro GetTimestamp $8
     FileWrite $9 "$8 phase=payload-copy-start attempt_id=$lobsterInstallerAttemptId attempt=$R1 source=$appPackageStagingDir\7z-out dest=$OUTDIR$\r$\n"
@@ -2175,7 +2443,7 @@ FunctionEnd
     Push $9
     System::Call 'kernel32::GetTickCount()i .r0'
     IntOp $1 $0 - $lobsterPackageCopyStartTick
-    FileOpen $9 "$APPDATA\LobsterAI\install-timing.log" a
+    FileOpen $9 "${LOBSTER_APPDATA_DIR}\install-timing.log" a
     FileSeek $9 0 END
     !insertmacro GetTimestamp $8
     FileWrite $9 "$8 phase=payload-copy-complete attempt_id=$lobsterInstallerAttemptId attempt=$R1 result=${RESULT} elapsed_ms=$1$\r$\n"
@@ -2192,7 +2460,7 @@ FunctionEnd
     Push $9
     System::Call 'kernel32::GetTickCount()i .r0'
     StrCpy $lobsterInstallerCacheCopyStartTick $0
-    FileOpen $9 "$APPDATA\LobsterAI\install-timing.log" a
+    FileOpen $9 "${LOBSTER_APPDATA_DIR}\install-timing.log" a
     FileSeek $9 0 END
     !insertmacro GetTimestamp $8
     FileWrite $9 "$8 phase=installer-cache-copy-start attempt_id=$lobsterInstallerAttemptId kind=${KIND}$\r$\n"
@@ -2228,7 +2496,7 @@ FunctionEnd
       Call lobsterQueryFreeMegabytes
       Pop $3
     ${EndIf}
-    FileOpen $9 "$APPDATA\LobsterAI\install-timing.log" a
+    FileOpen $9 "${LOBSTER_APPDATA_DIR}\install-timing.log" a
     FileSeek $9 0 END
     !insertmacro GetTimestamp $8
     ${If} "${RESULT}" == "error"
@@ -2248,7 +2516,7 @@ FunctionEnd
   !macro customEstimatedSizeKnown VALUE
     Push $8
     Push $9
-    FileOpen $9 "$APPDATA\LobsterAI\install-timing.log" a
+    FileOpen $9 "${LOBSTER_APPDATA_DIR}\install-timing.log" a
     FileSeek $9 0 END
     !insertmacro GetTimestamp $8
     FileWrite $9 "$8 phase=estimated-size-scan-skipped attempt_id=$lobsterInstallerAttemptId source=build-estimate value_kb=${VALUE}$\r$\n"
@@ -2272,7 +2540,7 @@ FunctionEnd
     Push $9
     System::Call 'kernel32::GetTickCount()i .r0'
     IntOp $1 $0 - $lobsterEstimatedSizeScanStartTick
-    FileOpen $9 "$APPDATA\LobsterAI\install-timing.log" a
+    FileOpen $9 "${LOBSTER_APPDATA_DIR}\install-timing.log" a
     FileSeek $9 0 END
     !insertmacro GetTimestamp $8
     FileWrite $9 "$8 phase=estimated-size-scan-complete attempt_id=$lobsterInstallerAttemptId value_kb=$lobsterEstimatedSizeValue elapsed_ms=$1$\r$\n"
@@ -2289,8 +2557,8 @@ FunctionEnd
   ; Write timestamps to help diagnose slow installation phases.
   ; Log file: %APPDATA%\LobsterAI\install-timing.log
 
-  CreateDirectory "$APPDATA\LobsterAI"
-  FileOpen $2 "$APPDATA\LobsterAI\install-timing.log" a
+  CreateDirectory "${LOBSTER_APPDATA_DIR}"
+  FileOpen $2 "${LOBSTER_APPDATA_DIR}\install-timing.log" a
   FileSeek $2 0 END
   !insertmacro GetTimestamp $8
   FileWrite $2 "$8 phase=app-files-install-complete attempt_id=$lobsterInstallerAttemptId$\r$\n"
@@ -2321,7 +2589,7 @@ FunctionEnd
   StrCpy $R3 "none"
   StrCpy $R4 "none"
   !insertmacro ResolveTrustedTar
-  FileOpen $2 "$APPDATA\LobsterAI\install-timing.log" a
+  FileOpen $2 "${LOBSTER_APPDATA_DIR}\install-timing.log" a
   FileSeek $2 0 END
   !insertmacro GetTimestamp $8
   FileWrite $2 "$8 phase=system-tool-resolved attempt_id=$lobsterInstallerAttemptId tool=tar status=$lobsterTrustedTarStatus source=$lobsterTrustedTarSource path=$lobsterTrustedTarPath$\r$\n"
@@ -2333,7 +2601,7 @@ FunctionEnd
   ; execution (the root cause of installers hanging at this phase).
   StrCmp $lobsterTrustedTarPath "" TarExtractElectron
   StrCpy $R3 "system-tar"
-  FileOpen $2 "$APPDATA\LobsterAI\install-timing.log" a
+  FileOpen $2 "${LOBSTER_APPDATA_DIR}\install-timing.log" a
   FileSeek $2 0 END
   !insertmacro GetTimestamp $8
   FileWrite $2 "$8 phase=tar-extract-start attempt_id=$lobsterInstallerAttemptId extractor=system-tar helper=$lobsterTrustedTarPath tar=$INSTDIR\resources\win-resources.tar dest=$INSTDIR\resources$\r$\n"
@@ -2352,7 +2620,7 @@ FunctionEnd
   StrCpy $R2 $0
   System::Call 'kernel32::GetTickCount()i .r6'
   IntOp $5 $6 - $7
-  FileOpen $2 "$APPDATA\LobsterAI\install-timing.log" a
+  FileOpen $2 "${LOBSTER_APPDATA_DIR}\install-timing.log" a
   FileSeek $2 0 END
   !insertmacro GetTimestamp $8
   FileWrite $2 "$8 phase=tar-extract-exit attempt_id=$lobsterInstallerAttemptId extractor=system-tar raw_kind=numeric-or-adapter-exit exit=$R2 elapsed_ms=$5$\r$\n"
@@ -2366,7 +2634,7 @@ FunctionEnd
     Push $R6
     Call lobsterBuildSingleLineTail
     Pop $R6
-    FileOpen $2 "$APPDATA\LobsterAI\install-timing.log" a
+    FileOpen $2 "${LOBSTER_APPDATA_DIR}\install-timing.log" a
     FileSeek $2 0 END
     !insertmacro GetTimestamp $8
     FileWrite $2 "$8 phase=tar-extract-output attempt_id=$lobsterInstallerAttemptId extractor=system-tar exit=$R2 text=$R6$\r$\n"
@@ -2388,7 +2656,7 @@ FunctionEnd
   ; present is treated as success, still gated by TarExtractVerify.
   StrCpy $R3 "electron"
   DetailPrint "[Installer] Launching bundled extractor"
-  FileOpen $2 "$APPDATA\LobsterAI\install-timing.log" a
+  FileOpen $2 "${LOBSTER_APPDATA_DIR}\install-timing.log" a
   FileSeek $2 0 END
   !insertmacro GetTimestamp $8
   FileWrite $2 "$8 phase=tar-extract-start attempt_id=$lobsterInstallerAttemptId extractor=electron tar=$INSTDIR\resources\win-resources.tar dest=$INSTDIR\resources$\r$\n"
@@ -2405,7 +2673,7 @@ FunctionEnd
   System::Call 'Kernel32::SetEnvironmentVariable(t "LOBSTERAI_EXTRACTOR_SCRIPT", t "$INSTDIR\resources\unpack-cfmind.cjs")i'
   System::Call 'Kernel32::SetEnvironmentVariable(t "LOBSTERAI_EXTRACTOR_ARCHIVE", t "$INSTDIR\resources\win-resources.tar")i'
   System::Call 'Kernel32::SetEnvironmentVariable(t "LOBSTERAI_EXTRACTOR_DESTINATION", t "$INSTDIR\resources")i'
-  System::Call 'Kernel32::SetEnvironmentVariable(t "LOBSTERAI_EXTRACTOR_LOG", t "$APPDATA\LobsterAI\install-timing.log")i'
+  System::Call 'Kernel32::SetEnvironmentVariable(t "LOBSTERAI_EXTRACTOR_LOG", t "${LOBSTER_APPDATA_DIR}\install-timing.log")i'
   Push '"$lobsterTrustedPowerShellPath" -NoProfile -NonInteractive -Command "\
     $$ErrorActionPreference = \"Stop\";\
     $$marker = $$env:LOBSTERAI_WATCHDOG_MARKER_PATH;\
@@ -2483,7 +2751,7 @@ FunctionEnd
   TarExtractWatchdogReturned:
   System::Call 'kernel32::GetTickCount()i .r6'
   IntOp $5 $6 - $7
-  FileOpen $2 "$APPDATA\LobsterAI\install-timing.log" a
+  FileOpen $2 "${LOBSTER_APPDATA_DIR}\install-timing.log" a
   FileSeek $2 0 END
   !insertmacro GetTimestamp $8
   FileWrite $2 "$8 phase=tar-extract-exit attempt_id=$lobsterInstallerAttemptId extractor=electron raw_marker=$R4 exit=$R2 elapsed_ms=$5$\r$\n"
@@ -2530,7 +2798,7 @@ FunctionEnd
   StrCpy $R5 "python-entry-missing"
 
   TarExtractRequiredResourceMissing:
-  FileOpen $2 "$APPDATA\LobsterAI\install-timing.log" a
+  FileOpen $2 "${LOBSTER_APPDATA_DIR}\install-timing.log" a
   FileSeek $2 0 END
   !insertmacro GetTimestamp $8
   FileWrite $2 "$8 phase=tar-extract-error attempt_id=$lobsterInstallerAttemptId extractor=$R3 exit=$R2 reason=$R5-after-extract$\r$\n"
@@ -2541,35 +2809,35 @@ FunctionEnd
   ; in /S installs unless a silent default is declared, and the in-app update
   ; must never block on an orphan dialog.
   StrCmp $R3 "system-tar" TarExtractElectron
-  MessageBox MB_OK|MB_ICONEXCLAMATION "The LobsterAI installation stopped because resource extraction completed without all required runtime resources ($R5). The installer will not commit a partial application. Details: $APPDATA\LobsterAI\install-timing.log" /SD IDOK
+  MessageBox MB_OK|MB_ICONEXCLAMATION "The LobsterAI installation stopped because resource extraction completed without all required runtime resources ($R5). The installer will not commit a partial application. Details: ${LOBSTER_APPDATA_DIR}\install-timing.log" /SD IDOK
   Goto TarExtractFailed
 
   TarExtractProcessFailed:
-    FileOpen $2 "$APPDATA\LobsterAI\install-timing.log" a
+    FileOpen $2 "${LOBSTER_APPDATA_DIR}\install-timing.log" a
     FileSeek $2 0 END
     !insertmacro GetTimestamp $8
     FileWrite $2 "$8 phase=tar-extract-error attempt_id=$lobsterInstallerAttemptId extractor=$R3 exit=$R2 raw_marker=$R4 elapsed_ms=$5 reason=process-start-failed$\r$\n"
     FileClose $2
-    MessageBox MB_OK|MB_ICONEXCLAMATION "The LobsterAI installation stopped because the resource extractor could not be started (exit=$R2). The installer will not commit a partial application. Details: $APPDATA\LobsterAI\install-timing.log" /SD IDOK
+    MessageBox MB_OK|MB_ICONEXCLAMATION "The LobsterAI installation stopped because the resource extractor could not be started (exit=$R2). The installer will not commit a partial application. Details: ${LOBSTER_APPDATA_DIR}\install-timing.log" /SD IDOK
     Goto TarExtractFailed
 
   TarExtractTimeout:
-    FileOpen $2 "$APPDATA\LobsterAI\install-timing.log" a
+    FileOpen $2 "${LOBSTER_APPDATA_DIR}\install-timing.log" a
     FileSeek $2 0 END
     !insertmacro GetTimestamp $8
     FileWrite $2 "$8 phase=tar-extract-error attempt_id=$lobsterInstallerAttemptId extractor=$R3 exit=$R2 raw_marker=$R4 elapsed_ms=$5 reason=timeout$\r$\n"
     FileClose $2
-    MessageBox MB_OK|MB_ICONEXCLAMATION "The LobsterAI installation stopped because resource extraction timed out after 10 minutes. The blocked extractor was terminated and the installer will not commit a partial application. Details: $APPDATA\LobsterAI\install-timing.log" /SD IDOK
+    MessageBox MB_OK|MB_ICONEXCLAMATION "The LobsterAI installation stopped because resource extraction timed out after 10 minutes. The blocked extractor was terminated and the installer will not commit a partial application. Details: ${LOBSTER_APPDATA_DIR}\install-timing.log" /SD IDOK
     Goto TarExtractFailed
 
   TarExtractTerminationFailed:
-    FileOpen $2 "$APPDATA\LobsterAI\install-timing.log" a
+    FileOpen $2 "${LOBSTER_APPDATA_DIR}\install-timing.log" a
     FileSeek $2 0 END
     !insertmacro GetTimestamp $8
     FileWrite $2 "$8 phase=tar-extract-error attempt_id=$lobsterInstallerAttemptId extractor=$R3 exit=$R2 raw_marker=$R4 elapsed_ms=$5 reason=process-termination-failed action=preserve-all-no-concurrent-rollback$\r$\n"
     FileClose $2
     System::Call 'Kernel32::SetEnvironmentVariable(t "ELECTRON_RUN_AS_NODE", t "")i'
-    MessageBox MB_OK|MB_ICONEXCLAMATION "The LobsterAI installation stopped because the extractor process could not be confirmed terminated. No automatic rollback or cleanup was attempted while that process may still be writing files. Restart Windows before retrying. Recovery files (if any): $lobsterOldInstallBackupPath. Details: $APPDATA\LobsterAI\install-timing.log" /SD IDOK
+    MessageBox MB_OK|MB_ICONEXCLAMATION "The LobsterAI installation stopped because the extractor process could not be confirmed terminated. No automatic rollback or cleanup was attempted while that process may still be writing files. Restart Windows before retrying. Recovery files (if any): $lobsterOldInstallBackupPath. Details: ${LOBSTER_APPDATA_DIR}\install-timing.log" /SD IDOK
     SetErrorLevel 3
     Quit
 
@@ -2582,7 +2850,7 @@ FunctionEnd
     ; never trigger deletion, an unreadable exit code alone must never abort
     ; an installation whose payload verifiably exists.)
     IfFileExists "$INSTDIR\resources\.unpack-cfmind-ok" 0 TarExtractOutputValidationFatal
-    FileOpen $2 "$APPDATA\LobsterAI\install-timing.log" a
+    FileOpen $2 "${LOBSTER_APPDATA_DIR}\install-timing.log" a
     FileSeek $2 0 END
     !insertmacro GetTimestamp $8
     FileWrite $2 "$8 phase=tar-extract-sentinel-rescue attempt_id=$lobsterInstallerAttemptId extractor=$R3 exit=$R2 raw_marker=$R4 elapsed_ms=$5 sentinel=present$\r$\n"
@@ -2590,25 +2858,25 @@ FunctionEnd
     Goto TarExtractVerify
 
   TarExtractOutputValidationFatal:
-    FileOpen $2 "$APPDATA\LobsterAI\install-timing.log" a
+    FileOpen $2 "${LOBSTER_APPDATA_DIR}\install-timing.log" a
     FileSeek $2 0 END
     !insertmacro GetTimestamp $8
     FileWrite $2 "$8 phase=tar-extract-error attempt_id=$lobsterInstallerAttemptId extractor=$R3 exit=$R2 raw_marker=$R4 elapsed_ms=$5 reason=watchdog-output-validation-failed$\r$\n"
     FileClose $2
-    MessageBox MB_OK|MB_ICONEXCLAMATION "The LobsterAI installation stopped because the resource extractor watchdog returned an invalid result. The installer will not commit a partial application. Details: $APPDATA\LobsterAI\install-timing.log" /SD IDOK
+    MessageBox MB_OK|MB_ICONEXCLAMATION "The LobsterAI installation stopped because the resource extractor watchdog returned an invalid result. The installer will not commit a partial application. Details: ${LOBSTER_APPDATA_DIR}\install-timing.log" /SD IDOK
     Goto TarExtractFailed
 
   TarExtractNonZero:
-    FileOpen $2 "$APPDATA\LobsterAI\install-timing.log" a
+    FileOpen $2 "${LOBSTER_APPDATA_DIR}\install-timing.log" a
     FileSeek $2 0 END
     !insertmacro GetTimestamp $8
     FileWrite $2 "$8 phase=tar-extract-error attempt_id=$lobsterInstallerAttemptId extractor=$R3 exit=$R2 raw_marker=$R4 elapsed_ms=$5 reason=numeric-child-exit$\r$\n"
     FileClose $2
-    MessageBox MB_OK|MB_ICONEXCLAMATION "The LobsterAI installation stopped because resource extraction failed (child exit code $R2). The installer will not commit a partial application. Details: $APPDATA\LobsterAI\install-timing.log" /SD IDOK
+    MessageBox MB_OK|MB_ICONEXCLAMATION "The LobsterAI installation stopped because resource extraction failed (child exit code $R2). The installer will not commit a partial application. Details: ${LOBSTER_APPDATA_DIR}\install-timing.log" /SD IDOK
     Goto TarExtractFailed
 
   TarExtractSucceeded:
-  FileOpen $2 "$APPDATA\LobsterAI\install-timing.log" a
+  FileOpen $2 "${LOBSTER_APPDATA_DIR}\install-timing.log" a
   FileSeek $2 0 END
   !insertmacro GetTimestamp $8
   FileWrite $2 "$8 phase=tar-extract-complete attempt_id=$lobsterInstallerAttemptId extractor=$R3 exit=$R2$\r$\n"
@@ -2628,7 +2896,7 @@ FunctionEnd
   Goto TarExtractDone
 
   TarExtractFailed:
-  FileOpen $2 "$APPDATA\LobsterAI\install-timing.log" a
+  FileOpen $2 "${LOBSTER_APPDATA_DIR}\install-timing.log" a
   FileSeek $2 0 END
   !insertmacro GetTimestamp $8
   FileWrite $2 "$8 phase=tar-extract-failed-archive-preserved attempt_id=$lobsterInstallerAttemptId extractor=$R3 exit=$R2 raw_marker=$R4 action=abort-install$\r$\n"
@@ -2636,7 +2904,7 @@ FunctionEnd
   System::Call 'Kernel32::SetEnvironmentVariable(t "ELECTRON_RUN_AS_NODE", t "")i'
   !insertmacro customRollbackOldInstall "resource-extraction-failed"
   StrCmp $lobsterOldInstallRollbackStatus "failed" 0 TarExtractAbort
-    MessageBox MB_OK|MB_ICONEXCLAMATION "The installation failed and automatic rollback did not complete. No recovery copy was deleted. Previous files: $lobsterOldInstallBackupPath. Partial update: $lobsterOldInstallFailedPath. Details: $APPDATA\LobsterAI\install-timing.log" /SD IDOK
+    MessageBox MB_OK|MB_ICONEXCLAMATION "The installation failed and automatic rollback did not complete. No recovery copy was deleted. Previous files: $lobsterOldInstallBackupPath. Partial update: $lobsterOldInstallFailedPath. Details: ${LOBSTER_APPDATA_DIR}\install-timing.log" /SD IDOK
   TarExtractAbort:
   SetErrorLevel 3
   Quit
@@ -2649,7 +2917,11 @@ FunctionEnd
   ; fixed skills-backup directory.
   StrCmp $lobsterLegacySkillsStatus "legacy-backup-succeeded" 0 SkipSkillRestore
   System::Call 'kernel32::GetTickCount()i .r7'
-  IfFileExists "$APPDATA\LobsterAI\skills-backup\$lobsterInstallerAttemptId\backup-manifest.json" SkillRestoreAttemptBackupReady
+  !ifdef LOBSTERAI_DEV_BUILD
+    IfFileExists "$APPDATA\LobsterAI-Dev\skills-backup\$lobsterInstallerAttemptId\backup-manifest.json" SkillRestoreAttemptBackupReady
+  !else
+    IfFileExists "$APPDATA\LobsterAI\skills-backup\$lobsterInstallerAttemptId\backup-manifest.json" SkillRestoreAttemptBackupReady
+  !endif
     StrCpy $R2 "backup-missing"
     StrCpy $1 "current-attempt-backup-manifest-missing"
     StrCpy $lobsterLegacySkillsRestoreStatus "legacy-restore-backup-missing"
@@ -2657,15 +2929,19 @@ FunctionEnd
 
   SkillRestoreAttemptBackupReady:
     DetailPrint "[Installer] Restoring user-created skills"
-    FileOpen $2 "$APPDATA\LobsterAI\install-timing.log" a
+    FileOpen $2 "${LOBSTER_APPDATA_DIR}\install-timing.log" a
     FileSeek $2 0 END
     !insertmacro GetTimestamp $8
-    FileWrite $2 "$8 phase=skill-restore-start attempt_id=$lobsterInstallerAttemptId backup=$APPDATA\LobsterAI\skills-backup\$lobsterInstallerAttemptId$\r$\n"
+    FileWrite $2 "$8 phase=skill-restore-start attempt_id=$lobsterInstallerAttemptId backup=${LOBSTER_APPDATA_DIR}\skills-backup\$lobsterInstallerAttemptId$\r$\n"
     FileClose $2
 
     StrCmp $lobsterTrustedPowerShellPath "" SkillRestoreHelperMissing
     System::Call 'Kernel32::SetEnvironmentVariable(t "LOBSTERAI_SKILL_SOURCE", t "$lobsterOldInstallOriginalPath\resources\SKILLs")i'
-    System::Call 'Kernel32::SetEnvironmentVariable(t "LOBSTERAI_SKILL_BACKUP_ROOT", t "$APPDATA\LobsterAI\skills-backup")i'
+    !ifdef LOBSTERAI_DEV_BUILD
+      System::Call 'Kernel32::SetEnvironmentVariable(t "LOBSTERAI_SKILL_BACKUP_ROOT", t "$APPDATA\LobsterAI-Dev\skills-backup")i'
+    !else
+      System::Call 'Kernel32::SetEnvironmentVariable(t "LOBSTERAI_SKILL_BACKUP_ROOT", t "$APPDATA\LobsterAI\skills-backup")i'
+    !endif
     System::Call 'Kernel32::SetEnvironmentVariable(t "LOBSTERAI_SKILL_DESTINATION", t "$INSTDIR\resources\SKILLs")i'
     System::Call 'Kernel32::SetEnvironmentVariable(t "LOBSTERAI_INSTALL_ATTEMPT_ID", t "$lobsterInstallerAttemptId")i'
     Push '"$lobsterTrustedPowerShellPath" -NoProfile -NonInteractive -Command "\
@@ -2756,16 +3032,16 @@ FunctionEnd
       StrCpy $lobsterLegacySkillsRestoreStatus "legacy-restore-failed"
     System::Call 'kernel32::GetTickCount()i .r6'
     IntOp $5 $6 - $7
-    FileOpen $2 "$APPDATA\LobsterAI\install-timing.log" a
+    FileOpen $2 "${LOBSTER_APPDATA_DIR}\install-timing.log" a
     FileSeek $2 0 END
     !insertmacro GetTimestamp $8
-    FileWrite $2 "$8 phase=skill-restore-complete attempt_id=$lobsterInstallerAttemptId status=$lobsterLegacySkillsRestoreStatus exit=$R2 elapsed_ms=$5 backup=$APPDATA\LobsterAI\skills-backup\$lobsterInstallerAttemptId$\r$\n"
+    FileWrite $2 "$8 phase=skill-restore-complete attempt_id=$lobsterInstallerAttemptId status=$lobsterLegacySkillsRestoreStatus exit=$R2 elapsed_ms=$5 backup=${LOBSTER_APPDATA_DIR}\skills-backup\$lobsterInstallerAttemptId$\r$\n"
     FileWrite $2 "$8 phase=skill-restore-output attempt_id=$lobsterInstallerAttemptId status=$lobsterLegacySkillsRestoreStatus text=$1$\r$\n"
     FileClose $2
 
     StrCmp $R2 "0" SkillRestoreValidated
     StrCmp $R2 "20" SkillRestoreConflictPreserved
-      FileOpen $2 "$APPDATA\LobsterAI\install-timing.log" a
+      FileOpen $2 "${LOBSTER_APPDATA_DIR}\install-timing.log" a
       FileSeek $2 0 END
       !insertmacro GetTimestamp $8
       FileWrite $2 "$8 phase=skill-restore-failed attempt_id=$lobsterInstallerAttemptId status=legacy-restore-failed action=attempt-backup-preserved rename_status=$lobsterOldInstallRenameStatus$\r$\n"
@@ -2779,10 +3055,10 @@ FunctionEnd
       System::Call 'Kernel32::SetEnvironmentVariable(t "ELECTRON_RUN_AS_NODE", t "")i'
       !insertmacro customRollbackOldInstall "skill-restore-failed"
       StrCmp $lobsterOldInstallRollbackStatus "success" SkillRestoreRollbackSucceeded
-        MessageBox MB_OK|MB_ICONEXCLAMATION "The LobsterAI update could not restore user skills, and automatic rollback did not complete. No recovery copy was deleted. Previous files: $lobsterOldInstallBackupPath. Partial update: $lobsterOldInstallFailedPath. Details: $APPDATA\LobsterAI\install-timing.log" /SD IDOK
+        MessageBox MB_OK|MB_ICONEXCLAMATION "The LobsterAI update could not restore user skills, and automatic rollback did not complete. No recovery copy was deleted. Previous files: $lobsterOldInstallBackupPath. Partial update: $lobsterOldInstallFailedPath. Details: ${LOBSTER_APPDATA_DIR}\install-timing.log" /SD IDOK
         Goto SkillRestoreAbort
       SkillRestoreRollbackSucceeded:
-        MessageBox MB_OK|MB_ICONEXCLAMATION "The LobsterAI update could not restore user skills, so the previous version was restored. Please retry the update. Details: $APPDATA\LobsterAI\install-timing.log" /SD IDOK
+        MessageBox MB_OK|MB_ICONEXCLAMATION "The LobsterAI update could not restore user skills, so the previous version was restored. Please retry the update. Details: ${LOBSTER_APPDATA_DIR}\install-timing.log" /SD IDOK
       SkillRestoreAbort:
       SetErrorLevel 2
       Quit
@@ -2794,23 +3070,31 @@ FunctionEnd
       ; recovery. The dialog must state exactly what survives: when no backup
       ; exists for this attempt, do not claim one was preserved.
       StrCmp $lobsterLegacySkillsRestoreStatus "legacy-restore-backup-missing" SkillRestoreDegradedBackupMissing
-      FileOpen $2 "$APPDATA\LobsterAI\install-timing.log" a
+      FileOpen $2 "${LOBSTER_APPDATA_DIR}\install-timing.log" a
       FileSeek $2 0 END
       !insertmacro GetTimestamp $8
-      FileWrite $2 "$8 phase=skill-restore-degraded attempt_id=$lobsterInstallerAttemptId status=$lobsterLegacySkillsRestoreStatus action=continue-with-attempt-backup-preserved backup=$APPDATA\LobsterAI\skills-backup\$lobsterInstallerAttemptId$\r$\n"
+      FileWrite $2 "$8 phase=skill-restore-degraded attempt_id=$lobsterInstallerAttemptId status=$lobsterLegacySkillsRestoreStatus action=continue-with-attempt-backup-preserved backup=${LOBSTER_APPDATA_DIR}\skills-backup\$lobsterInstallerAttemptId$\r$\n"
       FileClose $2
-      MessageBox MB_OK|MB_ICONEXCLAMATION "LobsterAI will finish installing, but legacy user skills could not be restored automatically ($lobsterLegacySkillsRestoreStatus). The recovery backup was preserved at $APPDATA\LobsterAI\skills-backup\$lobsterInstallerAttemptId. Details: $APPDATA\LobsterAI\install-timing.log" /SD IDOK
+      !ifdef LOBSTERAI_DEV_BUILD
+        MessageBox MB_OK|MB_ICONEXCLAMATION "LobsterAI-Dev will finish installing, but legacy user skills could not be restored automatically ($lobsterLegacySkillsRestoreStatus). The recovery backup was preserved at $APPDATA\LobsterAI-Dev\skills-backup\$lobsterInstallerAttemptId. Details: $APPDATA\LobsterAI-Dev\install-timing.log" /SD IDOK
+      !else
+        MessageBox MB_OK|MB_ICONEXCLAMATION "LobsterAI will finish installing, but legacy user skills could not be restored automatically ($lobsterLegacySkillsRestoreStatus). The recovery backup was preserved at $APPDATA\LobsterAI\skills-backup\$lobsterInstallerAttemptId. Details: ${LOBSTER_APPDATA_DIR}\install-timing.log" /SD IDOK
+      !endif
       Goto SkillRestoreValidated
 
     SkillRestoreDegradedBackupMissing:
       ; No backup exists for this attempt, so nothing could be restored and
       ; there is no preserved copy to point the user at.
-      FileOpen $2 "$APPDATA\LobsterAI\install-timing.log" a
+      FileOpen $2 "${LOBSTER_APPDATA_DIR}\install-timing.log" a
       FileSeek $2 0 END
       !insertmacro GetTimestamp $8
-      FileWrite $2 "$8 phase=skill-restore-degraded attempt_id=$lobsterInstallerAttemptId status=$lobsterLegacySkillsRestoreStatus action=continue-no-backup-found backup=$APPDATA\LobsterAI\skills-backup\$lobsterInstallerAttemptId$\r$\n"
+      FileWrite $2 "$8 phase=skill-restore-degraded attempt_id=$lobsterInstallerAttemptId status=$lobsterLegacySkillsRestoreStatus action=continue-no-backup-found backup=${LOBSTER_APPDATA_DIR}\skills-backup\$lobsterInstallerAttemptId$\r$\n"
       FileClose $2
-      MessageBox MB_OK|MB_ICONEXCLAMATION "LobsterAI will finish installing, but the recovery backup for legacy user skills was not found, so no skills were restored ($lobsterLegacySkillsRestoreStatus). Details: $APPDATA\LobsterAI\install-timing.log" /SD IDOK
+      !ifdef LOBSTERAI_DEV_BUILD
+        MessageBox MB_OK|MB_ICONEXCLAMATION "LobsterAI-Dev will finish installing, but the recovery backup for legacy user skills was not found, so no skills were restored ($lobsterLegacySkillsRestoreStatus). Details: $APPDATA\LobsterAI-Dev\install-timing.log" /SD IDOK
+      !else
+        MessageBox MB_OK|MB_ICONEXCLAMATION "LobsterAI will finish installing, but the recovery backup for legacy user skills was not found, so no skills were restored ($lobsterLegacySkillsRestoreStatus). Details: ${LOBSTER_APPDATA_DIR}\install-timing.log" /SD IDOK
+      !endif
       Goto SkillRestoreValidated
 
     SkillRestoreConflictPreserved:
@@ -2818,10 +3102,10 @@ FunctionEnd
       ; copy to be overwritten or deleted. Finish installing the verified new
       ; app, retain the entire attempt backup, and expose a typed state for
       ; user-context import/manual recovery.
-      FileOpen $2 "$APPDATA\LobsterAI\install-timing.log" a
+      FileOpen $2 "${LOBSTER_APPDATA_DIR}\install-timing.log" a
       FileSeek $2 0 END
       !insertmacro GetTimestamp $8
-      FileWrite $2 "$8 phase=skill-restore-conflict-preserved attempt_id=$lobsterInstallerAttemptId status=name-conflict action=attempt-backup-preserved backup=$APPDATA\LobsterAI\skills-backup\$lobsterInstallerAttemptId$\r$\n"
+      FileWrite $2 "$8 phase=skill-restore-conflict-preserved attempt_id=$lobsterInstallerAttemptId status=name-conflict action=attempt-backup-preserved backup=${LOBSTER_APPDATA_DIR}\skills-backup\$lobsterInstallerAttemptId$\r$\n"
       FileClose $2
     SkillRestoreValidated:
   SkipSkillRestore:
@@ -2875,7 +3159,7 @@ FunctionEnd
   StrCpy $0 "helper-not-found"
   StrCpy $1 "skipped:trusted-powershell-unavailable"
   DefenderRebalanceLog:
-  FileOpen $2 "$APPDATA\LobsterAI\install-timing.log" a
+  FileOpen $2 "${LOBSTER_APPDATA_DIR}\install-timing.log" a
   FileSeek $2 0 END
   !insertmacro GetTimestamp $8
   FileWrite $2 "$8 phase=defender-exclusion-rebalance-complete attempt_id=$lobsterInstallerAttemptId permanent_requested=$R7 exit=$0 output=$1$\r$\n"
@@ -2916,7 +3200,7 @@ FunctionEnd
     StrCmp $lobsterOldInstallRenameStatus "success" 0 NewInstallPrevalidateLog
       StrCpy $lobsterOldInstallRenameStatus "prevalidated"
     NewInstallPrevalidateLog:
-    FileOpen $2 "$APPDATA\LobsterAI\install-timing.log" a
+    FileOpen $2 "${LOBSTER_APPDATA_DIR}\install-timing.log" a
     FileSeek $2 0 END
     !insertmacro GetTimestamp $8
     FileWrite $2 "$8 phase=new-install-prevalidated attempt_id=$lobsterInstallerAttemptId status=$lobsterNewInstallValidationStatus reason=$lobsterNewInstallValidationReason rename_status=$lobsterOldInstallRenameStatus registration=pending backup_path=$lobsterOldInstallBackupPath$\r$\n"
@@ -2924,7 +3208,7 @@ FunctionEnd
     Goto NewInstallPrevalidateDone
 
   NewInstallPrevalidateFailed:
-    FileOpen $2 "$APPDATA\LobsterAI\install-timing.log" a
+    FileOpen $2 "${LOBSTER_APPDATA_DIR}\install-timing.log" a
     FileSeek $2 0 END
     !insertmacro GetTimestamp $8
     FileWrite $2 "$8 phase=new-install-prevalidation-failed attempt_id=$lobsterInstallerAttemptId status=$lobsterNewInstallValidationStatus reason=$lobsterNewInstallValidationReason rename_status=$lobsterOldInstallRenameStatus registration=not-written backup_path=$lobsterOldInstallBackupPath$\r$\n"
@@ -2932,13 +3216,13 @@ FunctionEnd
     StrCmp $lobsterOldInstallRenameStatus "success" 0 NewInstallPrevalidateAbort
     !insertmacro customRollbackOldInstall "new-install-validation-failed"
     StrCmp $lobsterOldInstallRollbackStatus "success" NewInstallPrevalidateRollbackSucceeded
-      MessageBox MB_OK|MB_ICONEXCLAMATION "The LobsterAI update could not be validated, and automatic rollback did not complete. No recovery copy was deleted. Previous files: $lobsterOldInstallBackupPath. Partial update: $lobsterOldInstallFailedPath. Details: $APPDATA\LobsterAI\install-timing.log" /SD IDOK
+      MessageBox MB_OK|MB_ICONEXCLAMATION "The LobsterAI update could not be validated, and automatic rollback did not complete. No recovery copy was deleted. Previous files: $lobsterOldInstallBackupPath. Partial update: $lobsterOldInstallFailedPath. Details: ${LOBSTER_APPDATA_DIR}\install-timing.log" /SD IDOK
       Goto NewInstallPrevalidateAbortAfterMessage
     NewInstallPrevalidateRollbackSucceeded:
-      MessageBox MB_OK|MB_ICONEXCLAMATION "The LobsterAI update could not be validated, so the previous version was restored. Please retry the update. Details: $APPDATA\LobsterAI\install-timing.log" /SD IDOK
+      MessageBox MB_OK|MB_ICONEXCLAMATION "The LobsterAI update could not be validated, so the previous version was restored. Please retry the update. Details: ${LOBSTER_APPDATA_DIR}\install-timing.log" /SD IDOK
       Goto NewInstallPrevalidateAbortAfterMessage
     NewInstallPrevalidateAbort:
-      MessageBox MB_OK|MB_ICONEXCLAMATION "The LobsterAI installation stopped because the new application could not be validated ($lobsterNewInstallValidationReason). New registration and shortcuts were not written. Details: $APPDATA\LobsterAI\install-timing.log" /SD IDOK
+      MessageBox MB_OK|MB_ICONEXCLAMATION "The LobsterAI installation stopped because the new application could not be validated ($lobsterNewInstallValidationReason). New registration and shortcuts were not written. Details: ${LOBSTER_APPDATA_DIR}\install-timing.log" /SD IDOK
     NewInstallPrevalidateAbortAfterMessage:
     SetErrorLevel 2
     Quit
@@ -2954,7 +3238,7 @@ FunctionEnd
   StrCmp $lobsterNewInstallValidationStatus "success" 0 InstallFinalizeInvariantFailed
   StrCmp $lobsterOldInstallRenameStatus "prevalidated" 0 InstallFinalizeNoRename
     StrCpy $lobsterOldInstallRenameStatus "committed"
-    FileOpen $2 "$APPDATA\LobsterAI\install-timing.log" a
+    FileOpen $2 "${LOBSTER_APPDATA_DIR}\install-timing.log" a
     FileSeek $2 0 END
     !insertmacro GetTimestamp $8
     FileWrite $2 "$8 phase=old-install-commit-complete attempt_id=$lobsterInstallerAttemptId status=$lobsterNewInstallValidationStatus reason=$lobsterNewInstallValidationReason registration=written backup_path=$lobsterOldInstallBackupPath$\r$\n"
@@ -2982,7 +3266,7 @@ FunctionEnd
       StrCpy $0 "helper-not-found"
     OldInstallCleanupDispatchDone:
     System::Call 'Kernel32::SetEnvironmentVariable(t "LOBSTERAI_OLD_CLEANUP_PATH", t "")i'
-    FileOpen $2 "$APPDATA\LobsterAI\install-timing.log" a
+    FileOpen $2 "${LOBSTER_APPDATA_DIR}\install-timing.log" a
     FileSeek $2 0 END
     !insertmacro GetTimestamp $8
     FileWrite $2 "$8 phase=old-install-cleanup-scheduled attempt_id=$lobsterInstallerAttemptId dispatch=$0 backup_path=$lobsterOldInstallBackupPath target=exact-current-backup cleanup_mode=async-exec-after-commit$\r$\n"
@@ -2994,7 +3278,7 @@ FunctionEnd
     ; The version-pinned template contract guarantees the pre-registry hook.
     ; Fail visibly if that contract is ever broken instead of silently
     ; finalizing an unvalidated tree.
-    FileOpen $2 "$APPDATA\LobsterAI\install-timing.log" a
+    FileOpen $2 "${LOBSTER_APPDATA_DIR}\install-timing.log" a
     FileSeek $2 0 END
     !insertmacro GetTimestamp $8
     FileWrite $2 "$8 phase=install-finalize-invariant-failed attempt_id=$lobsterInstallerAttemptId validation_status=$lobsterNewInstallValidationStatus rename_status=$lobsterOldInstallRenameStatus$\r$\n"
@@ -3003,7 +3287,7 @@ FunctionEnd
     Quit
 
   InstallFinalizeComplete:
-  FileOpen $2 "$APPDATA\LobsterAI\install-timing.log" a
+  FileOpen $2 "${LOBSTER_APPDATA_DIR}\install-timing.log" a
   FileSeek $2 0 END
   !insertmacro GetTimestamp $8
   FileWrite $2 "$8 phase=install-complete attempt_id=$lobsterInstallerAttemptId scenario=$lobsterInstallScenario$\r$\n"

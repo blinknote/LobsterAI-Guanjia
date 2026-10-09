@@ -105,6 +105,13 @@ for (const platformName of ['mac', 'win', 'linux']) {
 
 configureMacWebAuthnEntitlements(config, process.env.APPLE_TEAM_ID);
 
+const isDevBuild = config.appId === 'com.lobsterai.dev.app' && config.productName === 'LobsterAI-Dev';
+if (isDevBuild) {
+  process.env.LOBSTERAI_DEV_BUILD = '1';
+} else {
+  delete process.env.LOBSTERAI_DEV_BUILD;
+}
+
 // Sign every Windows binary electron-builder produces (LobsterAI.exe, the
 // uninstaller, the installer) through the internal Youdao signing service,
 // not just the final Setup.exe: the unsigned inner exe is what security
@@ -161,5 +168,6 @@ if (isWebInstallerEnabled()) {
 
 console.log(`[Keyfrom] configured artifact keyfrom as ${keyfrom}`);
 console.log(`[ChannelBuild] silentOnDoubleClick=${silentOnDoubleClick}`);
+console.log(`[DevBuild] isDevBuild=${isDevBuild}`);
 
 module.exports = config;

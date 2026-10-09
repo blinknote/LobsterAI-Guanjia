@@ -386,6 +386,8 @@ import {
   performPendingDataMigrationRestoreSync,
 } from './libs/dataMigration/dataMigrationService';
 import { DesktopNotificationManager } from './libs/desktopNotificationManager';
+import { DevUpdateClient } from './libs/devUpdateClient';
+import { DevUpdateTrustStore } from './libs/devUpdateTrustStore';
 import {
   getHtmlSharePublicBaseUrl,
   getKitStoreUrl,
@@ -2280,13 +2282,32 @@ const formatAutoLaunchStatusForLog = (status: AutoLaunchStatus): string => {
 
 const getAppUpdateCoordinator = (): AppUpdateCoordinator => {
   if (!appUpdateCoordinator) {
-    appUpdateCoordinator = new AppUpdateCoordinator(getStore(), new AppUpdateGrayClient({
-      getSession: () => resolveAppUpdateGraySession(),
-      getServerBaseUrl: getServerApiBaseUrl,
-      fetch: (url, options) => session.defaultSession.fetch(url, options),
-      platform: process.platform,
-      arch: process.arch,
-    }));
+    const isDevTarget =
+      process.platform === 'win32'
+      && process.arch === 'x64'
+      && APP_NAME === 'LobsterAI-Dev'
+      && APP_USER_MODEL_ID === 'com.lobsterai.dev.app';
+
+    if (isDevTarget) {
+      const devTrustStore = new DevUpdateTrustStore();
+      const devUpdateClient = new DevUpdateClient({
+        trustStore: devTrustStore,
+        fetch: (url, options) => session.defaultSession.fetch(url, options),
+      });
+      appUpdateCoordinator = new AppUpdateCoordinator(
+        getStore(),
+        undefined,
+        { trustStore: devTrustStore, client: devUpdateClient },
+      );
+    } else {
+      appUpdateCoordinator = new AppUpdateCoordinator(getStore(), new AppUpdateGrayClient({
+        getSession: () => resolveAppUpdateGraySession(),
+        getServerBaseUrl: getServerApiBaseUrl,
+        fetch: (url, options) => session.defaultSession.fetch(url, options),
+        platform: process.platform,
+        arch: process.arch,
+      }));
+    }
   }
   return appUpdateCoordinator;
 };

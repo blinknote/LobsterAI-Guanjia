@@ -7,6 +7,8 @@ jobs:
     resource_class: windows.medium
     shell: powershell.exe -ExecutionPolicy Bypass
     environment: &windows-environment
+      CIRCLE_PROJECT_ID: "465ea2ee-bc38-4dec-a593-e96eb637d630"
+      CIRCLE_PIPELINE_ID: "<< pipeline.id >>"
       CSC_IDENTITY_AUTO_DISCOVERY: "false"
       NODE_OPTIONS: "--max-old-space-size=6144"
     steps:
@@ -244,6 +246,28 @@ jobs:
       - store_artifacts:
           path: artifacts/windows
           destination: windows-x64
+      - persist_to_workspace:
+          root: '.circleci-workspace'
+          paths:
+            - installer/UPDATE_IDENTITY.json
+            - installer/BUILD_INFO.txt
+            - installer/*.exe
+
+  import-windows:
+    docker:
+      - image: cimg/node:24.15.0
+    resource_class: small
+    environment:
+      CIRCLE_PROJECT_ID: "465ea2ee-bc38-4dec-a593-e96eb637d630"
+      CIRCLE_PIPELINE_ID: "<< pipeline.id >>"
+    steps:
+      - checkout
+      - attach_workspace:
+          at: '.circleci-workspace'
+      - run:
+          name: Verify installer identity and import to updates.a-j.app
+          command: timeout 20m node .circleci/import-windows.cjs
+          no_output_timeout: 20m
 
 workflows:
   build:
@@ -262,4 +286,10 @@ workflows:
       - build-windows:
           requires:
             - runtime-windows
+          filters: *branch-only
+      - import-windows:
+          requires:
+            - build-windows
+          context:
+            - lobsterai-windows-updates-import
           filters: *branch-only

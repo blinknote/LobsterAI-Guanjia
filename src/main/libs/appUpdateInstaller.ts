@@ -1,4 +1,5 @@
 import { exec, execFile, spawn } from 'child_process';
+import crypto from 'crypto';
 import { app, session, shell } from 'electron';
 import fs from 'fs';
 import path from 'path';
@@ -27,6 +28,11 @@ export interface AppUpdateDownloadProgress {
 export interface AppUpdateDownloadResult {
   filePath: string;
   windowsInstallerUrlPolicyReceipt?: WindowsInstallerUrlPolicyReceipt;
+}
+
+export interface DownloadUpdateOptions {
+  expectedSize?: number;
+  expectedSha256?: string;
 }
 
 export const WindowsInstallerLauncherFallback = {
@@ -81,10 +87,21 @@ const PROGRESS_THROTTLE_MS = 200;
 /** Abort download if no data received for this duration (ms). */
 const DOWNLOAD_INACTIVITY_TIMEOUT_MS = 60_000;
 
+async function computeFileSha256(filePath: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const hash = crypto.createHash('sha256');
+    const stream = fs.createReadStream(filePath);
+    stream.on('error', reject);
+    stream.on('data', chunk => hash.update(chunk));
+    stream.on('end', () => resolve(hash.digest('hex').toLowerCase()));
+  });
+}
+
 export async function downloadUpdate(
   url: string,
   source: AppUpdateSource,
   onProgress: (progress: AppUpdateDownloadProgress) => void,
+  options?: DownloadUpdateOptions,
 ): Promise<AppUpdateDownloadResult> {
   if (activeDownloadController) {
     throw new Error('A download is already in progress');
@@ -227,6 +244,15 @@ export async function downloadUpdate(
     }
     if (total && Number.isFinite(total) && stat.size !== total) {
       throw new Error(`Download incomplete: expected ${total} bytes but got ${stat.size}`);
+    }
+    if (options?.expectedSize != null && Number.isFinite(options.expectedSize) && stat.size !== options.expectedSize) {
+      throw new Error(`Download incomplete: expected ${options.expectedSize} bytes but got ${stat.size}`);
+    }
+    if (options?.expectedSha256) {
+      const actualHash = await computeFileSha256(downloadPath);
+      if (actualHash.toLowerCase() !== options.expectedSha256.toLowerCase()) {
+        throw new Error(`Downloaded file hash mismatch: expected ${options.expectedSha256} but got ${actualHash}`);
+      }
     }
 
     // Rename to final path (atomic on same filesystem)

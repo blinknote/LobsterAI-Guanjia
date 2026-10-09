@@ -46,6 +46,14 @@ export const APP_UPDATE_FILE_INVALID_ERROR = 'update-file-invalid';
 
 export const APP_UPDATE_GRAY_UNAVAILABLE_ERROR = 'update-gray-unavailable';
 
+export const APP_UPDATE_DEV_REVOKED_ERROR = 'update-dev-revoked';
+export const APP_UPDATE_DEV_UNTRUSTED_ERROR = 'update-dev-untrusted';
+export const APP_UPDATE_DEV_OFFLINE_DISALLOWED_ERROR = 'update-dev-offline-disallowed';
+export const APP_UPDATE_DEV_INSTALL_LOCKED_ERROR = 'update-dev-install-locked';
+export const APP_UPDATE_DEV_SCOPE_MISMATCH_ERROR = 'update-dev-scope-mismatch';
+export const APP_UPDATE_DEV_STORE_CORRUPTED_ERROR = 'update-dev-store-corrupted';
+export const APP_UPDATE_DEV_SIGNATURE_INVALID_ERROR = 'update-dev-signature-invalid';
+
 export const AppUpdateChannel = { Gray: 'gray' } as const;
 
 /** Local eligibility context only; never contains an access token. */
@@ -74,6 +82,7 @@ export interface AppUpdateInfo {
   changeLog: { zh: ChangeLogEntry; en: ChangeLogEntry };
   url: string;
   gray?: AppUpdateGrayContext;
+  dev?: import('./devUpdateTypes').DevUpdateContext;
 }
 
 export interface AppUpdateRuntimeState {

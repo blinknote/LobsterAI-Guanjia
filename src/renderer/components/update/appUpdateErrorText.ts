@@ -1,4 +1,11 @@
 import {
+  APP_UPDATE_DEV_INSTALL_LOCKED_ERROR,
+  APP_UPDATE_DEV_OFFLINE_DISALLOWED_ERROR,
+  APP_UPDATE_DEV_REVOKED_ERROR,
+  APP_UPDATE_DEV_SCOPE_MISMATCH_ERROR,
+  APP_UPDATE_DEV_SIGNATURE_INVALID_ERROR,
+  APP_UPDATE_DEV_STORE_CORRUPTED_ERROR,
+  APP_UPDATE_DEV_UNTRUSTED_ERROR,
   APP_UPDATE_ELEVATION_DECLINED_ERROR,
   APP_UPDATE_FILE_INVALID_ERROR,
   APP_UPDATE_GRAY_UNAVAILABLE_ERROR,
@@ -11,6 +18,27 @@ import { i18nService } from '../../services/i18n';
  * an OS/network message shown as-is.
  */
 export const formatAppUpdateError = (message: string): string => {
+  if (message.startsWith(APP_UPDATE_DEV_REVOKED_ERROR)) {
+    return i18nService.t('updateDevRevoked');
+  }
+  if (message.startsWith(APP_UPDATE_DEV_UNTRUSTED_ERROR)) {
+    return i18nService.t('updateDevUntrusted');
+  }
+  if (message.startsWith(APP_UPDATE_DEV_OFFLINE_DISALLOWED_ERROR)) {
+    return i18nService.t('updateDevOfflineDisallowed');
+  }
+  if (message.startsWith(APP_UPDATE_DEV_INSTALL_LOCKED_ERROR)) {
+    return i18nService.t('updateDevInstallLocked');
+  }
+  if (message.startsWith(APP_UPDATE_DEV_SCOPE_MISMATCH_ERROR)) {
+    return i18nService.t('updateDevScopeMismatch');
+  }
+  if (message.startsWith(APP_UPDATE_DEV_STORE_CORRUPTED_ERROR)) {
+    return i18nService.t('updateDevStoreCorrupted');
+  }
+  if (message.startsWith(APP_UPDATE_DEV_SIGNATURE_INVALID_ERROR)) {
+    return i18nService.t('updateDevSignatureInvalid');
+  }
   if (message === APP_UPDATE_GRAY_UNAVAILABLE_ERROR) {
     return i18nService.t('updateGrayUnavailable');
   }

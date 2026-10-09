@@ -184,35 +184,11 @@ function Install-NodeToolchain {
 }
 
 function Collect-Artifacts {
-    $artifactDir = Join-Path $PWD.Path "artifacts\windows"
-    if (-not (Test-Path $artifactDir)) {
-        New-Item -ItemType Directory -Force -Path $artifactDir | Out-Null
+    Write-Host "==> Binding newly produced full NSIS Dev installer and generating UPDATE_IDENTITY.json..."
+    & node .circleci\artifact-identity.cjs collect
+    if ($LASTEXITCODE -ne 0) {
+        throw "artifact-identity.cjs collect failed with exit code $LASTEXITCODE"
     }
-
-    $exeFiles = @(Get-ChildItem -Path "release\*.exe" -File -ErrorAction SilentlyContinue)
-    if ($exeFiles.Count -eq 0) {
-        throw "No release exe files found under release\*.exe"
-    }
-    foreach ($file in $exeFiles) {
-        if ($file.Length -le 0) {
-            throw "Release artifact is empty: $($file.FullName)"
-        }
-    }
-
-    $commitHash = & git rev-parse HEAD
-    $infoFile = Join-Path $artifactDir "BUILD_INFO.txt"
-    "Commit: $commitHash" | Out-File -FilePath $infoFile -Encoding utf8
-    "BuildDate: $((Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ"))" | Add-Content -Path $infoFile
-    "" | Add-Content -Path $infoFile
-
-    foreach ($file in $exeFiles) {
-        Write-Host "==> Copying artifact: $($file.Name) ($($file.Length) bytes)"
-        Copy-Item -Path $file.FullName -Destination (Join-Path $artifactDir $file.Name) -Force
-        $sha = (Get-FileHash -Path $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
-        "$sha  $($file.Name)" | Add-Content -Path $infoFile
-        Write-Host "    SHA256: $sha"
-    }
-
     Write-Host "==> Artifact collection completed successfully."
 }
 
@@ -327,6 +303,7 @@ function Invoke-BuildAction {
                     Invoke-CommandWithHardTimeout -Command "npm run compile:electron" -TimeoutMinutes 5
                     Invoke-CommandWithHardTimeout -Command "node .circleci\output-cache.cjs capture client --build-succeeded --compile-succeeded" -TimeoutMinutes 55
                 }
+                Invoke-CommandWithHardTimeout -Command "node .circleci\artifact-identity.cjs stamp" -TimeoutMinutes 1
             }
             "skills" {
                 Invoke-CommandWithHardTimeout -Command "node .circleci\output-cache.cjs restore skills" -TimeoutMinutes 55
@@ -347,6 +324,7 @@ function Invoke-BuildAction {
                 }
             }
             "package" {
+                Invoke-CommandWithHardTimeout -Command "node .circleci\artifact-identity.cjs stamp" -TimeoutMinutes 1
                 Invoke-CommandWithHardTimeout -Command "node_modules\.bin\electron-builder.cmd --win --x64 --config scripts/electron-builder-config.cjs --publish never" -TimeoutMinutes 15
             }
             "artifacts" {
