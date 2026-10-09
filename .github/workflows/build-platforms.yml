@@ -13,11 +13,6 @@ on:
         required: true
         default: true
         type: boolean
-      build_linux:
-        description: 'Build Linux'
-        required: true
-        default: true
-        type: boolean
   push:
     branches:
       - main
@@ -46,30 +41,81 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24.x'
-      - uses: actions/cache@v4
+
+      # 1. npm 下载缓存
+      - name: Cache npm
+        uses: actions/cache@v4
         with:
           path: ~/.npm
           key: npm-${{ runner.os }}-${{ hashFiles('package.json') }}
           restore-keys: npm-${{ runner.os }}-
-      
+
+      # 2. pnpm store 缓存
+      - name: Cache pnpm Store
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/pnpm/store
+          key: pnpm-${{ runner.os }}-${{ hashFiles('package.json') }}
+          restore-keys: pnpm-${{ runner.os }}-
+
+      # 3. Electron prebuilt 与 electron-builder 缓存
+      - name: Cache Electron & Electron-builder Tools
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/Library/Caches/electron
+            ~/Library/Caches/electron-builder
+          key: electron-tools-${{ runner.os }}-${{ hashFiles('package.json') }}
+          restore-keys: electron-tools-${{ runner.os }}-
+
+      # 4. OpenClaw 18 个扩展插件缓存
+      - name: Cache OpenClaw Plugins
+        uses: actions/cache@v4
+        with:
+          path: vendor/openclaw-plugins
+          key: openclaw-plugins-${{ hashFiles('package.json') }}
+          restore-keys: openclaw-plugins-
+
+      # 5. OpenClaw 编译后运行时缓存 (mac-arm64)
+      - name: Cache OpenClaw Runtime (mac-arm64)
+        uses: actions/cache@v4
+        with:
+          path: vendor/openclaw-runtime/mac-arm64
+          key: openclaw-runtime-mac-arm64-${{ hashFiles('scripts/patches/**', 'package.json', 'scripts/*openclaw*') }}
+          restore-keys: openclaw-runtime-mac-arm64-
+
+      # 6. Skill 依赖缓存 (SKILLs/*/node_modules)
+      - name: Cache Skill Dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            SKILLs/imap-smtp-email/node_modules
+            SKILLs/pptx/node_modules
+            SKILLs/web-search/node_modules
+          key: skill-deps-${{ runner.os }}-${{ hashFiles('SKILLs/*/package.json') }}
+          restore-keys: skill-deps-${{ runner.os }}-
+
       - run: npm install -g pnpm
       - name: Install Dependencies
         timeout-minutes: 10
         run: npm install
-      
-      # 设置 OpenClaw runtime (如果需要)
+
+      # 设置 OpenClaw runtime (如已命中缓存直接建立 current 软链接)
       - name: Setup OpenClaw Runtime
         run: |
           if [ -d "vendor/openclaw-runtime/current" ]; then
-            echo "✓ OpenClaw runtime found"
+            echo "✓ OpenClaw runtime already linked"
+          elif [ -d "vendor/openclaw-runtime/mac-arm64" ]; then
+            node scripts/sync-openclaw-runtime-current.cjs mac-arm64
+            echo "✓ Synced cached mac-arm64 runtime to current"
           else
-            echo "⚠ OpenClaw runtime not found, build may fail"
+            echo "ℹ OpenClaw runtime will be built from source"
           fi
-      
+
       - name: Build macOS
         timeout-minutes: 50
         run: npm run dist:mac -- --publish never
-      
+
       - uses: actions/upload-artifact@v4
         with:
           name: macos-build
@@ -91,28 +137,99 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24.x'
-      - uses: actions/cache@v4
+
+      # 1. npm 下载缓存
+      - name: Cache npm
+        uses: actions/cache@v4
         with:
           path: ~\AppData\Local\npm-cache
           key: npm-${{ runner.os }}-${{ hashFiles('package.json') }}
           restore-keys: npm-${{ runner.os }}-
-      
+
+      # 2. pnpm store 缓存
+      - name: Cache pnpm Store
+        uses: actions/cache@v4
+        with:
+          path: ~\AppData\Local\pnpm\store
+          key: pnpm-${{ runner.os }}-${{ hashFiles('package.json') }}
+          restore-keys: pnpm-${{ runner.os }}-
+
+      # 3. Electron prebuilt 与 electron-builder 缓存
+      - name: Cache Electron & Electron-builder Tools
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~\AppData\Local\electron\Cache
+            ~\AppData\Local\electron-builder\Cache
+          key: electron-tools-${{ runner.os }}-${{ hashFiles('package.json') }}
+          restore-keys: electron-tools-${{ runner.os }}-
+
+      # 4. Windows 便携外部运行时 (Python & MinGit) 缓存
+      - name: Cache Windows External Runtimes
+        uses: actions/cache@v4
+        with:
+          path: |
+            resources/python-win
+            resources/mingit
+          key: win-ext-runtimes-${{ hashFiles('scripts/setup-python-runtime.js', 'scripts/setup-mingit.js') }}
+          restore-keys: win-ext-runtimes-
+
+      # 5. OpenClaw 18 个扩展插件缓存
+      - name: Cache OpenClaw Plugins
+        uses: actions/cache@v4
+        with:
+          path: vendor/openclaw-plugins
+          key: openclaw-plugins-${{ hashFiles('package.json') }}
+          restore-keys: openclaw-plugins-
+
+      # 6. OpenClaw 编译后运行时缓存 (win-x64)
+      - name: Cache OpenClaw Runtime (win-x64)
+        uses: actions/cache@v4
+        with:
+          path: vendor/openclaw-runtime/win-x64
+          key: openclaw-runtime-win-x64-${{ hashFiles('scripts/patches/**', 'package.json', 'scripts/*openclaw*') }}
+          restore-keys: openclaw-runtime-win-x64-
+
+      # 7. Skill 依赖缓存 (SKILLs/*/node_modules)
+      - name: Cache Skill Dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            SKILLs/imap-smtp-email/node_modules
+            SKILLs/pptx/node_modules
+            SKILLs/web-search/node_modules
+          key: skill-deps-${{ runner.os }}-${{ hashFiles('SKILLs/*/package.json') }}
+          restore-keys: skill-deps-${{ runner.os }}-
+
       - run: npm install -g pnpm
       - name: Install Dependencies
         timeout-minutes: 10
         run: npm install
-      
+
       # Windows 需要 Python 运行时
       - name: Setup Python Runtime
         timeout-minutes: 10
         run: npm run setup:python-runtime
         env:
           LOBSTERAI_PORTABLE_PYTHON_ARCHIVE: ${{ secrets.WINDOWS_PYTHON_ARCHIVE }}
-      
+
+      # 设置 OpenClaw runtime (如已命中缓存直接建立 current 软链接)
+      - name: Setup OpenClaw Runtime
+        shell: pwsh
+        run: |
+          if (Test-Path "vendor/openclaw-runtime/current") {
+            Write-Host "✓ OpenClaw runtime already linked"
+          } elseif (Test-Path "vendor/openclaw-runtime/win-x64") {
+            node scripts/sync-openclaw-runtime-current.cjs win-x64
+            Write-Host "✓ Synced cached win-x64 runtime to current"
+          } else {
+            Write-Host "ℹ OpenClaw runtime will be built from source"
+          }
+
       - name: Build Windows
         timeout-minutes: 50
         run: npm run dist:win -- --publish never
-      
+
       - uses: actions/upload-artifact@v4
         with:
           name: windows-build
@@ -120,71 +237,28 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  # ========== Linux 构建 ==========
-  build-linux:
-    if: ${{ github.event_name == 'push' || inputs.build_linux }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
-    env:
-      CSC_IDENTITY_AUTO_DISCOVERY: "false"
-      LOBSTERAI_UNSIGNED_BUILD: "1"
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '24.x'
-      - uses: actions/cache@v4
-        with:
-          path: ~/.npm
-          key: npm-${{ runner.os }}-${{ hashFiles('package.json') }}
-          restore-keys: npm-${{ runner.os }}-
-      
-      - name: Install System Dependencies
-        timeout-minutes: 10
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libgtk-3-0 libnotify4 libnss3 libxss1 libxtst6 xdg-utils libatspi2.0-0 libuuid1 libsecret-1-0
-      
-      - run: npm install -g pnpm
-      - name: Install Node Dependencies
-        timeout-minutes: 10
-        run: npm install
-      
-      - name: Build Linux
-        timeout-minutes: 50
-        run: npm run dist:linux -- --publish never
-      
-      - uses: actions/upload-artifact@v4
-        with:
-          name: linux-build
-          path: |
-            release/*.AppImage
-            release/*.deb
-          if-no-files-found: error
-          retention-days: 7
-
   # ========== 创建 Release ==========
   create-release:
-    needs: [build-macos, build-windows, build-linux]
+    needs: [build-macos, build-windows]
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Download All Artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
-      
+
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
           files: |
             artifacts/macos-build/*.dmg
             artifacts/windows-build/*.exe
-            artifacts/linux-build/*
           draft: true
           prerelease: ${{ contains(github.ref, '-beta') || contains(github.ref, '-alpha') || contains(github.ref, '-rc') }}
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
