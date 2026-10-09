@@ -28,6 +28,8 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
   NODE_OPTIONS: "--max-old-space-size=6144"
   CSC_IDENTITY_AUTO_DISCOVERY: "false"
+  LOBSTERAI_UNSIGNED_BUILD: "1"
+  LOBSTERAI_UNSIGNED_WINDOWS: "1"
 
 jobs:
   # ========== macOS 构建 ==========
@@ -38,6 +40,7 @@ jobs:
     env:
       NODE_OPTIONS: "--max-old-space-size=6144"
       CSC_IDENTITY_AUTO_DISCOVERY: "false"
+      LOBSTERAI_UNSIGNED_BUILD: "1"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -65,7 +68,7 @@ jobs:
       
       - name: Build macOS
         timeout-minutes: 50
-        run: npm run dist:mac -- --publish never --config.afterSign=null --config.mac.identity=null
+        run: npm run dist:mac -- --publish never
       
       - uses: actions/upload-artifact@v4
         with:
@@ -81,6 +84,8 @@ jobs:
     timeout-minutes: 60
     env:
       CSC_IDENTITY_AUTO_DISCOVERY: "false"
+      LOBSTERAI_UNSIGNED_WINDOWS: "1"
+      LOBSTERAI_UNSIGNED_BUILD: "1"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -122,6 +127,7 @@ jobs:
     timeout-minutes: 60
     env:
       CSC_IDENTITY_AUTO_DISCOVERY: "false"
+      LOBSTERAI_UNSIGNED_BUILD: "1"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

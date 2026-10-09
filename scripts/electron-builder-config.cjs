@@ -112,6 +112,22 @@ if (isDevBuild) {
   delete process.env.LOBSTERAI_DEV_BUILD;
 }
 
+// Clean up empty or whitespace certificate env vars from CI or dotenv to prevent
+// electron-builder from interpreting an empty string as a path to current directory.
+for (const envKey of [
+  'CSC_LINK',
+  'WIN_CSC_LINK',
+  'CSC_KEY_PASSWORD',
+  'WIN_CSC_KEY_PASSWORD',
+  'APPLE_ID',
+  'APPLE_APP_SPECIFIC_PASSWORD',
+  'APPLE_TEAM_ID',
+]) {
+  if (process.env[envKey] !== undefined && !process.env[envKey].trim()) {
+    delete process.env[envKey];
+  }
+}
+
 // Sign every Windows binary electron-builder produces (LobsterAI.exe, the
 // uninstaller, the installer) through the internal Youdao signing service,
 // not just the final Setup.exe: the unsigned inner exe is what security
@@ -122,7 +138,7 @@ config.win = {
   sign: path.join(__dirname, 'win-sign.cjs'),
 };
 
-if (process.env.LOBSTERAI_UNSIGNED_WINDOWS === '1') {
+if (process.env.LOBSTERAI_UNSIGNED_WINDOWS === '1' || process.env.LOBSTERAI_UNSIGNED_BUILD === '1') {
   // No certificate or custom signer makes WinPackager.sign return false,
   // while resource/icon editing and installer hooks remain enabled.
   config.win.sign = null;
@@ -137,6 +153,21 @@ if (process.env.LOBSTERAI_UNSIGNED_WINDOWS === '1') {
   // Clear links here too, after electron-builder has loaded dotenv files.
   delete process.env.CSC_LINK;
   delete process.env.WIN_CSC_LINK;
+}
+
+if (
+  process.env.LOBSTERAI_UNSIGNED_MAC === '1' ||
+  process.env.LOBSTERAI_UNSIGNED_BUILD === '1' ||
+  process.env.CSC_IDENTITY_AUTO_DISCOVERY === 'false'
+) {
+  config.afterSign = null;
+  config.mac = {
+    ...config.mac,
+    identity: null,
+  };
+  delete config.mac?.cscLink;
+  delete config.cscLink;
+  delete process.env.CSC_LINK;
 }
 
 delete config.extraResources;
