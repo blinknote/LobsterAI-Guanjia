@@ -99,10 +99,18 @@ async function bundleOpenClawStartupMigration(runtimeDir, openclawSrc, selectedE
       setup(build) {
         // Doctor's note formatter imports these packages, which the desktop
         // runtime does not ship. Inline their complete pure-JS dependency trees.
-        build.onResolve({ filter: /^(?:mdast-util-from-markdown|mdast-util-gfm-table|micromark-extension-gfm-table)$/ }, args => ({
-          path: require.resolve(args.path, { paths: [args.resolveDir] }),
-          namespace: 'doctor-markdown',
-        }));
+        build.onResolve({ filter: /^(?:mdast-util-from-markdown|mdast-util-gfm-table|micromark-extension-gfm-table)$/ }, args => {
+          let resolvedPath;
+          try {
+            resolvedPath = require.resolve(args.path, { paths: [args.resolveDir] });
+          } catch {
+            resolvedPath = require.resolve(args.path, { paths: [rootDir, path.join(rootDir, 'node_modules')] });
+          }
+          return {
+            path: resolvedPath,
+            namespace: 'doctor-markdown',
+          };
+        });
         build.onLoad({ filter: /.*/, namespace: 'doctor-markdown' }, async args => {
           const result = await esbuild.build({
             entryPoints: [args.path], bundle: true, platform: 'node',

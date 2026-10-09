@@ -97,18 +97,21 @@ jobs:
       # 设置 OpenClaw runtime (如已命中缓存直接建立 current 软链接)
       - name: Setup OpenClaw Runtime
         run: |
-          if [ -d "vendor/openclaw-runtime/current" ]; then
-            echo "✓ OpenClaw runtime already linked"
-          elif [ -d "vendor/openclaw-runtime/mac-arm64" ]; then
+          if [ -f "vendor/openclaw-runtime/mac-arm64/gateway.asar" ]; then
             node scripts/sync-openclaw-runtime-current.cjs mac-arm64
-            echo "✓ Synced cached mac-arm64 runtime to current"
+            echo "✓ OpenClaw runtime mac-arm64 cache hit, synced to current"
           else
-            echo "ℹ OpenClaw runtime will be built from source"
+            echo "ℹ OpenClaw runtime cache missed, building from source"
+            npm run openclaw:runtime:mac-arm64
           fi
 
       - name: Build macOS
         timeout-minutes: 50
-        run: npm run dist:mac -- --publish never
+        run: |
+          npm run build
+          npm run compile:electron
+          npm run build:skills
+          npx electron-builder --mac --arm64 --config scripts/electron-builder-config.cjs --publish never
 
       - uses: actions/upload-artifact@v4
         with:
@@ -204,13 +207,12 @@ jobs:
       - name: Setup OpenClaw Runtime
         shell: pwsh
         run: |
-          if (Test-Path "vendor/openclaw-runtime/current") {
-            Write-Host "✓ OpenClaw runtime already linked"
-          } elseif (Test-Path "vendor/openclaw-runtime/win-x64") {
+          if (Test-Path "vendor/openclaw-runtime/win-x64/gateway.asar") {
             node scripts/sync-openclaw-runtime-current.cjs win-x64
-            Write-Host "✓ Synced cached win-x64 runtime to current"
+            Write-Host "✓ OpenClaw runtime win-x64 cache hit, synced to current"
           } else {
-            Write-Host "ℹ OpenClaw runtime will be built from source"
+            Write-Host "ℹ OpenClaw runtime cache missed, building from source"
+            npm run openclaw:runtime:win-x64
           }
 
       # 在打包前生成 build-identity 标记 (打包进 app.asar)
@@ -219,7 +221,14 @@ jobs:
 
       - name: Build Windows
         timeout-minutes: 50
-        run: npm run dist:win -- --publish never
+        shell: bash
+        run: |
+          npm run verify:installer-patches
+          npm run setup:python-runtime
+          npm run build
+          npm run compile:electron
+          npm run build:skills
+          npx electron-builder --win --x64 --config scripts/electron-builder-config.cjs --publish never
 
       # 收集 Windows 安装包与身份元数据 (生成 UPDATE_IDENTITY.json)
       - name: Collect Windows Installer & Identity
