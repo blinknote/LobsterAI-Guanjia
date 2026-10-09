@@ -14,7 +14,7 @@ const EXPECTED_PACKAGE_TYPE = 'nsis-full';
 const EXPECTED_PE_MACHINE = 34404; // 0x8664 = IMAGE_FILE_MACHINE_AMD64
 const MAX_INSTALLER_SIZE = 1024 * 1024 * 1024; // 1 GiB hard limit
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const APPROVED_PROJECT_ID = '465ea2ee-bc38-4dec-a593-e96eb637d630';
+const APPROVED_PROJECT_ID = '0482e18c-23dd-4029-a3f8-237687fe401d';
 const REQUIRED_BRANCH = 'feat/smartbutler-integration';
 
 /**
