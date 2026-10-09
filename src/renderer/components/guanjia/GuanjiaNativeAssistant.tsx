@@ -8,24 +8,24 @@ import {
   GuanjiaPendingAction,
   OpenAssistantParams,
 } from '../../services/guanjiaNativeService';
-import { useGuanjiaSession } from '../../services/guanjiaSession';
+import { guanjiaSessionService, useGuanjiaSession } from '../../services/guanjiaSession';
 import type { CoworkMessage } from '../../types/cowork';
 import MarkdownContent from '../MarkdownContent';
 
 function decodeVerifiedMemberAssets(action: GuanjiaPendingAction) {
   const rawDetails = action.rawDetails as Record<string, unknown> | undefined;
   const assets = (action.verifiedAssets || rawDetails?.verified_member_assets || rawDetails?.verifiedAssets) as Record<string, unknown> | undefined;
-  if (!assets && !action.memberName && action.amount == null) return null;
+  if (!assets || assets.verified_from_db !== true) return null;
 
-  const rawMemberName = action.memberName || assets?.member_name || assets?.memberName;
-  const balance = assets?.balance ?? assets?.total_balance;
-  const principal = assets?.principal ?? assets?.principal_balance;
-  const bonus = assets?.bonus ?? assets?.gift_balance ?? assets?.bonus_balance;
-  const remainingTimes = assets?.remainingTimes ?? assets?.remaining_times;
-  const originalAmount = assets?.originalAmount ?? assets?.original_amount ?? action.amount;
-  const discount = assets?.discount;
+  const rawMemberName = assets.member_name;
+  const balance = assets.current_total_balance;
+  const principal = assets.principal_balance;
+  const bonus = assets.bonus_balance;
+  const remainingTimes = assets.remaining_times;
+  const deductAmount = assets.deduct_amount;
+  const afterBalance = assets.after_total_balance;
 
-  if (!rawMemberName && balance == null && principal == null && bonus == null && remainingTimes == null && originalAmount == null && discount == null) {
+  if (!rawMemberName && balance == null && principal == null && bonus == null && remainingTimes == null && deductAmount == null && afterBalance == null) {
     return null;
   }
 
@@ -35,8 +35,8 @@ function decodeVerifiedMemberAssets(action: GuanjiaPendingAction) {
     principal: principal != null ? String(principal) : undefined,
     bonus: bonus != null ? String(bonus) : undefined,
     remainingTimes: remainingTimes != null ? String(remainingTimes) : undefined,
-    originalAmount: originalAmount != null ? String(originalAmount) : undefined,
-    discount: discount != null ? String(discount) : undefined,
+    deductAmount: deductAmount != null ? String(deductAmount) : undefined,
+    afterBalance: afterBalance != null ? String(afterBalance) : undefined,
   };
 }
 
@@ -119,6 +119,11 @@ export const GuanjiaNativeAssistant: React.FC<GuanjiaNativeAssistantProps> = ({
   const [pendingActions, setPendingActions] = useState<GuanjiaPendingAction[]>([]);
   const [actionProcessingId, setActionProcessingId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const pendingRequestRef = useRef<symbol | null>(null);
+  const queuedRefreshRef = useRef<boolean>(false);
+  const actionProcessingRef = useRef<string | null>(null);
+  const terminalRunIdsRef = useRef<Set<string>>(new Set());
+  const actionErrorRunIdRef = useRef<string | null>(null);
   const [serviceError, setServiceError] = useState<string | null>(null);
 
   const drawerRef = useRef<HTMLElement>(null);
@@ -142,6 +147,11 @@ export const GuanjiaNativeAssistant: React.FC<GuanjiaNativeAssistantProps> = ({
     hydrateRevisionRef.current += 1;
     isTerminalRef.current = false;
     pendingOptimisticIdRef.current = null;
+    pendingRequestRef.current = null;
+    queuedRefreshRef.current = false;
+    actionProcessingRef.current = null;
+    terminalRunIdsRef.current.clear();
+    actionErrorRunIdRef.current = null;
     if (reconcileTimerRef.current) {
       clearTimeout(reconcileTimerRef.current);
       reconcileTimerRef.current = null;
@@ -249,20 +259,90 @@ export const GuanjiaNativeAssistant: React.FC<GuanjiaNativeAssistantProps> = ({
     };
   }, [isExpanded]);
 
-  // 刷新待确认动作（带 epoch 校验）
+  // 刷新待确认动作（带 epoch/session 与 generation 校验，单飞保护）
   const refreshPendingActions = useCallback(
     async (activeSessionId?: string) => {
       const targetId = activeSessionId || sessionIdRef.current;
       if (!targetId) return;
+      if (pendingRequestRef.current) {
+        queuedRefreshRef.current = true;
+        return;
+      }
+      const snapshot = guanjiaSessionService.getSnapshot();
+      if (snapshot.status !== 'authenticated' || snapshot.generation !== guanjiaSession.generation) return;
+
       const epoch = scopeEpochRef.current;
-      const res = await guanjiaNativeService.getPendingRuns(targetId);
-      if (scopeEpochRef.current !== epoch) return;
-      const actions = res.runs || res.pendingActions;
-      if (res.success && actions) {
-        setPendingActions(actions);
+      const request = Symbol();
+      pendingRequestRef.current = request;
+
+      try {
+        const res = await guanjiaNativeService.getPendingRuns(targetId);
+        if (scopeEpochRef.current !== epoch || sessionIdRef.current !== targetId) return;
+        const currentSnapshot = guanjiaSessionService.getSnapshot();
+        if (currentSnapshot.status !== 'authenticated' || currentSnapshot.generation !== guanjiaSession.generation) {
+          setPendingActions([]);
+          return;
+        }
+
+        if (res.success) {
+          const allActions = res.pendingActions || [];
+          for (const item of allActions) {
+            const isTerminalReceipt =
+              (item.status === 'confirmed' || item.status === 'failed') &&
+              item.resultPersisted === true;
+            if (isTerminalReceipt) {
+              terminalRunIdsRef.current.add(item.runId);
+              if (actionErrorRunIdRef.current === item.runId) {
+                actionErrorRunIdRef.current = null;
+                setActionError(null);
+              }
+            }
+          }
+
+          const incoming = allActions.filter(
+            item =>
+              item.status !== 'confirmed' &&
+              !terminalRunIdsRef.current.has(item.runId) &&
+              !(item.status === 'failed' && item.resultPersisted === true)
+          );
+          setPendingActions(prev => {
+            const prevMap = new Map(prev.map(item => [item.runId, item]));
+            return incoming.filter(inc => !terminalRunIdsRef.current.has(inc.runId) && inc.status !== 'confirmed').map(inc => {
+              const existing = prevMap.get(inc.runId);
+              if (existing) {
+                const shouldPreserveNonPending =
+                  actionProcessingRef.current === inc.runId || existing.status !== 'pending';
+                if (shouldPreserveNonPending && inc.status === 'pending') {
+                  return existing;
+                }
+              }
+              return inc;
+            });
+          });
+        } else {
+          setPendingActions(prev =>
+            prev.filter(item => item.status !== 'pending' && item.status !== 'confirmed' && !terminalRunIdsRef.current.has(item.runId))
+          );
+        }
+      } catch {
+        if (scopeEpochRef.current === epoch && sessionIdRef.current === targetId) {
+          setPendingActions(prev =>
+            prev.filter(item => item.status !== 'pending' && item.status !== 'confirmed' && !terminalRunIdsRef.current.has(item.runId))
+          );
+        }
+      } finally {
+        if (pendingRequestRef.current === request) {
+          pendingRequestRef.current = null;
+          if (queuedRefreshRef.current) {
+            queuedRefreshRef.current = false;
+            if (scopeEpochRef.current === epoch && sessionIdRef.current === targetId) {
+              void refreshPendingActions(targetId);
+            }
+          }
+        }
       }
     },
-    []
+    [guanjiaSession.generation]
   );
 
   // 执行水合与调和（受 epoch 与 revision 守卫保护）
@@ -438,6 +518,44 @@ export const GuanjiaNativeAssistant: React.FC<GuanjiaNativeAssistantProps> = ({
     };
   }, [scopeEpoch, performReconciliation, triggerCoalescedReconcile, updateMessages]);
 
+  // 监听原生 onPendingChanged 事件，单飞查询防环，不更新 streaming
+  useEffect(() => {
+    const nativeApi = (window as unknown as { electron?: { guanjia?: { native?: { onPendingChanged?: (cb: (actions: GuanjiaPendingAction[]) => void) => () => void } } } })?.electron?.guanjia?.native;
+    if (typeof nativeApi?.onPendingChanged !== 'function') return;
+
+    const currentEpoch = scopeEpoch;
+    const unsub = nativeApi.onPendingChanged(() => {
+      if (scopeEpochRef.current !== currentEpoch) return;
+      const activeId = sessionIdRef.current;
+      if (!activeId) return;
+      void refreshPendingActions(activeId);
+    });
+
+    return () => {
+      unsub();
+    };
+  }, [scopeEpoch, refreshPendingActions]);
+
+  // 仅在存在 in_progress / unknown 卡片需要终端状态跟进时启动轮询（无常驻渲染循环）
+  const hasInProgressOrUnknown = pendingActions.some(
+    a => (a.status === 'in_progress' || a.status === 'unknown') && !terminalRunIdsRef.current.has(a.runId)
+  );
+
+  useEffect(() => {
+    if (!hasInProgressOrUnknown) return;
+    const currentEpoch = scopeEpoch;
+    const interval = setInterval(() => {
+      if (scopeEpochRef.current !== currentEpoch) return;
+      const activeId = sessionIdRef.current;
+      if (!activeId) return;
+      void refreshPendingActions(activeId);
+    }, 2500);
+
+    return () => {
+      clearInterval(interval);
+    };
+  }, [hasInProgressOrUnknown, scopeEpoch, refreshPendingActions]);
+
   // 响应来自外部或内嵌网页的打开助手负载，检测 assistantType 变化以切换作用域
   useEffect(() => {
     if (!openAssistantPayload) return;
@@ -557,55 +675,96 @@ export const GuanjiaNativeAssistant: React.FC<GuanjiaNativeAssistantProps> = ({
 
   // 确认执行真实待确认动作
   const handleConfirmAction = async (action: GuanjiaPendingAction) => {
+    if (action.status !== 'pending') return;
+    if (actionProcessingRef.current || actionProcessingId) return;
+    const snapshot = guanjiaSessionService.getSnapshot();
+    if (snapshot.status !== 'authenticated' || snapshot.generation !== guanjiaSession.generation) return;
+
+    actionProcessingRef.current = action.runId;
     setActionProcessingId(action.runId);
-    setActionError(null);
+    if (actionErrorRunIdRef.current === action.runId) {
+      actionErrorRunIdRef.current = null;
+      setActionError(null);
+    }
     const opEpoch = scopeEpochRef.current;
+    const targetSessionId = sessionIdRef.current;
     try {
       const res = await guanjiaNativeService.confirmRun(action.runId);
-      if (scopeEpochRef.current !== opEpoch) return;
-      const nextStatus =
-        res.status === 'completed'
-          ? 'confirmed'
-          : res.status === 'failed'
-          ? 'failed'
-          : res.status === 'in_progress'
-          ? 'in_progress'
-          : res.status === 'unknown'
-          ? 'unknown'
-          : 'pending';
-      setPendingActions(prev =>
-        prev.map(item =>
-          item.runId === action.runId ? { ...item, status: nextStatus } : item
-        )
+      if (scopeEpochRef.current !== opEpoch || sessionIdRef.current !== targetSessionId) return;
+      const isTerminalReceipt = Boolean(
+        (res.success && res.status === 'completed' && res.resultPersisted === true) ||
+        (res.status === 'failed' && res.resultPersisted === true)
       );
-      if (!res.success) {
-        setActionError(res.error || res.message || tGuanjia('guanjiaConfirmFailed'));
-      } else if (res.status === 'unknown') {
-        setActionError(tGuanjia('guanjiaPendingActionStatusUnknown'));
+      if (isTerminalReceipt) {
+        terminalRunIdsRef.current.add(action.runId);
+        if (actionErrorRunIdRef.current === action.runId) {
+          actionErrorRunIdRef.current = null;
+          setActionError(null);
+        }
+        setPendingActions(prev => prev.filter(item => item.runId !== action.runId));
+        if (targetSessionId) {
+          void refreshPendingActions(targetSessionId);
+        }
+      } else {
+        const nextStatus: GuanjiaPendingAction['status'] =
+          res.status === 'failed'
+            ? 'failed'
+            : res.status === 'in_progress'
+            ? 'in_progress'
+            : 'unknown';
+        setPendingActions(prev =>
+          prev.map(item =>
+            item.runId === action.runId ? { ...item, status: nextStatus } : item
+          )
+        );
+        if (!terminalRunIdsRef.current.has(action.runId)) {
+          if (!res.success) {
+            actionErrorRunIdRef.current = action.runId;
+            setActionError(res.error || res.message || tGuanjia('guanjiaConfirmFailed'));
+          } else if (res.status === 'unknown') {
+            actionErrorRunIdRef.current = action.runId;
+            setActionError(tGuanjia('guanjiaPendingActionStatusUnknown'));
+          }
+        }
       }
     } catch (err) {
-      if (scopeEpochRef.current !== opEpoch) return;
+      if (scopeEpochRef.current !== opEpoch || sessionIdRef.current !== targetSessionId) return;
+      if (terminalRunIdsRef.current.has(action.runId)) return;
       setPendingActions(prev =>
         prev.map(item => item.runId === action.runId ? { ...item, status: 'unknown' } : item)
       );
+      actionErrorRunIdRef.current = action.runId;
       setActionError(err instanceof Error ? err.message : String(err));
     } finally {
-      if (scopeEpochRef.current === opEpoch) {
+      if (scopeEpochRef.current === opEpoch && sessionIdRef.current === targetSessionId) {
+        if (actionProcessingRef.current === action.runId) {
+          actionProcessingRef.current = null;
+        }
         setActionProcessingId(current => (current === action.runId ? null : current));
       }
     }
   };
 
-  // 取消待确认动作：仅撤销宿主确认资格，保持未执行
+  // 取消待确认动作：仅撤销宿主确认资格，保持未执行；不可撤销已提交事务
   const handleCancelAction = async (action: GuanjiaPendingAction) => {
+    if (action.status !== 'pending') return;
+    if (actionProcessingRef.current || actionProcessingId) return;
+    const snapshot = guanjiaSessionService.getSnapshot();
+    if (snapshot.status !== 'authenticated' || snapshot.generation !== guanjiaSession.generation) return;
+
+    actionProcessingRef.current = action.runId;
     setActionProcessingId(action.runId);
-    setActionError(null);
+    if (actionErrorRunIdRef.current === `cancel:${action.runId}`) {
+      actionErrorRunIdRef.current = null;
+      setActionError(null);
+    }
     const opEpoch = scopeEpochRef.current;
+    const targetSessionId = sessionIdRef.current;
     try {
       const res = await guanjiaNativeService.cancelRun(action.runId);
-      if (scopeEpochRef.current !== opEpoch) return;
-      const nextStatus =
-        res.status === 'cancelled' || res.status === 'unexecuted'
+      if (scopeEpochRef.current !== opEpoch || sessionIdRef.current !== targetSessionId) return;
+      const nextStatus: GuanjiaPendingAction['status'] =
+        res.success && (res.status === 'cancelled' || res.status === 'unexecuted')
           ? 'cancelled'
           : 'unknown';
       setPendingActions(prev =>
@@ -614,18 +773,24 @@ export const GuanjiaNativeAssistant: React.FC<GuanjiaNativeAssistantProps> = ({
         )
       );
       if (!res.success) {
+        actionErrorRunIdRef.current = `cancel:${action.runId}`;
         setActionError(res.error || res.message || tGuanjia('guanjiaCancelFailed'));
       } else if (res.status === 'unknown') {
+        actionErrorRunIdRef.current = `cancel:${action.runId}`;
         setActionError(tGuanjia('guanjiaCancelActionStatusUnknown'));
       }
     } catch (err) {
-      if (scopeEpochRef.current !== opEpoch) return;
+      if (scopeEpochRef.current !== opEpoch || sessionIdRef.current !== targetSessionId) return;
       setPendingActions(prev =>
         prev.map(item => item.runId === action.runId ? { ...item, status: 'unknown' } : item)
       );
+      actionErrorRunIdRef.current = `cancel:${action.runId}`;
       setActionError(err instanceof Error ? err.message : String(err));
     } finally {
-      if (scopeEpochRef.current === opEpoch) {
+      if (scopeEpochRef.current === opEpoch && sessionIdRef.current === targetSessionId) {
+        if (actionProcessingRef.current === action.runId) {
+          actionProcessingRef.current = null;
+        }
         setActionProcessingId(current => (current === action.runId ? null : current));
       }
     }
@@ -732,13 +897,18 @@ export const GuanjiaNativeAssistant: React.FC<GuanjiaNativeAssistantProps> = ({
           );
         })}
 
-        {/* 服务端真实待确认卡片 */}
-        {pendingActions.map(action => {
+        {/* 服务端真实待确认卡片（排除已确认，不渲染绿色卡片） */}
+        {pendingActions.filter(
+          action =>
+            action.status !== 'confirmed' &&
+            !terminalRunIdsRef.current.has(action.runId) &&
+            !(action.status === 'failed' && action.resultPersisted === true)
+        ).map(action => {
           const isPending = action.status === 'pending';
-          const isConfirmed = action.status === 'confirmed';
           const isCancelled = action.status === 'cancelled';
           const isFailed = action.status === 'failed';
           const isExpired = action.status === 'expired';
+          const isInProgress = action.status === 'in_progress';
           const isProcessing = actionProcessingId === action.runId;
 
           return (
@@ -747,13 +917,11 @@ export const GuanjiaNativeAssistant: React.FC<GuanjiaNativeAssistantProps> = ({
               className={`rounded-lg border p-3 shadow-2xs ${
                 isPending
                   ? 'border-amber-500/60 bg-amber-500/10 text-foreground'
-                  : isConfirmed
-                  ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-900 dark:text-emerald-200'
-                  : isCancelled
-                  ? 'border-border bg-surface-raised text-secondary'
-                  : isExpired
-                  ? 'border-border bg-surface-raised text-secondary'
-                  : 'border-destructive/40 bg-destructive/10 text-destructive'
+                : isInProgress
+                ? 'border-amber-500/40 bg-amber-500/5 text-foreground'
+                : isCancelled || isExpired || action.status === 'unknown'
+                ? 'border-border bg-surface-raised text-secondary'
+                : 'border-destructive/40 bg-destructive/10 text-destructive'
               }`}
               role="region"
               aria-label={action.title || tGuanjia('guanjiaActionSummary')}
@@ -783,11 +951,11 @@ export const GuanjiaNativeAssistant: React.FC<GuanjiaNativeAssistantProps> = ({
                     {decoded.remainingTimes != null && (
                       <span>{tGuanjia('guanjiaRemainingTimesCard')}：{decoded.remainingTimes}{tGuanjia('guanjiaTimesCardUnit')}</span>
                     )}
-                    {decoded.originalAmount != null && (
-                      <span>{tGuanjia('guanjiaOriginalAmount')}：¥{decoded.originalAmount}</span>
+                    {decoded.deductAmount != null && (
+                      <span>{tGuanjia('guanjiaDeductAmount')}：¥{decoded.deductAmount}</span>
                     )}
-                    {decoded.discount != null && (
-                      <span>{tGuanjia('guanjiaDiscount')}：{decoded.discount}</span>
+                    {decoded.afterBalance != null && (
+                      <span>{tGuanjia('guanjiaAfterBalance')}：¥{decoded.afterBalance}</span>
                     )}
                   </div>
                 );
@@ -813,12 +981,6 @@ export const GuanjiaNativeAssistant: React.FC<GuanjiaNativeAssistantProps> = ({
                   >
                     {isProcessing ? tGuanjia('guanjiaCancelling') : tGuanjia('guanjiaCancelAction')}
                   </button>
-                </div>
-              )}
-
-              {isConfirmed && (
-                <div className="mt-1.5 text-[11px] font-medium text-emerald-700 dark:text-emerald-400">
-                  {tGuanjia('guanjiaConfirmedSuccess')}
                 </div>
               )}
 

@@ -451,6 +451,7 @@ import {
 } from './libs/mainWindowLoadRecovery';
 import { inferImageMimeTypeFromDataUrl, type PersistedGeneratedImageAsset, persistGeneratedImageAssets, type PersistGeneratedImageAssetsResult, persistGeneratedVideoAssets, type RemoteGeneratedMediaAsset } from './libs/mediaAssetPersistence';
 import {
+  GUANJIA_ASSISTANT_TOOL_NAMES,
   migrateAgentModelRefs,
   parsePrimaryModelRef,
   resolveQualifiedAgentModelRef,
@@ -7566,6 +7567,25 @@ if (!gotTheLock) {
         + `enterpriseContext=${enterpriseContext ? 'present' : 'absent'}`,
       );
       const purchaseOffer = await activateLowCreditPurchaseOffer();
+      if (authAccountGeneration !== requestAccountGeneration || !isCurrentAuthStateSnapshot(profileResponseAuthState)) {
+        return createUnavailableResponse();
+      }
+
+      // Guanjia desktop auth fallback for restored official session
+      const verifiedOfficialId =
+        typeof profileBody.data?.id === 'number' &&
+        Number.isSafeInteger(profileBody.data.id) &&
+        profileBody.data.id > 0
+          ? profileBody.data.id
+          : undefined;
+      if (verifiedOfficialId !== undefined) {
+        void GuanjiaDesktopAuthCoordinator.getInstance()
+          .recoverRestoredOfficialSession(verifiedOfficialId)
+          .catch(() => {
+            console.warn('[DesktopAuth] Failed to recover restored official session');
+          });
+      }
+
       return {
         success: true,
         status: AuthSessionStatus.Authenticated,
@@ -10620,7 +10640,11 @@ if (!gotTheLock) {
         const allow = entry?.tools?.allow;
         return plugin?.enabled === true && !!plugin.config?.callbackUrl && entry?.contextInjection === 'never'
           && entry?.memory?.search?.enabled === false && entry?.tools?.elevated?.enabled === false
-          && Array.isArray(allow) && allow.length === 4 && ['guanjia_get_context', 'guanjia_list_skills', 'guanjia_execute_skill', 'guanjia_get_run_status'].every(name => allow.includes(name));
+          && Array.isArray(allow)
+          && allow.length === GUANJIA_ASSISTANT_TOOL_NAMES.length
+          && allow.every((item: unknown) => typeof item === 'string')
+          && new Set(allow).size === GUANJIA_ASSISTANT_TOOL_NAMES.length
+          && GUANJIA_ASSISTANT_TOOL_NAMES.every((name) => allow.includes(name));
       } catch { return false; }
     },
   });
@@ -15036,8 +15060,8 @@ if (!gotTheLock) {
 
       // Guanjia desktop auth startup restoration (verified once on startup)
       try {
-        void GuanjiaDesktopAuthCoordinator.getInstance().syncDesktopAuthSilent().catch(err => {
-          console.warn('[DesktopAuth] Startup restoration error:', err);
+        void GuanjiaDesktopAuthCoordinator.getInstance().restoreDesktopSession().catch(() => {
+          console.warn('[DesktopAuth] Startup restoration error');
         });
       } catch {
         // ignore startup coordinator error

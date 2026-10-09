@@ -20,6 +20,7 @@ import {
   type StartScopedSessionResult,
 } from '../../shared/guanjia/native';
 import type { CoworkStore } from '../coworkStore';
+import { t } from '../i18n';
 import type { CoworkRuntime, CoworkStartOptions } from '../libs/agentEngine/types';
 import { buildManagedSessionKey } from '../libs/openclawChannelSessionSync';
 import { PRESET_AGENTS } from '../presetAgents';
@@ -48,9 +49,20 @@ function getHostWindow(): BrowserWindow | null {
   }
 }
 const sessions = new Map<string, GuanjiaScopedSession>();
-type RunBinding = { sessionId: string; action?: GuanjiaPendingAction; confirmationId?: string };
+type RunBinding = {
+  sessionId: string;
+  action?: GuanjiaPendingAction;
+  confirmationId?: string;
+  resultMessageId?: string;
+  submitted?: boolean;
+  submitting?: boolean;
+  querying?: boolean;
+  lastReconciledStatus?: string;
+  lastReconciledContent?: string;
+};
 const runs = new Map<string, RunBinding>();
 const record = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
+const extractString = (val: unknown): string => (typeof val === 'string' ? val.trim() : '');
 function publicData(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(publicData);
   if (!record(value)) return value;
@@ -76,9 +88,11 @@ function hostCaller(event: IpcMainInvokeEvent): boolean {
   catch { return false; }
 }
 function requireNative(event: IpcMainInvokeEvent): void { if (!nativeCaller(event)) throw new Error('Unauthorized caller'); }
-function requireScoped(id: string): GuanjiaScopedSession { const scoped = sessions.get(id); if (!currentScope(scoped)) throw new Error('业务会话已失效，请开启新会话'); return scoped!; }
+function requireScoped(id: string): GuanjiaScopedSession { const scoped = sessions.get(id); if (!currentScope(scoped)) throw new Error(t('guanjiaSessionExpired')); return scoped!; }
 function pendingActions(id?: string): GuanjiaPendingAction[] {
-  return Array.from(runs.values()).filter((run) => (!id || run.sessionId === id) && currentScope(sessions.get(run.sessionId)) && !!run.action).map((run) => publicData(run.action) as GuanjiaPendingAction);
+  return Array.from(runs.values())
+    .filter((run) => (!id || run.sessionId === id) && currentScope(sessions.get(run.sessionId)) && !!run.action && (run.action.status !== 'confirmed' || run.action.resultPersisted === true))
+    .map((run) => publicData(run.action) as GuanjiaPendingAction);
 }
 function pushPending(): void {
   const win = getHostWindow();
@@ -105,6 +119,242 @@ function bindRun(scoped: GuanjiaScopedSession, run: Record<string, unknown>, ski
     pushPending();
   }
 }
+function persistAndBroadcastResult(
+  binding: RunBinding,
+  scoped: GuanjiaScopedSession,
+  runId: string,
+  content: string,
+  targetActionStatus: GuanjiaPendingAction['status'],
+  runDetails?: Record<string, unknown>,
+): boolean {
+  const currentSession = sessions.get(binding.sessionId);
+  if (!currentSession || !currentScope(currentSession) || currentSession.generation !== scoped.generation) {
+    return false;
+  }
+  const isTerminal = targetActionStatus === 'confirmed' || targetActionStatus === 'failed';
+  const syncAction = (persistedReceipt?: boolean) => {
+    if (binding.action) {
+      const prevStatus = binding.action.status;
+      const hadReceipt = binding.action.resultPersisted === true;
+      if (persistedReceipt !== false) binding.action.status = targetActionStatus;
+      if (runDetails && persistedReceipt !== false) {
+        binding.action.rawDetails = publicData(runDetails) as Record<string, unknown>;
+      }
+      if (isTerminal && persistedReceipt) {
+        binding.action.resultPersisted = true;
+      } else {
+        delete binding.action.resultPersisted;
+      }
+      if (prevStatus !== binding.action.status || hadReceipt !== (binding.action.resultPersisted === true)) {
+        pushPending();
+      }
+    }
+  };
+
+  const store = runtime?.getCoworkStore();
+  if (!store) return false;
+
+  if (
+    binding.resultMessageId &&
+    binding.lastReconciledStatus === targetActionStatus &&
+    binding.lastReconciledContent === content
+  ) {
+    const rowTimestamp = store.getMessageTimestamp(scoped.sessionId, binding.resultMessageId);
+    if (rowTimestamp == null) {
+      syncAction(false);
+      return false;
+    }
+    if (isTerminal && binding.action?.resultPersisted !== true) {
+      syncAction(false);
+      return false;
+    }
+    const isTerminalDedup = isTerminal && binding.action?.resultPersisted === true;
+    syncAction(isTerminalDedup);
+    return true;
+  }
+
+  const metadata: Record<string, unknown> = {
+    [GuanjiaMessageMetadataKey.BusinessRunId]: runId,
+  };
+
+  const win = getHostWindow();
+  let storeSucceeded = false;
+  let newMsg: { id: string } | undefined;
+  const contents = win && !win.isDestroyed() ? win.webContents : null;
+
+  try {
+    if (!binding.resultMessageId) {
+      const msg = store.addMessage(scoped.sessionId, {
+        type: 'assistant',
+        content,
+        metadata,
+      });
+      newMsg = msg;
+      binding.resultMessageId = msg.id;
+      binding.lastReconciledContent = content;
+    } else {
+      store.updateMessage(scoped.sessionId, binding.resultMessageId, {
+        content,
+        metadata,
+      });
+      const rowTimestamp = store.getMessageTimestamp(scoped.sessionId, binding.resultMessageId);
+      if (rowTimestamp == null) {
+        syncAction(false);
+        return false;
+      }
+      binding.lastReconciledContent = content;
+    }
+    binding.lastReconciledStatus = targetActionStatus;
+    storeSucceeded = true;
+  } catch {
+    syncAction(false);
+    return false;
+  }
+
+  syncAction(storeSucceeded);
+  try {
+    if (contents && !contents.isDestroyed()) {
+      if (newMsg) {
+        contents.send('cowork:stream:message', { sessionId: scoped.sessionId, message: newMsg });
+      } else if (binding.resultMessageId) {
+        contents.send('cowork:stream:messageUpdate', { sessionId: scoped.sessionId, messageId: binding.resultMessageId, content, metadata });
+      }
+    }
+  } catch { /* non-fatal: storage and status already committed */ }
+  return storeSucceeded;
+}
+interface ReconcileOutcome {
+  status: 'completed' | 'failed' | 'in_progress' | 'unknown';
+  persisted: boolean;
+  resultPersisted?: boolean;
+  content: string;
+  error?: string;
+  message?: string;
+}
+function reconcileRunResult(
+  binding: RunBinding,
+  run: Record<string, unknown>,
+  scoped: GuanjiaScopedSession,
+  isConfirmFlight = false,
+): ReconcileOutcome {
+  if (!binding.action) {
+    return { status: 'unknown', persisted: false, content: '' };
+  }
+
+  if (typeof run.run_id === 'string' && binding.action.runId && run.run_id !== binding.action.runId) {
+    return { status: 'unknown', persisted: false, content: '', error: '运行编号不符' };
+  }
+  if (!binding.submitted) {
+    return { status: 'unknown', persisted: false, content: '' };
+  }
+  if (binding.submitting && !isConfirmFlight) {
+    return { status: 'in_progress', persisted: false, content: '' };
+  }
+
+  const rawStatus = typeof run.status === 'string' ? run.status : 'unknown';
+  if (binding.action.status === 'confirmed') {
+    return {
+      status: 'completed',
+      persisted: Boolean(binding.action.resultPersisted),
+      ...(binding.action.resultPersisted ? { resultPersisted: true } : {}),
+      content: binding.lastReconciledContent ?? '',
+    };
+  }
+  if (binding.action.status === 'cancelled') {
+    return { status: 'failed', persisted: false, content: binding.lastReconciledContent ?? '' };
+  }
+  if ((binding.action.status === 'failed' || binding.action.status === 'expired') && (rawStatus === 'confirmation_required' || rawStatus === 'in_progress' || rawStatus === 'unknown')) {
+    return {
+      status: 'failed',
+      persisted: Boolean(binding.action.resultPersisted),
+      ...(binding.action.resultPersisted ? { resultPersisted: true } : {}),
+      content: binding.lastReconciledContent ?? '',
+    };
+  }
+
+  let targetActionStatus: GuanjiaPendingAction['status'] = 'unknown';
+  let confirmResultStatus: 'completed' | 'failed' | 'in_progress' | 'unknown' = 'unknown';
+  let content = '';
+  let errorDetail: string | undefined;
+
+  if (rawStatus === 'succeeded') {
+    const replyStr = extractString(run.reply);
+    content = replyStr || t('guanjiaRunSucceededNoDetails');
+    targetActionStatus = 'confirmed';
+    confirmResultStatus = 'completed';
+  } else if (rawStatus === 'failed') {
+    const errObj = record(run.error) ? run.error : null;
+    const errObjMsg = errObj ? extractString(errObj.message) : '';
+    const errStr = typeof run.error === 'string' ? run.error.trim() : errObjMsg;
+    errorDetail = errStr || extractString(run.message) || extractString(run.reply);
+    content = errorDetail ? t('guanjiaRunFailed', { error: errorDetail }) : t('guanjiaRunFailedGeneric');
+    targetActionStatus = 'failed';
+    confirmResultStatus = 'failed';
+  } else if (rawStatus === 'need_more_info') {
+    const info = extractString(run.message) || extractString(run.reply) || extractString(run.error);
+    content = info ? t('guanjiaRunNeedMoreInfo', { info }) : t('guanjiaRunNeedMoreInfoGeneric');
+    errorDetail = content;
+    targetActionStatus = 'failed';
+    confirmResultStatus = 'failed';
+  } else if (rawStatus === 'in_progress') {
+    content = t('guanjiaRunInProgress');
+    targetActionStatus = 'in_progress';
+    confirmResultStatus = 'in_progress';
+  } else {
+    content = t('guanjiaRunUnknown');
+    targetActionStatus = 'unknown';
+    confirmResultStatus = 'unknown';
+  }
+  const persisted = persistAndBroadcastResult(binding, scoped, binding.action.runId, content, targetActionStatus, run);
+  const finalStatus = persisted && confirmResultStatus === 'completed' ? 'completed' : confirmResultStatus === 'completed' ? 'unknown' : confirmResultStatus;
+  const terminalResultPersisted = (finalStatus === 'completed' || finalStatus === 'failed') && persisted ? true : undefined;
+  return {
+    status: finalStatus,
+    persisted,
+    ...(terminalResultPersisted ? { resultPersisted: true } : {}),
+    content,
+    error: errorDetail,
+    message: typeof run.message === 'string' ? run.message : undefined,
+  };
+}
+async function reconcilePendingActionsForSessions(scopedSessions: GuanjiaScopedSession[]): Promise<void> {
+  const allowedSessionIds = new Set(scopedSessions.map((s) => s.sessionId));
+  const candidates = Array.from(runs.values()).filter((b) => allowedSessionIds.has(b.sessionId) && b.action && b.submitted && (b.action.status === 'in_progress' || b.action.status === 'unknown') && !b.submitting && !b.querying);
+  if (candidates.length === 0) return;
+  const budgetAc = new AbortController();
+  const budgetTimer = setTimeout(() => budgetAc.abort(), 20000);
+  try {
+    for (const binding of candidates) {
+      if (budgetAc.signal.aborted) break;
+      if (!binding.action || binding.submitting || binding.querying) continue;
+      binding.querying = true;
+      const runAc = new AbortController();
+      const runTimer = setTimeout(() => runAc.abort(), 5000);
+      const onBudgetAbort = () => runAc.abort();
+      budgetAc.signal.addEventListener('abort', onBudgetAbort, { once: true });
+      try {
+        const scoped = sessions.get(binding.sessionId);
+        if (!scoped || !currentScope(scoped)) continue;
+        const data = decodeRun(await requestGuanjiaBusinessApi({ path: '/api/c/ai/skills/runs/get', method: 'POST', body: { run_id: binding.action.runId }, expectedGeneration: scoped.generation, signal: runAc.signal }));
+        const currentSession = sessions.get(binding.sessionId);
+        if (!currentSession || !currentScope(currentSession) || currentSession.generation !== scoped.generation) continue;
+        if (data.run_id !== binding.action.runId) continue;
+        if (binding.submitting || (binding.action.status !== 'in_progress' && binding.action.status !== 'unknown')) continue;
+        if (data.status === 'confirmation_required') continue;
+        reconcileRunResult(binding, data, currentSession);
+      } catch {
+        // Bounded timeout or network error: do not crash or corrupt
+      } finally {
+        clearTimeout(runTimer);
+        budgetAc.signal.removeEventListener('abort', onBudgetAbort);
+        binding.querying = false;
+      }
+    }
+  } finally {
+    clearTimeout(budgetTimer);
+    budgetAc.abort();
+  }
+}
 export async function handleGuanjiaNativeToolCall(request: GuanjiaToolBridgeRequest, signal?: AbortSignal): Promise<GuanjiaToolBridgeResponse> {
   const reply = (value: unknown, isError = false): GuanjiaToolBridgeResponse => ({ content: [{ type: 'text', text: JSON.stringify(publicData(value)) }], ...(isError ? { isError } : {}) });
   try {
@@ -128,12 +378,24 @@ export async function handleGuanjiaNativeToolCall(request: GuanjiaToolBridgeRequ
       }
     }
     if (request.toolName === 'guanjia_get_run_status') {
-      const id = typeof request.args.runId === 'string' ? request.args.runId : ''; const binding = runs.get(id);
+      const id = typeof request.args.runId === 'string' ? request.args.runId : '';
+      const binding = runs.get(id);
       if (!binding || binding.sessionId !== scoped.sessionId) throw new Error('禁止查询未绑定到当前会话的运行');
-      const run = decodeRun(await requestGuanjiaBusinessApi({ path: '/api/c/ai/skills/runs/get', method: 'POST', body: { run_id: id }, expectedGeneration: scoped.generation, signal }));
-      requireScoped(scoped.sessionId); bindRun(scoped, run, typeof run.skill_id === 'string' ? run.skill_id : '');
-      if (binding.action && run.status !== 'confirmation_required') { binding.action.status = run.status === 'succeeded' ? 'confirmed' : run.status === 'failed' ? 'failed' : run.status === 'in_progress' ? 'in_progress' : 'unknown'; pushPending(); }
-      return reply(run);
+      if (binding.action?.status === 'cancelled') throw new Error(t('guanjiaCannotQueryCancelledRun'));
+      if (binding.submitting) return reply(binding.action ? publicData(binding.action) : { run_id: id, status: 'in_progress' });
+      if (binding.querying) return reply(binding.action ? publicData(binding.action) : { run_id: id, status: binding.action?.status ?? 'unknown' });
+      binding.querying = true;
+      try {
+        const run = decodeRun(await requestGuanjiaBusinessApi({ path: '/api/c/ai/skills/runs/get', method: 'POST', body: { run_id: id }, expectedGeneration: scoped.generation, signal }));
+        const currentSession = requireScoped(scoped.sessionId);
+        if (run.run_id !== id) throw new Error('查询响应运行编号不符');
+        if (binding.submitting) return reply(binding.action ? publicData(binding.action) : run);
+        if (run.status === 'confirmation_required' || !binding.submitted) { bindRun(scoped, run, typeof run.skill_id === 'string' ? run.skill_id : ''); return reply(run); }
+        reconcileRunResult(binding, run, currentSession);
+        return reply(run);
+      } finally {
+        binding.querying = false;
+      }
     }
     throw new Error('不允许调用该业务工具');
   } catch (error) { return reply({ error: error instanceof Error ? error.message : '业务工具调用失败' }, true); }
@@ -277,36 +539,66 @@ export function registerGuanjiaNativeAssistantHandlers(options: NativeAssistantR
     try { requireNative(event); const scoped = requireScoped(id); const session = options.getCoworkStore().getSession(id); return { success: true, sessionId: id, session: { ...scoped, status: session?.status === 'completed' ? 'done' : session?.status }, messages: session?.messages ?? [], pendingActions: pendingActions(id) }; }
     catch (error) { return { success: false, error: error instanceof Error ? error.message : '会话不可用' }; }
   });
-  ipcMain.handle(Channel.GetPendingActions, (event, filter?: { sessionId?: string } | string) => {
-    try { requireNative(event); const targetSessionId = typeof filter === 'string' ? filter : filter?.sessionId; if (targetSessionId) requireScoped(targetSessionId); const actions = pendingActions(targetSessionId); return { success: true, runs: actions, pendingActions: actions }; }
+  ipcMain.handle(Channel.GetPendingActions, async (event, filter?: { sessionId?: string } | string) => {
+    try {
+      requireNative(event);
+      const targetSessionId = typeof filter === 'string' ? filter : filter?.sessionId;
+      if (targetSessionId) {
+        const targetScoped = requireScoped(targetSessionId);
+        await reconcilePendingActionsForSessions([targetScoped]);
+        requireScoped(targetSessionId);
+      } else {
+        const validSessions = Array.from(sessions.values()).filter((s) => currentScope(s));
+        await reconcilePendingActionsForSessions(validSessions);
+        if (GuanjiaSession.getInstance().getSnapshot().status !== 'authenticated') throw new Error(t('guanjiaSessionExpired'));
+      }
+      const actions = pendingActions(targetSessionId);
+      return { success: true, runs: actions, pendingActions: actions };
+    }
     catch (error) { return { success: false, error: error instanceof Error ? error.message : '待确认操作不可用' }; }
   });
   ipcMain.handle(Channel.ConfirmPendingAction, async (event, params: { runId: string; note?: string }): Promise<ConfirmActionResult> => {
     let binding: RunBinding | undefined;
+    let scoped: GuanjiaScopedSession | undefined;
+    let ownsFlight = false;
     try {
       requireNative(event); binding = runs.get(params.runId); if (!binding?.action || binding.action.status !== 'pending' || !binding.confirmationId) throw new Error('待确认操作不存在或已处理');
-      const scoped = requireScoped(binding.sessionId); binding.action.status = 'in_progress'; pushPending();
+      if (binding.submitting) throw new Error('待确认操作不存在或已处理');
+      scoped = requireScoped(binding.sessionId); binding.submitting = true; binding.submitted = true; ownsFlight = true; binding.action.status = 'in_progress'; pushPending();
+      persistAndBroadcastResult(binding, scoped, params.runId, t('guanjiaRunInProgress'), 'in_progress');
       const run = decodeRun(await requestGuanjiaBusinessApi({ path: '/api/c/ai/skills/runs/confirm', method: 'POST', body: { run_id: params.runId }, expectedGeneration: scoped.generation })); requireScoped(scoped.sessionId);
       if (run.run_id !== params.runId) throw new Error('确认响应运行编号不符');
-      const status = run.status === 'succeeded' ? 'completed' : run.status === 'failed' ? 'failed' : run.status === 'in_progress' ? 'in_progress' : 'unknown';
-      binding.action.status = status === 'completed' ? 'confirmed' : status; binding.action.rawDetails = publicData(run) as Record<string, unknown>; pushPending();
-      const success = status === 'completed';
-      let errorDetail: string | undefined;
-      if (!success) {
-        if (typeof run.error === 'string' && run.error.trim()) {
-          errorDetail = run.error.trim();
-        } else if (record(run.error) && typeof run.error.message === 'string' && run.error.message.trim()) {
-          errorDetail = run.error.message.trim();
-        } else if (typeof run.reply === 'string' && run.reply.trim()) {
-          errorDetail = run.reply.trim();
-        } else if (typeof run.message === 'string' && run.message.trim()) {
-          errorDetail = run.message.trim();
-        }
-      }
-      return { success, runId: params.runId, status, data: publicData(run), ...(errorDetail ? { error: errorDetail } : {}) };
+      const currentSession = requireScoped(scoped.sessionId);
+      const outcome = reconcileRunResult(binding, run, currentSession, true);
+      return {
+        success: outcome.status === 'completed',
+        runId: params.runId,
+        status: outcome.status,
+        data: publicData(run),
+        ...(outcome.resultPersisted ? { resultPersisted: true } : {}),
+        ...(outcome.message ? { message: outcome.message } : {}),
+        ...(outcome.error ? { error: outcome.error } : {}),
+      };
     } catch (error) {
-      const unknown = binding?.action?.status === 'in_progress' || (error instanceof GuanjiaBusinessApiError && error.unknownOutcome); if (binding?.action && unknown) binding.action.status = 'unknown'; pushPending();
-      return { success: false, runId: params?.runId ?? '', status: unknown ? 'unknown' : 'failed', error: error instanceof Error ? error.message : '确认结果尚未核验' };
+      if (ownsFlight && scoped && currentScope(sessions.get(scoped.sessionId))) {
+        const isUnknown = error instanceof GuanjiaBusinessApiError ? error.unknownOutcome : true;
+        const errStatus = isUnknown ? 'unknown' : 'failed';
+        const errMsg = error instanceof Error ? error.message : '确认结果尚未核验';
+        const errText = isUnknown ? t('guanjiaRunUnknownError', { error: errMsg }) : t('guanjiaRunFailed', { error: errMsg });
+        let writeSaved = false;
+        if (binding) writeSaved = persistAndBroadcastResult(binding, scoped, params?.runId ?? '', errText, errStatus);
+        const hasPersisted = !isUnknown && writeSaved ? true : undefined;
+        return {
+          success: false,
+          runId: params?.runId ?? '',
+          status: errStatus,
+          error: errMsg,
+          ...(hasPersisted ? { resultPersisted: true } : {}),
+        };
+      }
+      return { success: false, runId: params?.runId ?? '', status: 'unknown', error: error instanceof Error ? error.message : '确认结果尚未核验' };
+    } finally {
+      if (ownsFlight && binding) binding.submitting = false;
     }
   });
   ipcMain.handle(Channel.CancelPendingAction, (event, params: { runId: string }) => {

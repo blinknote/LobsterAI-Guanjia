@@ -292,7 +292,7 @@ const plugin = {
       });
     }
 
-    api.logger.info("[guanjia-tools] registered 4 scoped business tools with optional discovery and ringzero guard.");
+    api.logger.info(`[guanjia-tools] requested ${ALL_GUANJIA_TOOL_NAMES.length} scoped business tools with optional discovery and ringzero guard.`);
   },
 };
 

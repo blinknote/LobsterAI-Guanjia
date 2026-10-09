@@ -225,7 +225,7 @@ export function registerGuanjiaIpcHandlers(options?: RegisterGuanjiaHandlersOpti
     if (!isTrustedMainRenderer(event, options?.getMainWindow)) {
       throw new Error('非法的调用来源');
     }
-    return sessionService.restore();
+    return GuanjiaDesktopAuthCoordinator.getInstance().restoreDesktopSession();
   });
 
   handle(

@@ -18,6 +18,7 @@ import {
 import { isTestModeEnabled } from '../libs/endpoints';
 import { GuanjiaSession } from './guanjiaSession';
 import { GuanjiaWorkspaceManager } from './guanjiaWorkspaceManager';
+import { GuanjiaSessionSnapshot } from './types';
 
 const OFFICIAL_PROFILE_URL = 'https://lobsterai-server.youdao.com/api/user/profile';
 
@@ -70,6 +71,12 @@ export class GuanjiaDesktopAuthCoordinator {
   private issuanceAttempts = new Map<string, { requestId: string; status: 'pending' | 'active' | 'revoked'; createdAt: number }>();
 
   private inFlightSync: Promise<GuanjiaDesktopAuthStatus> | null = null;
+  private desktopSessionRestoreCompleted = false;
+  private inFlightRestore: Promise<GuanjiaSessionSnapshot> | null = null;
+  private isStartupIntentActive = true;
+  private startupExpectedBusinessGeneration: number | null = null;
+  private attemptedRecoveryOwnerKeys = new Set<string>();
+
   private listeners = new Set<(status: GuanjiaDesktopAuthStatus) => void>();
 
   private officialTokenGetter: (() => string | null) | null = null;
@@ -112,6 +119,207 @@ export class GuanjiaDesktopAuthCoordinator {
         console.error('[DesktopAuthCoordinator] Listener error:', err);
       }
     }
+  }
+
+  // =========================================================================
+  // 共享启动会话恢复与 GetUser 补救恢复
+  // =========================================================================
+  /**
+   * 共享启动恢复逻辑 (单进程只执行一次非破坏性恢复，并发调用共享同一个 inFlight Promise)
+   */
+  public restoreDesktopSession(): Promise<GuanjiaSessionSnapshot> {
+    if (this.desktopSessionRestoreCompleted) {
+      return Promise.resolve(GuanjiaSession.getInstance().getSnapshot());
+    }
+    if (this.inFlightRestore) {
+      return this.inFlightRestore;
+    }
+    const initialBusinessGen = GuanjiaSession.getInstance().getGeneration();
+    const restorePromise = Promise.resolve().then(() => this.performRestoreDesktopSession(initialBusinessGen));
+    this.inFlightRestore = restorePromise;
+    const cleanup = (): void => {
+      if (this.inFlightRestore === restorePromise) {
+        this.inFlightRestore = null;
+      }
+    };
+    void restorePromise.then(cleanup, cleanup);
+    return restorePromise;
+  }
+
+  private async performRestoreDesktopSession(invokedBusinessGen: number): Promise<GuanjiaSessionSnapshot> {
+    const sessionService = GuanjiaSession.getInstance();
+    const capturedOfficialGen = this.officialGeneration;
+
+    try {
+      // 若用户已主动退出管家 (logoutSuppressed === true)，跳过 cookie restore 与后续静默换取
+      // 若在启动恢复被调用前/微任务执行前业务代次已推进（非初始作用域，如已有手动登录尝试），跳过恢复
+      if (
+        !this.isStartupIntentActive ||
+        this.logoutSuppressed ||
+        invokedBusinessGen !== 0 ||
+        sessionService.getGeneration() !== invokedBusinessGen
+      ) {
+        this.isStartupIntentActive = false;
+        return sessionService.getSnapshot();
+      }
+
+      this.startupExpectedBusinessGeneration = invokedBusinessGen;
+
+      let currentSnapshot = sessionService.getSnapshot();
+      // 若初始状态已认证或正在 restoring，视为已有初始手动登录意图，关闭启动意图并跳过恢复
+      if (currentSnapshot.status === 'authenticated' || currentSnapshot.status === 'restoring') {
+        this.isStartupIntentActive = false;
+        return currentSnapshot;
+      }
+
+      // 尝试非破坏性真实 cookie 恢复
+      const manager = GuanjiaWorkspaceManager.getInstance();
+      const cookieToken = await manager.getRestorableToken().catch((): string | null => null);
+
+      if (
+        cookieToken &&
+        !this.logoutSuppressed &&
+        this.officialGeneration === capturedOfficialGen &&
+        this.isStartupIntentActive &&
+        sessionService.getGeneration() === invokedBusinessGen
+      ) {
+        const source = this.getOwnedTokenSource(cookieToken) || 'restoration';
+        this.trackOwnedToken(cookieToken, source);
+
+        try {
+          const verified = await sessionService.verify(cookieToken);
+          if (
+            this.officialGeneration === capturedOfficialGen &&
+            this.isStartupIntentActive &&
+            sessionService.getGeneration() === invokedBusinessGen &&
+            !this.logoutSuppressed
+          ) {
+            const adoptPromise = sessionService.adoptCandidate(
+              cookieToken,
+              verified.user,
+              null,
+              source,
+            );
+            const reservedGen = sessionService.getGeneration();
+            const adoptedSnapshot = await adoptPromise;
+            const currentCreds = sessionService.getCredentials();
+            const isAdoptSuccess =
+              adoptedSnapshot.status === 'authenticated' &&
+              adoptedSnapshot.generation === reservedGen &&
+              sessionService.getGeneration() === reservedGen &&
+              this.officialGeneration === capturedOfficialGen &&
+              this.isStartupIntentActive &&
+              !this.logoutSuppressed &&
+              currentCreds?.token === cookieToken &&
+              adoptedSnapshot.user != null &&
+              verified.user != null &&
+              String(adoptedSnapshot.user.id) === String(verified.user.id) &&
+              String(adoptedSnapshot.user.tenantId) === String(verified.user.tenantId);
+
+            if (isAdoptSuccess) {
+              this.startupExpectedBusinessGeneration = reservedGen;
+            }
+          }
+        } catch {
+          console.warn('[DesktopAuth] Cookie session restore unverified');
+        }
+      }
+
+      currentSnapshot = sessionService.getSnapshot();
+
+      // postawait 检查：若业务仍未认证且未主动退出抑制，且未在 restoring，转真实官方静默同步与换取
+      if (
+        this.officialGeneration === capturedOfficialGen &&
+        this.isStartupIntentActive &&
+        !this.logoutSuppressed &&
+        sessionService.getGeneration() === this.startupExpectedBusinessGeneration
+      ) {
+        if (
+          currentSnapshot.status !== 'authenticated' &&
+          currentSnapshot.status !== 'restoring'
+        ) {
+          await this.syncDesktopAuthSilent({
+            allowAdoption: true,
+            intent: 'startup',
+          }).catch(() => {
+            console.warn('[DesktopAuth] Startup silent auth sync failed');
+          });
+        }
+      }
+    } finally {
+      this.desktopSessionRestoreCompleted = true;
+    }
+
+    return sessionService.getSnapshot();
+  }
+
+  /**
+   * 针对官方已登录但管家会话缺失/过期的有界补救恢复 (由成功持久化的 GetUser 触发)
+   */
+  public async recoverRestoredOfficialSession(verifiedOfficialId?: number): Promise<GuanjiaDesktopAuthStatus> {
+    if (this.logoutSuppressed || !this.isStartupIntentActive) {
+      return this.getStatusSnapshot();
+    }
+
+    if (
+      typeof verifiedOfficialId !== 'number' ||
+      !Number.isSafeInteger(verifiedOfficialId) ||
+      verifiedOfficialId <= 0
+    ) {
+      return this.getStatusSnapshot();
+    }
+    const sessionService = GuanjiaSession.getInstance();
+    const currentSnapshot = sessionService.getSnapshot();
+    if (currentSnapshot.status === 'authenticated' || currentSnapshot.status === 'restoring') {
+      return this.getStatusSnapshot();
+    }
+
+    if (
+      this.startupExpectedBusinessGeneration !== null &&
+      sessionService.getGeneration() !== this.startupExpectedBusinessGeneration
+    ) {
+      this.isStartupIntentActive = false;
+      return this.getStatusSnapshot();
+    }
+
+    const capturedOfficialGen = this.officialGeneration;
+    const quotaKey = `${verifiedOfficialId}:${capturedOfficialGen}`;
+
+    if (this.attemptedRecoveryOwnerKeys.has(quotaKey)) {
+      return this.getStatusSnapshot();
+    }
+
+    // 每次进程针对已核验的 owner+officialGen 配额最多尝试一次；在 await 之前提前保留尝试配额
+    this.attemptedRecoveryOwnerKeys.add(quotaKey);
+
+    if (this.inFlightRestore) {
+      await this.inFlightRestore.catch(() => {});
+    } else if (!this.desktopSessionRestoreCompleted) {
+      await this.restoreDesktopSession().catch(() => {});
+    }
+
+    if (
+      this.officialGeneration !== capturedOfficialGen ||
+      !this.isStartupIntentActive ||
+      this.logoutSuppressed
+    ) {
+      return this.getStatusSnapshot();
+    }
+
+    const postSnapshot = sessionService.getSnapshot();
+    if (postSnapshot.status === 'authenticated' || postSnapshot.status === 'restoring') {
+      return this.getStatusSnapshot();
+    }
+
+    if (
+      this.startupExpectedBusinessGeneration !== null &&
+      sessionService.getGeneration() !== this.startupExpectedBusinessGeneration
+    ) {
+      this.isStartupIntentActive = false;
+      return this.getStatusSnapshot();
+    }
+
+    return this.syncDesktopAuthSilent({ allowAdoption: true, intent: 'startup' });
   }
 
   // =========================================================================
@@ -663,18 +871,22 @@ export class GuanjiaDesktopAuthCoordinator {
       }
 
       // 若员工不同或当前未认证：自动采用候选会话
-      const newSnapshot = await sessionService.adoptCandidate(
+      const adoptionPromise = sessionService.adoptCandidate(
         candidateToken,
         verified.user,
         null,
         'sso',
       );
+      const adoptionGeneration = sessionService.getGeneration();
+      const newSnapshot = await adoptionPromise;
 
       const currentCreds = sessionService.getCredentials();
       const isAdoptSuccess =
         newSnapshot.status === 'authenticated' &&
-        newSnapshot.generation === sessionService.getGeneration() &&
+        newSnapshot.generation === adoptionGeneration &&
+        sessionService.getGeneration() === adoptionGeneration &&
         newSnapshot.user != null &&
+        verified.user != null &&
         String(newSnapshot.user.id) === String(verified.user.id) &&
         String(newSnapshot.user.tenantId) === String(verified.user.tenantId) &&
         currentCreds?.token === candidateToken &&
@@ -686,6 +898,10 @@ export class GuanjiaDesktopAuthCoordinator {
           void this.revokeTokenDirect(candidateToken);
         }
         return { success: false, error: newSnapshot.error || '静默登录会话采用失败或已被新代次覆盖' };
+      }
+
+      if (this.isStartupIntentActive && !this.logoutSuppressed) {
+        this.startupExpectedBusinessGeneration = adoptionGeneration;
       }
 
       this.notifyStatusChanged();
@@ -1019,11 +1235,49 @@ export class GuanjiaDesktopAuthCoordinator {
     }
 
     const capturedOfficialGen = this.officialGeneration;
+    const sessionService = GuanjiaSession.getInstance();
+    const capturedBusinessGen = intent === 'startup' ? sessionService.getGeneration() : null;
+
+    if (intent === 'startup') {
+      if (
+        !this.isStartupIntentActive ||
+        this.logoutSuppressed ||
+        (this.startupExpectedBusinessGeneration !== null &&
+          capturedBusinessGen !== this.startupExpectedBusinessGeneration)
+      ) {
+        if (
+          this.startupExpectedBusinessGeneration !== null &&
+          capturedBusinessGen !== this.startupExpectedBusinessGeneration
+        ) {
+          this.isStartupIntentActive = false;
+        }
+        return this.getStatusSnapshot();
+      }
+    }
 
     // 1. 严格核验官方生产 profile
     const profile = await this.verifyOfficialProfile(officialToken);
     if (this.officialGeneration !== capturedOfficialGen) {
       return this.getStatusSnapshot();
+    }
+
+    if (intent === 'startup') {
+      const currentGen = sessionService.getGeneration();
+      if (
+        !this.isStartupIntentActive ||
+        this.logoutSuppressed ||
+        capturedBusinessGen === null ||
+        currentGen !== capturedBusinessGen ||
+        (this.startupExpectedBusinessGeneration !== null && currentGen !== this.startupExpectedBusinessGeneration)
+      ) {
+        if (
+          currentGen !== capturedBusinessGen ||
+          (this.startupExpectedBusinessGeneration !== null && currentGen !== this.startupExpectedBusinessGeneration)
+        ) {
+          this.isStartupIntentActive = false;
+        }
+        return this.getStatusSnapshot();
+      }
     }
 
     if (!profile.success || !profile.userId) {
@@ -1041,6 +1295,25 @@ export class GuanjiaDesktopAuthCoordinator {
       return this.getStatusSnapshot();
     }
 
+    if (intent === 'startup') {
+      const currentGen = sessionService.getGeneration();
+      if (
+        !this.isStartupIntentActive ||
+        this.logoutSuppressed ||
+        capturedBusinessGen === null ||
+        currentGen !== capturedBusinessGen ||
+        (this.startupExpectedBusinessGeneration !== null && currentGen !== this.startupExpectedBusinessGeneration)
+      ) {
+        if (
+          currentGen !== capturedBusinessGen ||
+          (this.startupExpectedBusinessGeneration !== null && currentGen !== this.startupExpectedBusinessGeneration)
+        ) {
+          this.isStartupIntentActive = false;
+        }
+        return this.getStatusSnapshot();
+      }
+    }
+
     if (!bindingRes.success) {
       this.bindingState = 'unavailable';
       this.lastError = bindingRes.error;
@@ -1054,8 +1327,29 @@ export class GuanjiaDesktopAuthCoordinator {
 
     // 3. 自动采用逻辑
     if (allowAdoption && this.bindingState === 'bound' && !this.logoutSuppressed && this.bindingInfo) {
-      const sessionService = GuanjiaSession.getInstance();
+      if (intent === 'startup') {
+        const currentGen = sessionService.getGeneration();
+        if (
+          !this.isStartupIntentActive ||
+          this.logoutSuppressed ||
+          capturedBusinessGen === null ||
+          currentGen !== capturedBusinessGen ||
+          (this.startupExpectedBusinessGeneration !== null && currentGen !== this.startupExpectedBusinessGeneration)
+        ) {
+          if (
+            currentGen !== capturedBusinessGen ||
+            (this.startupExpectedBusinessGeneration !== null && currentGen !== this.startupExpectedBusinessGeneration)
+          ) {
+            this.isStartupIntentActive = false;
+          }
+          return this.getStatusSnapshot();
+        }
+      }
+
       const currentSnapshot = sessionService.getSnapshot();
+      if (currentSnapshot.status === 'restoring') {
+        return this.getStatusSnapshot();
+      }
       const currentCreds = sessionService.getCredentials() as { source?: string } | null;
 
       const isSameEmployee =
@@ -1074,8 +1368,18 @@ export class GuanjiaDesktopAuthCoordinator {
         if (currentSnapshot.status === 'authenticated' && currentCreds?.source === 'sso') {
           sessionService.invalidate('官方账号已切换');
         }
+        const preExchangeBusinessGen = sessionService.getGeneration();
         if (this.officialGeneration === capturedOfficialGen) {
-          await this.exchangeAndAdopt();
+          const adoptRes = await this.exchangeAndAdopt();
+          if (
+            this.officialGeneration === capturedOfficialGen &&
+            sessionService.getGeneration() === preExchangeBusinessGen &&
+            !this.logoutSuppressed &&
+            !adoptRes.success &&
+            adoptRes.error
+          ) {
+            this.lastError = adoptRes.error;
+          }
         }
       } else {
         if (
@@ -1083,10 +1387,23 @@ export class GuanjiaDesktopAuthCoordinator {
           !isSameEmployee
         ) {
           if (this.officialGeneration === capturedOfficialGen) {
-            await this.exchangeAndAdopt();
+            const adoptRes = await this.exchangeAndAdopt();
+            if (
+              this.officialGeneration === capturedOfficialGen &&
+              !this.logoutSuppressed &&
+              (intent !== 'startup' || (capturedBusinessGen !== null && sessionService.getGeneration() === capturedBusinessGen)) &&
+              !adoptRes.success &&
+              adoptRes.error
+            ) {
+              this.lastError = adoptRes.error;
+            }
           }
         }
       }
+    }
+
+    if (this.officialGeneration !== capturedOfficialGen) {
+      return this.getStatusSnapshot();
     }
 
     this.notifyStatusChanged();
@@ -1100,6 +1417,7 @@ export class GuanjiaDesktopAuthCoordinator {
     this.officialGeneration += 1;
     this.logoutSuppressed = false;
     this.lastError = undefined;
+    this.isStartupIntentActive = false;
     this.savePersistedState();
 
     // 若官方用户变更，重置绑定状态
@@ -1122,6 +1440,7 @@ export class GuanjiaDesktopAuthCoordinator {
    */
   public handleOfficialExchangeRollback(): void {
     this.officialGeneration += 1;
+    this.isStartupIntentActive = false;
   }
 
   /**
@@ -1133,6 +1452,7 @@ export class GuanjiaDesktopAuthCoordinator {
     this.bindingState = 'not_checked';
     this.bindingInfo = null;
     this.lastError = undefined;
+    this.isStartupIntentActive = false;
 
     // 1. 本地管家会话立即失效
     GuanjiaSession.getInstance().invalidate('官方账号已退出');
@@ -1174,6 +1494,7 @@ export class GuanjiaDesktopAuthCoordinator {
     this.officialGeneration += 1;
     this.bindingState = 'unavailable';
     this.lastError = reason;
+    this.isStartupIntentActive = false;
     GuanjiaSession.getInstance().invalidate(reason);
     await this.revokeAllOwnedTokensAndAttempts();
     this.notifyStatusChanged();

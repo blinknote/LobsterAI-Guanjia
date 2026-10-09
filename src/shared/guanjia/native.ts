@@ -44,6 +44,7 @@ export type GuanjiaAssistantType = 'general' | 'financial';
  */
 export const GuanjiaMessageMetadataKey = {
   DisplayContent: 'guanjiaDisplayContent',
+  BusinessRunId: 'guanjiaBusinessRunId',
 } as const;
 
 export type GuanjiaMessageMetadataKey =
@@ -242,6 +243,7 @@ export interface GuanjiaPendingAction {
   createdAt: number;
   expiresAt?: number;
   rawDetails?: Record<string, unknown>;
+  resultPersisted?: boolean;
 }
 
 export interface ConfirmPendingActionParams {
@@ -263,6 +265,7 @@ export interface ConfirmActionResult {
   message?: string;
   error?: string;
   data?: unknown;
+  resultPersisted?: boolean;
 }
 
 export interface CancelActionResult {

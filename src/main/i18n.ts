@@ -401,6 +401,18 @@ const translations: Record<LanguageType, Record<string, string>> = {
     nodeDeploymentAccessStatusApplyFailed: '服务已部署，但访问状态更新失败：{message}',
 
     'enterprise.updateBlocked': '版本更新由企业统一管理',
+
+    // Guanjia Native Assistant
+    guanjiaRunSucceededNoDetails: '操作已执行，服务端未返回结果说明',
+    guanjiaRunFailed: '执行失败：{error}',
+    guanjiaRunFailedGeneric: '操作执行失败，服务端未返回具体原因',
+    guanjiaRunInProgress: '业务操作正在执行中，请稍候…',
+    guanjiaRunUnknown: '执行结果未确认，请稍后查询，请勿重复操作',
+    guanjiaRunUnknownError: '执行结果未确认：{error}，请勿重复操作',
+    guanjiaRunNeedMoreInfo: '操作未能完成，需要补充信息：{info}',
+    guanjiaRunNeedMoreInfoGeneric: '操作未能完成，缺少必要业务信息',
+    guanjiaSessionExpired: '业务会话已失效，请开启新会话',
+    guanjiaCannotQueryCancelledRun: '禁止查询已取消的运行',
   },
   en: {
     browserPasskeyChooseAccountTitle: 'Use a passkey',
@@ -838,6 +850,18 @@ const translations: Record<LanguageType, Record<string, string>> = {
       'The service was deployed, but its access settings could not be updated: {message}',
 
     'enterprise.updateBlocked': 'Updates are managed by enterprise',
+
+    // Guanjia Native Assistant
+    guanjiaRunSucceededNoDetails: 'Operation executed, but the server did not return result details',
+    guanjiaRunFailed: 'Execution failed: {error}',
+    guanjiaRunFailedGeneric: 'Operation failed, no details returned by server',
+    guanjiaRunInProgress: 'Operation in progress, please wait…',
+    guanjiaRunUnknown: 'Execution outcome not confirmed. Please check later and do not re-submit.',
+    guanjiaRunUnknownError: 'Execution outcome not confirmed: {error}. Please do not retry immediately.',
+    guanjiaRunNeedMoreInfo: 'Operation incomplete, additional information required: {info}',
+    guanjiaRunNeedMoreInfoGeneric: 'Operation incomplete, required business information is missing',
+    guanjiaSessionExpired: 'Business session expired, please start a new session',
+    guanjiaCannotQueryCancelledRun: 'Cannot query cancelled run',
   },
 };
 
