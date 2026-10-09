@@ -1095,16 +1095,32 @@ describe('Windows installer hardening contracts', () => {
       "System::Call 'ole32::CoCreateGuid(g .s)'",
     );
     expect(installerInclude).toContain('RequestExecutionLevel admin');
+    expect(installerInclude).toContain(
+      '!define LOBSTER_APPDATA_DIR "$APPDATA\\LobsterAI-Dev"',
+    );
+    expect(installerInclude).toContain(
+      '!define LOBSTER_APPDATA_DIR "$APPDATA\\LobsterAI"',
+    );
     expect(init).toContain('!insertmacro EnsureInstallerAttemptId');
     expect(init.indexOf('!insertmacro EnsureInstallerAttemptId')).toBeLessThan(
       init.indexOf('FileOpen $9'),
     );
     expect(init).toContain(
-      'FileOpen $9 "$APPDATA\\LobsterAI\\install-timing.log" a',
+      'FileOpen $9 "$APPDATA\\LobsterAI-Dev\\install-timing.log" a',
     );
-    expect(init).toContain('FileSeek $9 0 END');
+    expect(init).toContain(
+      'FileOpen $9 "${LOBSTER_APPDATA_DIR}\\install-timing.log" a',
+    );
+    expect(init.match(/FileSeek \$9 0 END/g)).toHaveLength(2);
+    expect(init).not.toMatch(/install-timing\.log["']?\s+w/);
     expect(init).not.toContain(
       'FileOpen $9 "$APPDATA\\LobsterAI\\install-timing.log" w',
+    );
+    expect(init).not.toContain(
+      'FileOpen $9 "$APPDATA\\LobsterAI-Dev\\install-timing.log" w',
+    );
+    expect(init).not.toContain(
+      'FileOpen $9 "${LOBSTER_APPDATA_DIR}\\install-timing.log" w',
     );
     expect(init).toContain('StrCpy $lobsterInvocationSource "unknown"');
     expect(init).toContain('${If} ${isUpdated}');
