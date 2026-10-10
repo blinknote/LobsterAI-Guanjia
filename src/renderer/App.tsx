@@ -276,8 +276,12 @@ const App: React.FC = () => {
   const [hasUnreadCompletedTasks, setHasUnreadCompletedTasks] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(244);
   const initialOpenClawEngineStatusRef = useRef(coworkService.getOpenClawEngineStatusSnapshot());
+  const initialStartupCompletedRef = useRef(
+    initialOpenClawEngineStatusRef.current !== null &&
+    initialOpenClawEngineStatusRef.current.phase !== OpenClawEnginePhase.Starting,
+  );
   const [isEngineStartupOverlayVisible, setIsEngineStartupOverlayVisible] = useState(
-    () => initialOpenClawEngineStatusRef.current?.phase === OpenClawEnginePhase.Starting,
+    () => !initialStartupCompletedRef.current && initialOpenClawEngineStatusRef.current?.phase === OpenClawEnginePhase.Starting,
   );
   const [hasResolvedEngineStartupOverlayState, setHasResolvedEngineStartupOverlayState] = useState(
     () => initialOpenClawEngineStatusRef.current !== null,
@@ -362,7 +366,17 @@ const App: React.FC = () => {
 
   useEffect(() => {
     let isCurrent = true;
-    const resolveOverlayVisible = (phase?: string | null) => phase === OpenClawEnginePhase.Starting;
+    const resolveOverlayVisible = (phase?: string | null) => {
+      // 一旦初次启动就绪，后续运行期间（切换模型、登录管家、同步配置等触发的 Starting）绝不再展示全屏遮罩，保持静默
+      if (initialStartupCompletedRef.current) {
+        return false;
+      }
+      if (phase && phase !== OpenClawEnginePhase.Starting) {
+        initialStartupCompletedRef.current = true;
+        return false;
+      }
+      return phase === OpenClawEnginePhase.Starting;
+    };
 
     coworkService
       .getOpenClawEngineStatus()
@@ -370,6 +384,9 @@ const App: React.FC = () => {
         if (!isCurrent) return;
         setIsEngineStartupOverlayVisible(resolveOverlayVisible(status?.phase));
         setHasResolvedEngineStartupOverlayState(true);
+        if (status?.phase && status.phase !== OpenClawEnginePhase.Starting) {
+          initialStartupCompletedRef.current = true;
+        }
       })
       .catch(error => {
         console.debug(
@@ -377,6 +394,8 @@ const App: React.FC = () => {
           error,
         );
         if (isCurrent) {
+          initialStartupCompletedRef.current = true;
+          setIsEngineStartupOverlayVisible(false);
           setHasResolvedEngineStartupOverlayState(true);
         }
       });
@@ -384,6 +403,9 @@ const App: React.FC = () => {
     const unsubscribe = coworkService.onOpenClawEngineStatus(status => {
       setIsEngineStartupOverlayVisible(resolveOverlayVisible(status.phase));
       setHasResolvedEngineStartupOverlayState(true);
+      if (status.phase && status.phase !== OpenClawEnginePhase.Starting) {
+        initialStartupCompletedRef.current = true;
+      }
     });
 
     return () => {
@@ -391,6 +413,23 @@ const App: React.FC = () => {
       unsubscribe();
     };
   }, []);
+
+  // 一旦初次启动就绪（已完成初始化并且 overlay 隐藏过），后续绝不再弹出全屏动画
+  useEffect(() => {
+    if (isInitialized && !isEngineStartupOverlayVisible) {
+      initialStartupCompletedRef.current = true;
+    }
+  }, [isInitialized, isEngineStartupOverlayVisible]);
+
+  // 确保当用户在管家界面时，不会因为后台引擎状态刷新而被强制挂起或覆盖
+  useEffect(() => {
+    if (mainView === 'guanjia') {
+      initialStartupCompletedRef.current = true;
+      if (isEngineStartupOverlayVisible) {
+        setIsEngineStartupOverlayVisible(false);
+      }
+    }
+  }, [mainView, isEngineStartupOverlayVisible]);
 
   const waitWithTimeout = useCallback(
     async <T,>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> => {
@@ -1202,7 +1241,7 @@ const App: React.FC = () => {
   }, [showToast, stopUserInitiatedUpdateFlow]);
 
   const handleShowLogin = useCallback(() => {
-    window.dispatchEvent(new CustomEvent('guanjia:open-login'));
+    void authService.login();
   }, []);
 
   const runUpdateCheck = useCallback(async (): Promise<boolean> => {
@@ -1634,13 +1673,16 @@ const App: React.FC = () => {
     setNewUserWelcomeAfterLoginSignal(value => value + 1);
     try {
       finishNewUserOnboarding('start_experience');
-      window.dispatchEvent(new CustomEvent('guanjia:open-login'));
+      const result = await authService.login();
+      if (!result.success) {
+        console.warn('[Onboarding] official login request was not completed:', result.error);
+      }
       reportOnboardingAction('login_redirect_result', {
         source: 'new_user_onboarding',
         result: 'success',
       });
     } catch (error) {
-      console.warn('[Onboarding] failed to open guanjia login:', error);
+      console.warn('[Onboarding] failed to open official login:', error);
     } finally {
       newUserLoginPendingRef.current = false;
     }
@@ -2406,7 +2448,9 @@ const App: React.FC = () => {
               className="relative h-full min-h-0 rounded-xl border border-border bg-background overflow-hidden"
             >
               {mainView !== 'cowork' && <SkinBackdrop variant={SkinBackdropVariant.Management} />}
-              <EngineStartupOverlay />
+              {isEngineStartupOverlayVisible && (
+                <EngineStartupOverlay visible={isEngineStartupOverlayVisible} />
+              )}
               {/* Keep-alive 保活容器：使用 CSS hidden 控制显隐，切走不卸载各视图及 iframe，保持输入草稿与滚动位置 */}
               <div
                 className={`h-full w-full ${mainView === 'cowork' ? '' : 'hidden'}`}

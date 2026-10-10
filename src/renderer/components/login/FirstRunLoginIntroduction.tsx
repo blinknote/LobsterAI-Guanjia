@@ -57,6 +57,7 @@ const FirstRunLoginIntroduction: React.FC<FirstRunLoginIntroductionProps> = ({
         loginPendingRef.current = true;
         setLoginPending(true);
         void onStartExperience().finally(() => {
+          setHasSeenIntroduction(true);
           loginPendingRef.current = false;
           setLoginPending(false);
         });

@@ -39,6 +39,8 @@ let persistedTipIndex: number | null = null;
 // index.html's static splash shows this same page before React mounts, so the
 // overlay must not fade in on app start — only when it appears mid-session.
 let overlayWasVisible = true;
+// 标记应用初次冷启动是否已完成。初次就绪后，后续运行期间（登录、切换API/协议、同步配置）的任何后台引擎状态重载一律静默，不再弹遮罩
+let coldStartCompleted = false;
 
 const resolveEngineStatusText = (status: OpenClawEngineStatus): string => {
   switch (status.phase) {
@@ -65,6 +67,11 @@ interface EngineStartupOverlayProps {
    * frame so startup is one continuous screen.
    */
   bootstrapping?: boolean;
+  /**
+   * Explicit visibility control. When provided, takes precedence over
+   * internal phase-based visibility check.
+   */
+  visible?: boolean;
 }
 
 /**
@@ -75,7 +82,10 @@ interface EngineStartupOverlayProps {
  * index.html contains a static pre-React replica of this page; keep the
  * layout in sync so the handoff between the two is invisible.
  */
-const EngineStartupOverlay: React.FC<EngineStartupOverlayProps> = ({ bootstrapping = false }) => {
+const EngineStartupOverlay: React.FC<EngineStartupOverlayProps> = ({
+  bootstrapping = false,
+  visible: controlledVisible,
+}) => {
   const [status, setStatus] = useState<OpenClawEngineStatus | null>(
     () => coworkService.getOpenClawEngineStatusSnapshot()
   );
@@ -92,18 +102,25 @@ const EngineStartupOverlay: React.FC<EngineStartupOverlayProps> = ({ bootstrappi
     coworkService.getOpenClawEngineStatus()
       .then((s) => {
         if (s) setStatus(s);
+        if (s?.phase && s.phase !== 'starting') {
+          coldStartCompleted = true;
+        }
       })
       .catch(() => { /* keep last known status */ });
 
     const unsubscribe = coworkService.onOpenClawEngineStatus((s) => {
       setStatus(s);
+      if (s.phase && s.phase !== 'starting') {
+        coldStartCompleted = true;
+      }
     });
 
     return unsubscribe;
   }, []);
 
-  const isStarting = status?.phase === 'starting';
-  const visible = bootstrapping || isStarting;
+  const isStarting = !coldStartCompleted && status?.phase === 'starting';
+  const computedVisible = (bootstrapping && !coldStartCompleted) || isStarting;
+  const visible = controlledVisible !== undefined ? controlledVisible : computedVisible;
 
   // Fade in only when the overlay appears mid-session (e.g. engine restart),
   // not on app start where the static splash / bootstrap tree already showed it.

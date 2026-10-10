@@ -1,4 +1,4 @@
-import { Type, type TSchema } from "@sinclair/typebox";
+import { type TSchema,Type } from "@sinclair/typebox";
 
 export interface NativeSkillMeta {
   id: string;
@@ -214,14 +214,16 @@ export const NATIVE_SKILLS: NativeSkillMeta[] = [
     id: "item_center_manage",
     name: "项目管理中心与智能调价",
     toolName: "guanjia_item_center_manage",
-    description: "查询服务项目、新增或修改项目标准时长与零售价、启停或下架项目。",
+    description: "查询服务项目（action='query'只读免确认）、新增或修改项目标准时长与零售价、启停或下架项目。",
     schema: Type.Object({
-      action: Type.String({ description: "操作动作：query / create / update / change_status" }),
+      action: Type.Optional(Type.String({ description: "操作动作：query(只读查询项目，默认) / create(新增项目) / update(修改时长售价) / change_status(启停下架) / schedule_edit(创建定时调价编辑)" })),
       item_name: Type.Optional(Type.String({ description: "项目名称" })),
       item_id: Type.Optional(Type.Number({ description: "项目ID" })),
+      category_id: Type.Optional(Type.Number({ description: "归属二级分类/子类ID（新建时必填有效子类ID）" })),
       duration: Type.Optional(Type.Number({ description: "服务时长(分钟)" })),
       price: Type.Optional(Type.Number({ description: "零售价格(元)" })),
       status: Type.Optional(Type.Number({ description: "状态：0=禁用, 1=启用, 2=下架" })),
+      effective_at: Type.Optional(Type.String({ description: "定时调价生效时间（格式：YYYY-MM-DD HH:MM:SS）" })),
     }),
   },
   {
