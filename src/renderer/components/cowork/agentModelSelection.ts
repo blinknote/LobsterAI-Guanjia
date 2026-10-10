@@ -66,6 +66,11 @@ export function resolveAgentModelSelection({
   availableModels,
   fallbackModel,
 }: ResolveAgentModelSelectionInput): ResolveAgentModelSelectionResult {
+  const isSystemBuiltin = fallbackModel?.providerKey === 'system_builtin' || availableModels.some(m => m.providerKey === 'system_builtin');
+  if (isSystemBuiltin && fallbackModel) {
+    return { selectedModel: fallbackModel, usesFallback: true, hasInvalidExplicitModel: false };
+  }
+
   const normalizedSessionModel = sessionModel?.trim() ?? '';
   if (normalizedSessionModel) {
     const explicitSessionModel = resolveOpenClawModelRef(normalizedSessionModel, availableModels) ?? null;

@@ -437,8 +437,9 @@ const ModelSelector: React.FC<ModelSelectorProps> = ({
   const isLoggedIn = useSelector((state: RootState) => state.auth.isLoggedIn);
   const selectedModel = controlled ? value ?? null : globalSelectedModel;
   const selectedModelKey = selectedModel ? getModelIdentityKey(selectedModel) : '';
+  const systemBuiltinModel = useSelector((state: RootState) => state.model.systemBuiltinModel);
   const availableModels = useSelector((state: RootState) => state.model.availableModels);
-  const serverModels = availableModels.filter(m => m.isServerModel);
+  const serverModels = systemBuiltinModel ? [] : availableModels.filter(m => m.isServerModel);
   const userModels = availableModels.filter(m => !m.isServerModel);
   const modelGroups = [
     ...(serverModels.length > 0

@@ -604,6 +604,7 @@ class CoworkService {
         agentService.switchAgent(AgentId.GuanjiaAssistant);
         void this.loadSessions(AgentId.GuanjiaAssistant);
       }
+      void this.syncGuanjiaModelConfig();
     }
 
     const unsubGuanjia = guanjiaSessionService.subscribe(() => {
@@ -618,7 +619,7 @@ class CoworkService {
       lastGuanjiaStoreId = snap.store?.id;
       lastGuanjiaUserId = snap.user?.id;
 
-      if (generationChanged || storeChanged || userChanged || (statusChanged && snap.status !== 'authenticated')) {
+      if (generationChanged || storeChanged || userChanged || statusChanged) {
         this.guanjiaSessionGenerations.clear();
         this.latestLoadSessionsRequestId += 1;
         this.latestLoadSessionRequestId += 1;
@@ -641,42 +642,50 @@ class CoworkService {
             agentService.switchAgent(AgentId.GuanjiaAssistant);
             void this.loadSessions(AgentId.GuanjiaAssistant);
           }
-          if (typeof window !== 'undefined' && window.electron?.guanjia?.getClientModelConfig) {
-            void window.electron.guanjia.getClientModelConfig().then((cfg) => {
-              if (cfg?.success && cfg.data) {
-                const currentModel = store.getState().model.defaultSelectedModel;
-                if (cfg.data.hide_youdao_models && cfg.data.model_name) {
-                  if (
-                    currentModel?.id === cfg.data.model_name &&
-                    currentModel?.providerKey === 'system_builtin'
-                  ) {
-                    return;
-                  }
-                  store.dispatch(setSystemBuiltinModelOnly({
-                    model_name: cfg.data.model_name,
-                    display_name: cfg.data.display_name || `管家系统内置大模型 (${cfg.data.model_name})`,
-                  }));
-                } else {
-                  if (store.getState().model.backupServerModels) {
-                    store.dispatch(setSystemBuiltinModelOnly(null));
-                  }
-                }
-              }
-            }).catch(() => {});
-          }
+          void this.syncGuanjiaModelConfig();
         } else {
           const curAgentId = store.getState().agent.currentAgentId;
           if (curAgentId === AgentId.GuanjiaAssistant) {
             agentService.switchAgent(AgentId.Main);
             void this.loadSessions(AgentId.Main);
           }
-          if (store.getState().model.backupServerModels) {
+          if (store.getState().model.systemBuiltinModel || store.getState().model.backupServerModels) {
             store.dispatch(setSystemBuiltinModelOnly(null));
           }
         }
       }
     });
     this.streamListenerCleanups.push(unsubGuanjia);
+  }
+
+  public async syncGuanjiaModelConfig(): Promise<void> {
+    if (typeof window === 'undefined' || !window.electron?.guanjia?.getClientModelConfig) {
+      return;
+    }
+    const snap = guanjiaSessionService.getSnapshot();
+    if (snap.status !== 'authenticated') {
+      if (store.getState().model.systemBuiltinModel || store.getState().model.backupServerModels) {
+        store.dispatch(setSystemBuiltinModelOnly(null));
+      }
+      return;
+    }
+    try {
+      const cfg = await window.electron.guanjia.getClientModelConfig();
+      if (cfg?.success && cfg.data) {
+        if (cfg.data.hide_youdao_models && cfg.data.model_name) {
+          store.dispatch(setSystemBuiltinModelOnly({
+            model_name: cfg.data.model_name,
+            display_name: cfg.data.display_name || `管家系统内置大模型 (${cfg.data.model_name})`,
+          }));
+        } else {
+          if (store.getState().model.systemBuiltinModel || store.getState().model.backupServerModels) {
+            store.dispatch(setSystemBuiltinModelOnly(null));
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('[CoworkService] failed to sync Guanjia client model config:', err);
+    }
   }
 
   private isStillRunningError(error: string): boolean {

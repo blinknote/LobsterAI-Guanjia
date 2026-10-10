@@ -103,6 +103,7 @@ interface ModelState {
   selectedModelByAgent: Record<string, Model>;
   availableModels: Model[];
   backupServerModels?: Model[] | null;
+  systemBuiltinModel?: { model_name: string; display_name: string } | null;
 }
 
 /**
@@ -118,6 +119,9 @@ export function selectAgentSelectedModel(
   agentId: string,
   agentModelRef: string,
 ): Model {
+  if (modelState.systemBuiltinModel && modelState.availableModels.length > 0) {
+    return modelState.availableModels[0];
+  }
   const override = modelState.selectedModelByAgent[agentId];
   const trimmed = agentModelRef.trim();
   if (trimmed) {
@@ -162,6 +166,7 @@ const initialState: ModelState = {
   selectedModelByAgent: {},
   availableModels: availableModels,
   backupServerModels: null,
+  systemBuiltinModel: null,
 };
 
 const modelSlice = createSlice({
@@ -180,6 +185,11 @@ const modelSlice = createSlice({
       delete state.selectedModelByAgent[action.payload];
     },
     setAvailableModels: (state, action: PayloadAction<Model[]>) => {
+      if (state.systemBuiltinModel) {
+        const serverModels = (state.backupServerModels ?? []).filter(m => m.isServerModel);
+        state.backupServerModels = [...serverModels, ...action.payload];
+        return;
+      }
       // 保留已有的服务端模型，只更新用户自配模型（与 setServerModels 对称）
       const serverModels = state.availableModels.filter(m => m.isServerModel);
       state.availableModels = [...serverModels, ...action.payload];
@@ -196,6 +206,11 @@ const modelSlice = createSlice({
       syncSelectedModelByAgent(state.selectedModelByAgent, state.availableModels);
     },
     setServerModels: (state, action: PayloadAction<Model[]>) => {
+      if (state.systemBuiltinModel) {
+        const userModels = (state.backupServerModels ?? []).filter(m => !m.isServerModel);
+        state.backupServerModels = [...action.payload, ...userModels];
+        return;
+      }
       // 服务端模型放前面，自配模型保留在后面
       const userModels = state.availableModels.filter(m => !m.isServerModel);
       state.availableModels = [...action.payload, ...userModels];
@@ -211,6 +226,10 @@ const modelSlice = createSlice({
       syncSelectedModelByAgent(state.selectedModelByAgent, state.availableModels);
     },
     clearServerModels: (state) => {
+      if (state.systemBuiltinModel) {
+        state.backupServerModels = (state.backupServerModels ?? []).filter(m => !m.isServerModel);
+        return;
+      }
       state.availableModels = state.availableModels.filter(m => !m.isServerModel);
       availableModels = state.availableModels;
       // 如果 defaultSelectedModel 是服务端模型，切换到第一个可用模型
@@ -226,6 +245,7 @@ const modelSlice = createSlice({
       action: PayloadAction<{ model_name: string; display_name: string } | null>,
     ) => {
       if (action.payload) {
+        state.systemBuiltinModel = action.payload;
         if (!state.backupServerModels) {
           state.backupServerModels = [...state.availableModels];
         }
@@ -242,8 +262,10 @@ const modelSlice = createSlice({
         state.availableModels = [sysModel];
         state.defaultSelectedModel = sysModel;
         availableModels = state.availableModels;
+        state.selectedModelByAgent = {};
         syncSelectedModelByAgent(state.selectedModelByAgent, state.availableModels);
       } else if (state.backupServerModels) {
+        state.systemBuiltinModel = null;
         state.availableModels = [...state.backupServerModels];
         state.backupServerModels = null;
         availableModels = state.availableModels;

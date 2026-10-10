@@ -9,6 +9,7 @@ import modelReducer, {
   setDefaultSelectedModel,
   setSelectedModel,
   setServerModels,
+  setSystemBuiltinModelOnly,
 } from './modelSlice';
 
 const modelA: Model = { id: 'gpt-4o', name: 'GPT-4o', providerKey: 'openai' };
@@ -42,7 +43,58 @@ describe('setSelectedModel', () => {
     expect(state.selectedModelByAgent['agent-1']).toEqual(modelA);
     expect(state.selectedModelByAgent['agent-2']).toEqual(modelB);
   });
+
+  test('forces system builtin model for all agents when systemBuiltinModel is active', () => {
+    let state = makeState({
+      availableModels: [modelA, serverModel],
+      defaultSelectedModel: modelA,
+      selectedModelByAgent: { 'agent-1': modelA, main: serverModel },
+    });
+
+    state = modelReducer(state, setSystemBuiltinModelOnly({
+      model_name: 'gemini-3.8-flash-high',
+      display_name: '管家系统内置大模型 (gemini-3.8-flash-high)',
+    }));
+
+    expect(state.availableModels).toHaveLength(1);
+    expect(state.availableModels[0].id).toBe('gemini-3.8-flash-high');
+    expect(state.defaultSelectedModel.id).toBe('gemini-3.8-flash-high');
+
+    // Both agent-1 and main should resolve to the system builtin model
+    const resAgent1 = selectAgentSelectedModel(state, 'agent-1', 'openai/gpt-4o');
+    expect(resAgent1.id).toBe('gemini-3.8-flash-high');
+
+    const resMain = selectAgentSelectedModel(state, 'main', 'lobsterai-server/server-model');
+    expect(resMain.id).toBe('gemini-3.8-flash-high');
+  });
+
+  test('setServerModels does not overwrite availableModels when systemBuiltinModel is active', () => {
+    let state = makeState({
+      availableModels: [modelA],
+      defaultSelectedModel: modelA,
+    });
+
+    state = modelReducer(state, setSystemBuiltinModelOnly({
+      model_name: 'gemini-3.8-flash-high',
+      display_name: '管家系统内置大模型 (gemini-3.8-flash-high)',
+    }));
+
+    // Incoming server models should update backupServerModels, NOT availableModels
+    state = modelReducer(state, setServerModels([serverModel, lockedServerModel]));
+
+    expect(state.availableModels).toHaveLength(1);
+    expect(state.availableModels[0].id).toBe('gemini-3.8-flash-high');
+    expect(state.defaultSelectedModel.id).toBe('gemini-3.8-flash-high');
+    expect(state.backupServerModels).toEqual([serverModel, lockedServerModel, modelA]);
+
+    // Restoring restores backupServerModels
+    state = modelReducer(state, setSystemBuiltinModelOnly(null));
+    expect(state.systemBuiltinModel).toBeNull();
+    expect(state.availableModels).toEqual([serverModel, lockedServerModel, modelA]);
+    expect(state.backupServerModels).toBeNull();
+  });
 });
+
 
 describe('setDefaultSelectedModel', () => {
   test('sets app-level default model', () => {
