@@ -42,19 +42,26 @@ jobs:
         with:
           node-version: '24.x'
 
+      - name: Generate Cache Keys
+        run: node scripts/generate-cache-keys.cjs
+
       # 1. npm 下载缓存
       - name: Cache npm
         uses: actions/cache@v4
         with:
           path: ~/.npm
-          key: npm-${{ runner.os }}-${{ hashFiles('package.json') }}
+          key: npm-${{ runner.os }}-${{ hashFiles('.dependencies-hash') }}
+          restore-keys: |
+            npm-${{ runner.os }}-
 
       # 2. pnpm store 缓存
       - name: Cache pnpm Store
         uses: actions/cache@v4
         with:
           path: ~/Library/pnpm/store
-          key: pnpm-${{ runner.os }}-${{ hashFiles('package.json') }}
+          key: pnpm-${{ runner.os }}-${{ hashFiles('.dependencies-hash') }}
+          restore-keys: |
+            pnpm-${{ runner.os }}-
 
       # 3. Electron prebuilt 与 electron-builder 缓存
       - name: Cache Electron & Electron-builder Tools
@@ -63,21 +70,27 @@ jobs:
           path: |
             ~/Library/Caches/electron
             ~/Library/Caches/electron-builder
-          key: electron-tools-${{ runner.os }}-${{ hashFiles('package.json') }}
+          key: electron-tools-${{ runner.os }}-${{ hashFiles('.dependencies-hash') }}
+          restore-keys: |
+            electron-tools-${{ runner.os }}-
 
       # 4. OpenClaw 18 个扩展插件缓存
       - name: Cache OpenClaw Plugins
         uses: actions/cache@v4
         with:
           path: vendor/openclaw-plugins
-          key: openclaw-plugins-${{ hashFiles('package.json') }}
+          key: openclaw-plugins-${{ hashFiles('.openclaw-plugins-hash') }}
+          restore-keys: |
+            openclaw-plugins-
 
       # 5. OpenClaw 编译后运行时缓存 (mac-arm64)
       - name: Cache OpenClaw Runtime (mac-arm64)
         uses: actions/cache@v4
         with:
           path: vendor/openclaw-runtime/mac-arm64
-          key: openclaw-runtime-mac-arm64-${{ hashFiles('scripts/patches/**', 'package.json', 'scripts/*openclaw*') }}
+          key: openclaw-runtime-mac-arm64-${{ hashFiles('scripts/patches/**', 'scripts/*openclaw*', '.openclaw-runtime-hash') }}
+          restore-keys: |
+            openclaw-runtime-mac-arm64-
 
       # 6. Skill 依赖缓存 (SKILLs/*/node_modules)
       - name: Cache Skill Dependencies
@@ -88,6 +101,8 @@ jobs:
             SKILLs/pptx/node_modules
             SKILLs/web-search/node_modules
           key: skill-deps-${{ runner.os }}-${{ hashFiles('SKILLs/*/package.json') }}
+          restore-keys: |
+            skill-deps-${{ runner.os }}-
 
       - run: npm install -g pnpm
       - name: Install Dependencies
@@ -152,19 +167,26 @@ jobs:
         with:
           node-version: '24.x'
 
+      - name: Generate Cache Keys
+        run: node scripts/generate-cache-keys.cjs
+
       # 1. npm 下载缓存
       - name: Cache npm
         uses: actions/cache@v4
         with:
           path: ~\AppData\Local\npm-cache
-          key: npm-${{ runner.os }}-${{ hashFiles('package.json') }}
+          key: npm-${{ runner.os }}-${{ hashFiles('.dependencies-hash') }}
+          restore-keys: |
+            npm-${{ runner.os }}-
 
       # 2. pnpm store 缓存
       - name: Cache pnpm Store
         uses: actions/cache@v4
         with:
           path: ~\AppData\Local\pnpm\store
-          key: pnpm-${{ runner.os }}-${{ hashFiles('package.json') }}
+          key: pnpm-${{ runner.os }}-${{ hashFiles('.dependencies-hash') }}
+          restore-keys: |
+            pnpm-${{ runner.os }}-
 
       # 3. Electron prebuilt 与 electron-builder 缓存
       - name: Cache Electron & Electron-builder Tools
@@ -173,7 +195,9 @@ jobs:
           path: |
             ~\AppData\Local\electron\Cache
             ~\AppData\Local\electron-builder\Cache
-          key: electron-tools-${{ runner.os }}-${{ hashFiles('package.json') }}
+          key: electron-tools-${{ runner.os }}-${{ hashFiles('.dependencies-hash') }}
+          restore-keys: |
+            electron-tools-${{ runner.os }}-
 
       # 4. Windows 便携外部运行时 (Python & MinGit) 缓存
       - name: Cache Windows External Runtimes
@@ -183,20 +207,26 @@ jobs:
             resources/python-win
             resources/mingit
           key: win-ext-runtimes-${{ hashFiles('scripts/setup-python-runtime.js', 'scripts/setup-mingit.js') }}
+          restore-keys: |
+            win-ext-runtimes-
 
       # 5. OpenClaw 18 个扩展插件缓存
       - name: Cache OpenClaw Plugins
         uses: actions/cache@v4
         with:
           path: vendor/openclaw-plugins
-          key: openclaw-plugins-${{ hashFiles('package.json') }}
+          key: openclaw-plugins-${{ hashFiles('.openclaw-plugins-hash') }}
+          restore-keys: |
+            openclaw-plugins-
 
       # 6. OpenClaw 编译后运行时缓存 (win-x64)
       - name: Cache OpenClaw Runtime (win-x64)
         uses: actions/cache@v4
         with:
           path: vendor/openclaw-runtime/win-x64
-          key: openclaw-runtime-win-x64-${{ hashFiles('scripts/patches/**', 'package.json', 'scripts/*openclaw*') }}
+          key: openclaw-runtime-win-x64-${{ hashFiles('scripts/patches/**', 'scripts/*openclaw*', '.openclaw-runtime-hash') }}
+          restore-keys: |
+            openclaw-runtime-win-x64-
 
       # 7. Skill 依赖缓存 (SKILLs/*/node_modules)
       - name: Cache Skill Dependencies
@@ -207,6 +237,8 @@ jobs:
             SKILLs/pptx/node_modules
             SKILLs/web-search/node_modules
           key: skill-deps-${{ runner.os }}-${{ hashFiles('SKILLs/*/package.json') }}
+          restore-keys: |
+            skill-deps-${{ runner.os }}-
 
       - run: npm install -g pnpm
       - name: Install Dependencies

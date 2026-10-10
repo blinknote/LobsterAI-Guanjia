@@ -17,6 +17,9 @@ vendor/openclaw-runtime/
 vendor/openclaw-plugins/
 vendor/dsh-runtime/
 vendor/dsh-dist/
+.*-hash
+.openclaw-plugins-hash
+.openclaw-runtime-hash
 
 # Tar archives generated during Windows packaging
 build-tar/
