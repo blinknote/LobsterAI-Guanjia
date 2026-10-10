@@ -3,7 +3,8 @@ import { resolve } from 'node:path';
 
 import { describe, expect, test } from 'vitest';
 
-const repoFile = (path: string): string => readFileSync(resolve(process.cwd(), path), 'utf8');
+const repoFile = (path: string): string =>
+  readFileSync(resolve(process.cwd(), path), 'utf8').replace(/\r\n/g, '\n');
 
 const installerInclude = repoFile('scripts/nsis-installer.nsh');
 const unpackScript = repoFile('scripts/unpack-cfmind.cjs');
@@ -1580,9 +1581,7 @@ describe('Windows installer hardening contracts', () => {
   });
 
   test('validates Dev registration, DisplayName, and UninstallString before permitting staging', () => {
-    const preflightStart = installerInclude.indexOf(
-      '!ifdef LOBSTERAI_DEV_BUILD\n      ; Dev guard for existing/non-empty targets',
-    );
+    const preflightStart = installerInclude.indexOf('!macro customCheckAppRunning');
     const preflightAccepted = installerInclude.indexOf('DevPreflightAccepted:', preflightStart);
     const preflight = installerInclude.slice(preflightStart, preflightAccepted);
 
