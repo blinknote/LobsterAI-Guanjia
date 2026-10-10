@@ -2,6 +2,15 @@ import type { GuanjiaClientModelConfig } from './types';
 
 let cachedGuanjiaModelConfig: GuanjiaClientModelConfig | null = null;
 let isGuanjiaAuthenticated = false;
+let guanjiaSessionTokenGetter: (() => string | null) | null = null;
+
+export function setGuanjiaSessionTokenGetter(getter: (() => string | null) | null): void {
+  guanjiaSessionTokenGetter = getter;
+}
+
+export function getGuanjiaSessionToken(): string | null {
+  return guanjiaSessionTokenGetter ? guanjiaSessionTokenGetter() : null;
+}
 
 export function setGuanjiaAuthenticated(authenticated: boolean): void {
   isGuanjiaAuthenticated = authenticated;

@@ -4,6 +4,7 @@ import {
   isGuanjiaSystemModelActive,
   setCachedGuanjiaModelConfig,
   setGuanjiaAuthenticated,
+  setGuanjiaSessionTokenGetter,
 } from './guanjiaModelConfig';
 import { GuanjiaWorkspaceManager } from './guanjiaWorkspaceManager';
 import { GuanjiaClientModelConfig, GuanjiaIpcChannel, GuanjiaLoginPayload, GuanjiaSessionSnapshot, GuanjiaSsoCredentials, GuanjiaStoreSnapshot, GuanjiaUserSnapshot } from './types';
@@ -32,7 +33,11 @@ export class GuanjiaSession {
   private restorePromise: Promise<GuanjiaSessionSnapshot> | null = null;
   private constructor() {}
   public static getInstance(): GuanjiaSession {
-    return GuanjiaSession.instance ?? (GuanjiaSession.instance = new GuanjiaSession());
+    if (!GuanjiaSession.instance) {
+      GuanjiaSession.instance = new GuanjiaSession();
+      setGuanjiaSessionTokenGetter(() => GuanjiaSession.instance?.getCredentials()?.token || null);
+    }
+    return GuanjiaSession.instance;
   }
   public getSnapshot(): GuanjiaSessionSnapshot {
     return { ...this.snapshot, user: this.snapshot.user ? { ...this.snapshot.user } : null, store: this.snapshot.store ? { ...this.snapshot.store } : null };
@@ -120,7 +125,7 @@ export class GuanjiaSession {
       display_name: '管家系统内置模型 (gemini-3.8-flash-high)',
       balance: 0,
       hide_youdao_models: true,
-      api_base_url: 'https://cpa.qszy.me/v1',
+      api_base_url: 'https://guanjia.qszy.me/api/c/ai/v1',
       api_key: '',
       api_type: 'openai',
     });

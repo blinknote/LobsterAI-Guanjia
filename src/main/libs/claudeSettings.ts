@@ -16,6 +16,7 @@ import {
 } from '../../shared/providers/modelThinking';
 import {
   getCachedGuanjiaModelConfig,
+  getGuanjiaSessionToken,
   isGuanjiaSystemModelActive,
 } from '../guanjia/guanjiaModelConfig';
 import type { SqliteStore } from '../sqliteStore';
@@ -546,8 +547,8 @@ function resolveMatchedProvider(appConfig: AppConfig): { matched: MatchedProvide
     const guanjiaCfg = getCachedGuanjiaModelConfig();
     const modelId = guanjiaCfg?.model_name || 'gemini-3.8-flash-high';
     const displayName = guanjiaCfg?.display_name || `管家系统内置模型 (${modelId})`;
-    const baseURL = guanjiaCfg?.api_base_url || 'https://cpa.qszy.me/v1';
-    const apiKey = guanjiaCfg?.api_key || 'sk-lobsterai-local';
+    const baseURL = guanjiaCfg?.api_base_url || 'https://guanjia.qszy.me/api/c/ai/v1';
+    const apiKey = getGuanjiaSessionToken() || guanjiaCfg?.api_key || 'sk-lobsterai-local';
     return {
       matched: {
         providerName: 'system_builtin',
@@ -844,8 +845,8 @@ export function resolveRawApiConfig(): ApiConfigResolution {
     const guanjiaCfg = getCachedGuanjiaModelConfig();
     const modelId = guanjiaCfg?.model_name || 'gemini-3.8-flash-high';
     const displayName = guanjiaCfg?.display_name || `管家系统内置模型 (${modelId})`;
-    const baseURL = guanjiaCfg?.api_base_url || 'https://cpa.qszy.me/v1';
-    const apiKey = guanjiaCfg?.api_key || 'sk-lobsterai-local';
+    const baseURL = guanjiaCfg?.api_base_url || 'https://guanjia.qszy.me/api/c/ai/v1';
+    const apiKey = getGuanjiaSessionToken() || guanjiaCfg?.api_key || 'sk-lobsterai-local';
     return {
       config: {
         apiKey,
@@ -955,7 +956,7 @@ export function resolveAllProviderApiKeys(): Record<string, string> {
 
   if (isGuanjiaSystemModelActive()) {
     const guanjiaCfg = getCachedGuanjiaModelConfig();
-    const apiKey = guanjiaCfg?.api_key?.trim() || 'sk-lobsterai-local';
+    const apiKey = getGuanjiaSessionToken() || guanjiaCfg?.api_key?.trim() || 'sk-lobsterai-local';
     result.SYSTEM_BUILTIN = apiKey;
   }
 
@@ -1061,8 +1062,8 @@ export function resolveAllEnabledProviderConfigs(): ProviderRawConfig[] {
     const guanjiaCfg = getCachedGuanjiaModelConfig();
     const modelName = guanjiaCfg?.model_name || 'gemini-3.8-flash-high';
     const displayName = guanjiaCfg?.display_name || `管家系统内置模型 (${modelName})`;
-    const effectiveBaseUrl = guanjiaCfg?.api_base_url || 'https://cpa.qszy.me/v1';
-    const effectiveApiKey = guanjiaCfg?.api_key || 'sk-lobsterai-local';
+    const effectiveBaseUrl = guanjiaCfg?.api_base_url || 'https://guanjia.qszy.me/api/c/ai/v1';
+    const effectiveApiKey = getGuanjiaSessionToken() || guanjiaCfg?.api_key || 'sk-lobsterai-local';
     result.push({
       providerName: 'system_builtin',
       baseURL: effectiveBaseUrl,

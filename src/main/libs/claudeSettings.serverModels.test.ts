@@ -5,19 +5,19 @@ vi.mock('electron', () => ({
 }));
 
 import {
-  clearServerModelMetadata,
-  evaluateServerModelRunGate,
-  getAllServerModelMetadata,
-  ServerModelRunGateReason,
-  updateServerModelMetadata,
-  resolveAllEnabledProviderConfigs,
-  resolveAllProviderApiKeys,
-  resolveRawApiConfig,
-} from './claudeSettings';
-import {
   setCachedGuanjiaModelConfig,
   setGuanjiaAuthenticated,
 } from '../guanjia/guanjiaModelConfig';
+import {
+  clearServerModelMetadata,
+  evaluateServerModelRunGate,
+  getAllServerModelMetadata,
+  resolveAllEnabledProviderConfigs,
+  resolveAllProviderApiKeys,
+  resolveRawApiConfig,
+  ServerModelRunGateReason,
+  updateServerModelMetadata,
+} from './claudeSettings';
 
 beforeEach(() => {
   clearServerModelMetadata();
@@ -58,6 +58,37 @@ describe('server model metadata cache', () => {
       maxTokens: 1_048_576,
       explicitContextCache: undefined,
     }]);
+  });
+
+  test('uses relay endpoint and fallback key when server returns zero key in relay mode', () => {
+    setGuanjiaAuthenticated(true);
+    setCachedGuanjiaModelConfig({
+      client_ai_provider: 'system_builtin',
+      provider_name: 'system_builtin',
+      model_name: 'gemini-3.8-flash-high',
+      display_name: '管家系统内置模型 (gemini-3.8-flash-high)',
+      api_base_url: 'https://guanjia.qszy.me/api/c/ai/v1',
+      api_key: '',
+      api_type: 'openai',
+      hide_youdao_models: true,
+    });
+
+    const providers = resolveAllEnabledProviderConfigs();
+    const systemBuiltin = providers.find((p) => p.providerName === 'system_builtin');
+    expect(systemBuiltin).toBeDefined();
+    expect(systemBuiltin?.baseURL).toBe('https://guanjia.qszy.me/api/c/ai/v1');
+    expect(systemBuiltin?.apiKey).toBe('sk-lobsterai-local');
+
+    const apiKeys = resolveAllProviderApiKeys();
+    expect(apiKeys.SYSTEM_BUILTIN).toBe('sk-lobsterai-local');
+
+    const raw = resolveRawApiConfig();
+    expect(raw.config).toMatchObject({
+      model: 'gemini-3.8-flash-high',
+      baseURL: 'https://guanjia.qszy.me/api/c/ai/v1',
+      apiKey: 'sk-lobsterai-local',
+      apiType: 'openai',
+    });
   });
 
   test('overrides untrusted K3 capability values with the client runtime profile', () => {
