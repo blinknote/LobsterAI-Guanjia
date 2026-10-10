@@ -6,6 +6,7 @@
 import { EyeIcon, EyeSlashIcon, XCircleIcon as XCircleIconSolid } from '@heroicons/react/20/solid';
 import { ArrowLeftIcon, CheckCircleIcon, CheckIcon, ChevronDownIcon, ChevronRightIcon, EllipsisVerticalIcon, ExclamationTriangleIcon, PlusIcon, SignalIcon, XCircleIcon, XMarkIcon } from '@heroicons/react/24/outline';
 import { ArrowPathIcon } from '@heroicons/react/24/outline';
+import { AgentId } from '@shared/agent/constants';
 import type { Platform } from '@shared/platform';
 import { PlatformRegistry } from '@shared/platform';
 import WecomAIBotSDK from '@wecom/wecom-aibot-sdk';
@@ -13,11 +14,12 @@ import { QRCodeSVG } from 'qrcode.react';
 import React, { useEffect, useMemo, useRef,useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 
+import { agentService } from '../../services/agent';
 import { i18nService } from '../../services/i18n';
 import { imService } from '../../services/im';
 import { LogReporterAction, reportYdAnalyzer } from '../../services/logReporter';
 import { RootState } from '../../store';
-import { clearError,setDingTalkConfig, setDingTalkInstanceConfig, setDiscordConfig, setDiscordInstanceConfig, setEmailInstanceConfig, setFeishuConfig, setFeishuInstanceConfig, setNeteaseBeeChanConfig, setNimConfig, setNimInstanceConfig, setPopoInstanceConfig, setQQConfig, setQQInstanceConfig, setTelegramInstanceConfig, setTelegramOpenClawConfig, setWecomConfig, setWecomInstanceConfig, setWeixinConfig } from '../../store/slices/imSlice';
+import { clearError, setDingTalkConfig, setDingTalkInstanceConfig, setDiscordConfig, setDiscordInstanceConfig, setEmailInstanceConfig, setFeishuConfig, setFeishuInstanceConfig, setIMSettings, setNeteaseBeeChanConfig, setNimConfig, setNimInstanceConfig, setPopoInstanceConfig, setQQConfig, setQQInstanceConfig, setTelegramInstanceConfig, setTelegramOpenClawConfig, setWecomConfig, setWecomInstanceConfig, setWeixinConfig } from '../../store/slices/imSlice';
 import type { EmailInstanceConfig, IMConnectivityCheck, IMConnectivityTestResult, IMGatewayConfig, WeixinOpenClawConfig } from '../../types/im';
 import { MAX_DINGTALK_INSTANCES, MAX_DISCORD_INSTANCES, MAX_EMAIL_INSTANCES, MAX_FEISHU_INSTANCES, MAX_NIM_INSTANCES, MAX_POPO_INSTANCES, MAX_QQ_INSTANCES, MAX_TELEGRAM_INSTANCES, MAX_WECOM_INSTANCES } from '../../types/im';
 import { getVisibleIMPlatforms } from '../../utils/regionFilter';
@@ -437,6 +439,150 @@ const IMSettings: React.FC = () => {
   const weixinLoginRequestRef = useRef(0);
   const weixinDmPolicyMenuRef = useRef<HTMLDivElement>(null);
   const [_localIp, setLocalIp] = useState<string>('');
+  const agents = useSelector((state: RootState) => state.agent.agents);
+  const [openBindingMenuKey, setOpenBindingMenuKey] = useState<string | null>(null);
+  const bindingMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    void agentService.loadAgents();
+  }, []);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (bindingMenuRef.current?.contains(event.target as Node)) return;
+      setOpenBindingMenuKey(null);
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const availableAgents = useMemo(() => {
+    const list: Array<{ id: string; name: string }> = [
+      { id: 'main', name: i18nService.t('agentMainTitle') || '主 Agent (通用助理)' },
+    ];
+    const guanjia = agents.find((a) => a.id === AgentId.GuanjiaAssistant || a.id === 'guanjia-assistant');
+    list.push({
+      id: AgentId.GuanjiaAssistant,
+      name: guanjia?.name || i18nService.t('guanjiaAssistantName') || '智慧管家助理',
+    });
+    for (const a of agents) {
+      if (a.id === 'main' || a.id === AgentId.GuanjiaAssistant || a.id === 'guanjia-assistant') continue;
+      if (a.enabled) {
+        list.push({ id: a.id, name: a.name });
+      }
+    }
+    return list;
+  }, [agents]);
+
+  const handleAgentBindingChange = async (bindingKey: string, newAgentId: string) => {
+    const currentBindings = { ...(config.settings?.platformAgentBindings || {}) };
+    if (newAgentId === 'main') {
+      delete currentBindings[bindingKey];
+    } else {
+      currentBindings[bindingKey] = newAgentId;
+    }
+    const newSettings = {
+      ...config.settings,
+      platformAgentBindings: currentBindings,
+    };
+    dispatch(setIMSettings(newSettings));
+    await imService.persistConfig({ settings: newSettings });
+    await imService.saveAndSyncConfig();
+    window.dispatchEvent(new CustomEvent('app:showToast', {
+      detail: i18nService.t('imBoundAgentUpdated') || '已更新关联智能体',
+    }));
+  };
+
+  const renderAgentBindingSelector = (bindingKey: string) => {
+    const boundAgentId = config.settings?.platformAgentBindings?.[bindingKey]
+      || (bindingKey.includes(':') ? config.settings?.platformAgentBindings?.[bindingKey.split(':')[0]] : null)
+      || 'main';
+    const currentAgent = availableAgents.find((a) => a.id === boundAgentId)
+      || availableAgents.find((a) => a.id === 'main')
+      || { id: 'main', name: i18nService.t('agentMainTitle') || '主 Agent (通用助理)' };
+    const isOpen = openBindingMenuKey === bindingKey;
+
+    return (
+      <div className="relative" ref={isOpen ? bindingMenuRef : undefined}>
+        <button
+          type="button"
+          onClick={() => setOpenBindingMenuKey(isOpen ? null : bindingKey)}
+          className={`flex min-h-[42px] w-full items-center rounded-lg border px-3 text-left transition-colors ${
+            isOpen
+              ? 'border-primary bg-surface-raised shadow-subtle'
+              : 'border-border-subtle bg-surface hover:border-border hover:bg-surface-raised'
+          }`}
+          aria-haspopup="listbox"
+          aria-expanded={isOpen}
+        >
+          <span className="text-xs font-medium text-foreground">
+            {i18nService.t('imBoundAgentLabel')}
+          </span>
+          <span className="ml-auto flex items-center gap-1.5 text-xs font-medium text-foreground">
+            {currentAgent.id === AgentId.GuanjiaAssistant ? (
+              <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[11px] bg-primary/10 text-primary font-medium">
+                {currentAgent.name}
+              </span>
+            ) : (
+              currentAgent.name
+            )}
+          </span>
+          <ChevronDownIcon className={`ml-2 h-3.5 w-3.5 flex-shrink-0 text-secondary transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+        </button>
+        {isOpen && (
+          <div className="absolute left-0 right-0 top-full z-30 mt-1 overflow-hidden rounded-lg border border-border bg-surface shadow-popover popover-enter">
+            <div className="py-1" role="listbox">
+              {availableAgents.map((agent) => {
+                const selected = agent.id === boundAgentId;
+                return (
+                  <button
+                    key={agent.id}
+                    type="button"
+                    role="option"
+                    aria-selected={selected}
+                    onClick={() => {
+                      setOpenBindingMenuKey(null);
+                      void handleAgentBindingChange(bindingKey, agent.id);
+                    }}
+                    className={`flex w-full items-center gap-2 px-3 py-2 text-left text-xs transition-colors ${
+                      selected ? 'bg-primary/10 text-primary' : 'text-foreground hover:bg-surface-raised'
+                    }`}
+                  >
+                    <span className="min-w-0 flex-1 truncate font-medium">
+                      {agent.name}
+                    </span>
+                    {agent.id === AgentId.GuanjiaAssistant && (
+                      <span className="text-[10px] text-primary bg-primary/10 px-1 py-0.5 rounded">
+                        {i18nService.t('imBoundAgentGuanjiaDesc')}
+                      </span>
+                    )}
+                    {agent.id === 'main' && (
+                      <span className="text-[10px] text-secondary">
+                        {i18nService.t('imBoundAgentMainDesc')}
+                      </span>
+                    )}
+                    {selected && <CheckIcon className="h-3.5 w-3.5 flex-shrink-0" />}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const renderAgentBindingCard = (platform: Platform, instanceId: string) => {
+    const bindingKey = `${platform}:${instanceId}`;
+    return (
+      <div className="rounded-lg border border-border-subtle bg-surface p-3 space-y-2">
+        <h4 className="text-xs font-medium text-secondary">
+          {i18nService.t('imBoundAgent')}
+        </h4>
+        {renderAgentBindingSelector(bindingKey)}
+      </div>
+    );
+  };
   const isMountedRef = useRef(true);
 
   // OpenClaw config schema for schema-driven forms
@@ -2013,6 +2159,26 @@ const IMSettings: React.FC = () => {
                         {connected ? i18nService.t('connected') : i18nService.t('disconnected')}
                       </span>
                     </div>
+                    {(() => {
+                      const boundKey = `${platform}:${instance.instanceId}`;
+                      const boundAgentId = config.settings?.platformAgentBindings?.[boundKey]
+                        || config.settings?.platformAgentBindings?.[platform]
+                        || 'main';
+                      const boundAgent = availableAgents.find((a) => a.id === boundAgentId);
+                      const boundAgentName = boundAgent?.name || (boundAgentId === 'main' ? (i18nService.t('agentMainTitle') || '主 Agent') : boundAgentId);
+                      return (
+                        <div className="mt-1 flex items-center gap-1 text-[11px]">
+                          <span className="text-secondary">{i18nService.t('imBoundAgent')}:</span>
+                          <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${
+                            boundAgentId === AgentId.GuanjiaAssistant
+                              ? 'bg-primary/10 text-primary'
+                              : 'text-foreground bg-surface-raised'
+                          }`}>
+                            {boundAgentName}
+                          </span>
+                        </div>
+                      );
+                    })()}
                     {lastError && (
                       <p className="mt-1 line-clamp-1 text-xs text-red-500">
                         {translateIMError(lastError)}
@@ -2222,6 +2388,7 @@ const IMSettings: React.FC = () => {
                 connectivityResults={connectivityResults}
                 language={language}
               />
+              {activeDingTalkInstanceId && renderAgentBindingCard('dingtalk', activeDingTalkInstanceId)}
               {renderInstanceSaveReminder('dingtalk', selectedInstance as unknown as IMInstanceConfigCard, selectedStatus)}
             </div>
           );
@@ -2269,6 +2436,7 @@ const IMSettings: React.FC = () => {
                 connectivityResults={connectivityResults}
                 language={language}
               />
+              {activeFeishuInstanceId && renderAgentBindingCard('feishu', activeFeishuInstanceId)}
               {renderInstanceSaveReminder('feishu', selectedInstance as unknown as IMInstanceConfigCard, selectedStatus)}
             </div>
           );
@@ -2312,6 +2480,7 @@ const IMSettings: React.FC = () => {
                 testingPlatform={testingPlatform}
                 connectivityResults={connectivityResults}
               />
+              {activeQQInstanceId && renderAgentBindingCard('qq', activeQQInstanceId)}
               {renderInstanceSaveReminder('qq', selectedInstance as unknown as IMInstanceConfigCard, selectedStatus)}
             </div>
           );
@@ -2440,6 +2609,7 @@ const IMSettings: React.FC = () => {
               </div>
 
               {renderInstanceSaveReminder('email', inst as unknown as IMInstanceConfigCard, instStatus)}
+              {activeEmailInstanceId && renderAgentBindingCard('email', activeEmailInstanceId)}
 
               {/* Email Address */}
               <div>
@@ -2699,6 +2869,7 @@ const IMSettings: React.FC = () => {
                 language={language}
               />
               {renderInstanceSaveReminder('telegram', selectedInstance as unknown as IMInstanceConfigCard, selectedStatus)}
+              {activeTelegramInstanceId && renderAgentBindingCard('telegram', activeTelegramInstanceId)}
             </div>
           );
         })()}
@@ -2743,6 +2914,7 @@ const IMSettings: React.FC = () => {
                 language={language}
               />
               {renderInstanceSaveReminder('discord', selectedInstance as unknown as IMInstanceConfigCard, selectedStatus)}
+              {activeDiscordInstanceId && renderAgentBindingCard('discord', activeDiscordInstanceId)}
             </div>
           );
         })()}
@@ -2791,6 +2963,7 @@ const IMSettings: React.FC = () => {
                 connectivityResults={connectivityResults}
               />
               {renderInstanceSaveReminder('nim', selectedInstance as unknown as IMInstanceConfigCard, selectedStatus)}
+              {activeNimInstanceId && renderAgentBindingCard('nim', activeNimInstanceId)}
             </div>
           );
         })()}
@@ -2867,6 +3040,13 @@ const IMSettings: React.FC = () => {
             <div className="pt-1">
               {renderConnectivityTestButton('netease-bee')}
             </div>
+
+            <section>
+              <h4 className="mb-2 text-xs font-medium text-secondary">
+                {i18nService.t('imBoundAgent')}
+              </h4>
+              {renderAgentBindingSelector('netease-bee')}
+            </section>
 
             {renderPlatformRuntimeNotice('netease-bee')}
 
@@ -3016,6 +3196,13 @@ const IMSettings: React.FC = () => {
                         </div>
                       )}
                     </div>
+                  </section>
+
+                  <section>
+                    <h4 className="mb-2 text-xs font-medium text-secondary">
+                      {i18nService.t('imBoundAgent')}
+                    </h4>
+                    {renderAgentBindingSelector('weixin')}
                   </section>
 
                   <details className="group">
@@ -3186,6 +3373,7 @@ const IMSettings: React.FC = () => {
                   language={language}
                   renderPairingSection={renderPairingSection}
                 />
+                {activeWecomInstanceId && renderAgentBindingCard('wecom', activeWecomInstanceId)}
                 {renderInstanceSaveReminder('wecom', activeWecomInstance as unknown as IMInstanceConfigCard, activeWecomStatus)}
               </div>
             );
@@ -3239,6 +3427,7 @@ const IMSettings: React.FC = () => {
                 language={language}
               />
               {renderInstanceSaveReminder('popo', selectedInstance as unknown as IMInstanceConfigCard, selectedStatus)}
+              {activePopoInstanceId && renderAgentBindingCard('popo', activePopoInstanceId)}
             </div>
           );
         })()}

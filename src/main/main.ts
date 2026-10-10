@@ -10668,6 +10668,7 @@ if (!gotTheLock) {
           && GUANJIA_ASSISTANT_TOOL_NAMES.every((name) => allow.includes(name));
       } catch { return false; }
     },
+    getIMStore: () => getIMGatewayManager().getIMStore(),
   });
 
   guardedCoworkHandle('cowork:session:contextUsage', async (_event, sessionId: string) => {

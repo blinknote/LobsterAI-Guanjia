@@ -3979,6 +3979,11 @@ export class OpenClawConfigSync {
     if (!platformBindings || Object.keys(platformBindings).length === 0) return {};
 
     const agents = this.getAgents?.() ?? [];
+    const isTargetAgentValid = (agentId: string) => {
+      if (agentId === AgentId.Main) return true;
+      if (agentId === AgentId.GuanjiaAssistant || agentId === 'guanjia-assistant') return true;
+      return agents.some(a => a.id === agentId && a.enabled);
+    };
 
     const bindings: Array<Record<string, unknown>> = [];
 
@@ -4003,8 +4008,7 @@ export class OpenClawConfigSync {
           const bindingKey = `${platform}:${inst.instanceId}`;
           const agentId = platformBindings[bindingKey];
           if (!agentId) continue;
-          const targetAgent = agents.find(a => a.id === agentId && a.enabled);
-          if (agentId !== AgentId.Main && !targetAgent) continue;
+          if (!isTargetAgentValid(agentId)) continue;
           const accountId = platform === 'nim'
             ? deriveNimAccountId(inst as NimInstanceConfig)
             : inst.instanceId.slice(0, 8);
@@ -4013,9 +4017,8 @@ export class OpenClawConfigSync {
         }
         // Also check legacy platform-level binding
         const platformAgentId = platformBindings[platform];
-        if (platformAgentId && platformAgentId !== 'main') {
-          const targetAgent = agents.find(a => a.id === platformAgentId && a.enabled);
-          if (targetAgent && instances.some(i => i.enabled)) {
+        if (platformAgentId && platformAgentId !== 'main' && isTargetAgentValid(platformAgentId)) {
+          if (instances.some(i => i.enabled)) {
             bindings.push({
               agentId: platformAgentId,
               match: { channel, accountId: OPENCLAW_BINDING_ANY_ACCOUNT_ID },
@@ -4039,10 +4042,7 @@ export class OpenClawConfigSync {
 
     for (const { getter, channel, platform } of singleInstanceChannels) {
       const agentId = platformBindings[platform];
-      if (!agentId || agentId === 'main') continue;
-
-      const targetAgent = agents.find(a => a.id === agentId && a.enabled);
-      if (!targetAgent) continue;
+      if (!agentId || agentId === 'main' || !isTargetAgentValid(agentId)) continue;
 
       try {
         const cfg = getter();

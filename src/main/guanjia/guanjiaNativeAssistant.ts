@@ -21,6 +21,7 @@ import {
 } from '../../shared/guanjia/native';
 import type { CoworkStore } from '../coworkStore';
 import { t } from '../i18n';
+import type { IMStore } from '../im/imStore';
 import type { CoworkRuntime, CoworkStartOptions } from '../libs/agentEngine/types';
 import { buildManagedSessionKey } from '../libs/openclawChannelSessionSync';
 import { PRESET_AGENTS } from '../presetAgents';
@@ -38,6 +39,7 @@ export interface NativeAssistantRuntimeOptions {
   ensureModelReady: () => Promise<{ allowed: boolean; error?: string }>;
   getWorkspaceRoot: () => string;
   isBusinessBridgeReady: () => boolean;
+  getIMStore?: () => IMStore | null;
 }
 let runtime: NativeAssistantRuntimeOptions | undefined;
 function getHostWindow(): BrowserWindow | null {
@@ -358,7 +360,61 @@ async function reconcilePendingActionsForSessions(scopedSessions: GuanjiaScopedS
 export async function handleGuanjiaNativeToolCall(request: GuanjiaToolBridgeRequest, signal?: AbortSignal): Promise<GuanjiaToolBridgeResponse> {
   const reply = (value: unknown, isError = false): GuanjiaToolBridgeResponse => ({ content: [{ type: 'text', text: JSON.stringify(publicData(value)) }], ...(isError ? { isError } : {}) });
   try {
-    const scoped = Array.from(sessions.values()).find((s) => s.openclawSessionKey === request.context.sessionKey);
+    const sessionKey = request.context.sessionKey || '';
+    let scoped = Array.from(sessions.values()).find((s) => s.openclawSessionKey === sessionKey);
+    const isChannelKey = sessionKey.startsWith('agent:guanjia-assistant:') || sessionKey.startsWith(`agent:${AgentId.GuanjiaAssistant}:`);
+
+    if (isChannelKey) {
+      const snapshot = GuanjiaSession.getInstance().getSnapshot();
+      if (snapshot.status !== 'authenticated' || !snapshot.user?.tenantId || !snapshot.store) {
+        throw new Error('智慧管家当前未在桌面端登录，无法访问门店业务数据，请先在电脑端登录智慧管家账号。');
+      }
+
+      if (scoped) {
+        if (scoped.generation !== snapshot.generation || String(scoped.storeId) !== String(snapshot.store.id)) {
+          scoped.generation = snapshot.generation;
+          scoped.tenantId = snapshot.user.tenantId;
+          scoped.userId = snapshot.user.id;
+          scoped.storeId = snapshot.store.id;
+          scoped.storeCode = snapshot.store.code;
+          scoped.updatedAt = Date.now();
+        }
+      } else {
+        const imStore = runtime?.getIMStore?.();
+        const mapping = imStore?.getSessionMappingByOpenClawSessionKey(sessionKey);
+        let sessionId = mapping?.coworkSessionId;
+        if (!sessionId) {
+          const root = runtime?.getWorkspaceRoot() ?? '/tmp';
+          fs.mkdirSync(root, { recursive: true });
+          const cwd = fs.mkdtempSync(path.join(root, 'im-session-'));
+          const created = runtime?.getCoworkStore().createSession(
+            '智慧管家IM渠道会话',
+            cwd,
+            systemPrompt(),
+            'local',
+            [],
+            AgentId.GuanjiaAssistant,
+          );
+          sessionId = created?.id ?? crypto.randomUUID();
+        }
+        scoped = {
+          sessionId,
+          openclawSessionKey: sessionKey,
+          agentId: AgentId.GuanjiaAssistant,
+          assistantType: 'general',
+          tenantId: snapshot.user.tenantId,
+          userId: snapshot.user.id,
+          storeId: snapshot.store.id,
+          storeCode: snapshot.store.code,
+          generation: snapshot.generation,
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+          title: '智慧管家IM渠道会话',
+        };
+        sessions.set(sessionId, scoped);
+      }
+    }
+
     if (!scoped || !currentScope(scoped) || !runtime?.isBusinessBridgeReady() || signal?.aborted) throw new Error('业务工具会话不可用或已失效');
     assertAllowedModelParameters(request.args);
     if (request.toolName === 'guanjia_get_context') { const snapshot = GuanjiaSession.getInstance().getSnapshot(); return reply({ user: snapshot.user, store: snapshot.store, assistantType: scoped.assistantType }); }
@@ -371,7 +427,14 @@ export async function handleGuanjiaNativeToolCall(request: GuanjiaToolBridgeRequ
       const requestId = crypto.randomUUID();
       try {
         const run = decodeRun(await requestGuanjiaBusinessApi({ path: '/api/c/ai/skills/execute', method: 'POST', body: { skill_id: skillId, params: parameters, session_id: scoped.sessionId, request_id: requestId }, expectedGeneration: scoped.generation, signal }));
-        bindRun(scoped, run, skillId); return reply(run);
+        bindRun(scoped, run, skillId);
+        if (run.status === 'confirmation_required' && isChannelKey) {
+          const channelNotice = '（提示：该操作涉及资金或写操作，已生成待确认凭单并推送到门店管家桌面端，请通知前台或店长在电脑端核对并点击确认。）';
+          if (typeof run.reply === 'string' && !run.reply.includes('电脑端')) {
+            run.reply = `${run.reply}\n\n${channelNotice}`;
+          }
+        }
+        return reply(run);
       } catch (error) {
         if (error instanceof GuanjiaBusinessApiError && error.unknownOutcome) return reply({ status: 'unknown', request_id: error.requestId ?? requestId, run_id: error.runId, message: error.message }, true);
         throw error;
@@ -606,6 +669,45 @@ export function registerGuanjiaNativeAssistantHandlers(options: NativeAssistantR
     catch (error) { return { success: false, runId: params?.runId ?? '', status: 'unknown', error: error instanceof Error ? error.message : '取消失败' }; }
   });
 }
+function checkOrRestoreGuanjiaScope(id: string): boolean {
+  let scoped = sessions.get(id);
+  const snapshot = GuanjiaSession.getInstance().getSnapshot();
+  if (snapshot.status !== 'authenticated' || !snapshot.user || !snapshot.store) {
+    return false;
+  }
+  if (!scoped) {
+    const session = runtime?.getCoworkStore().getSession(id);
+    if (session?.agentId === AgentId.GuanjiaAssistant) {
+      const mapping = runtime?.getIMStore?.()?.getSessionMappingByCoworkSessionId(id);
+      const openclawSessionKey = mapping?.openClawSessionKey || buildManagedSessionKey(id, AgentId.GuanjiaAssistant);
+      scoped = {
+        sessionId: id,
+        openclawSessionKey,
+        agentId: AgentId.GuanjiaAssistant,
+        assistantType: 'general',
+        tenantId: snapshot.user.tenantId,
+        userId: snapshot.user.id,
+        storeId: snapshot.store.id,
+        storeCode: snapshot.store.code,
+        generation: snapshot.generation,
+        createdAt: session.createdAt || Date.now(),
+        updatedAt: session.updatedAt || Date.now(),
+        title: session.title || '智慧管家会话',
+      };
+      sessions.set(id, scoped);
+    }
+  } else if (!scoped.openclawSessionKey.includes(':lobsterai:')) {
+    if (scoped.generation !== snapshot.generation || String(scoped.storeId) !== String(snapshot.store.id)) {
+      scoped.generation = snapshot.generation;
+      scoped.tenantId = snapshot.user.tenantId;
+      scoped.userId = snapshot.user.id;
+      scoped.storeId = snapshot.store.id;
+      scoped.storeCode = snapshot.store.code;
+      scoped.updatedAt = Date.now();
+    }
+  }
+  return currentScope(scoped);
+}
 export function isSessionGuanjiaProtected(id: string): boolean { return sessions.has(id) || (runtime?.getCoworkStore().getSession(id)?.agentId === AgentId.GuanjiaAssistant); }
-export function canAccessGuanjiaSession(id: string): boolean { return !isSessionGuanjiaProtected(id) || currentScope(sessions.get(id)); }
-export function filterAccessibleSessions<T extends { id: string; agentId?: string | null; agent_id?: string | null }>(items: T[]): T[] { return items.filter((s) => (s.agentId ?? s.agent_id) !== AgentId.GuanjiaAssistant || currentScope(sessions.get(s.id))); }
+export function canAccessGuanjiaSession(id: string): boolean { return !isSessionGuanjiaProtected(id) || checkOrRestoreGuanjiaScope(id); }
+export function filterAccessibleSessions<T extends { id: string; agentId?: string | null; agent_id?: string | null }>(items: T[]): T[] { return items.filter((s) => (s.agentId ?? s.agent_id) !== AgentId.GuanjiaAssistant || checkOrRestoreGuanjiaScope(s.id)); }
