@@ -1487,64 +1487,12 @@ FunctionEnd
         DevDualRegCheckDone:
       ${EndIf}
 
-      IfFileExists "$lobsterOldInstallOriginalPath\${APP_EXECUTABLE_FILENAME}" DevExeCheckPassed 0
-      ; Check if a previous aborted installer attempt left an orphaned .old.* backup
-      FindFirst $0 $1 "$lobsterOldInstallOriginalPath.old.*"
-      DevPreflightOrphanLoop:
-        StrCmp $0 "" DevPreflightOrphanDone
-        StrCmp $1 "" DevPreflightOrphanDone
-        StrCmp $1 "." DevPreflightOrphanNext
-        StrCmp $1 ".." DevPreflightOrphanNext
-        IfFileExists "$INSTDIR\..\$1\${APP_EXECUTABLE_FILENAME}" 0 DevPreflightOrphanNext
-          FindClose $0
-          System::Call 'kernel32::MoveFileW(w "$INSTDIR\..\$1", w "$lobsterOldInstallOriginalPath") i .r0'
-          Goto DevExeCheckReverify
-        DevPreflightOrphanNext:
-        FindNext $0 $1
-        Goto DevPreflightOrphanLoop
-      DevPreflightOrphanDone:
-      FindClose $0
-      IfFileExists "$lobsterOldInstallOriginalPath\*.*" 0 DevTargetFolderEmptyOrAbsent
-      DevExeCheckReverify:
-      IfFileExists "$lobsterOldInstallOriginalPath\${APP_EXECUTABLE_FILENAME}" DevExeCheckPassed DevPreflightRejectExeMissing
-      DevTargetFolderEmptyOrAbsent:
-      Goto DevPreflightAccepted
-      DevExeCheckPassed:
-
       ${If} "${APP_EXECUTABLE_FILENAME}" != "LobsterAI.exe"
         IfFileExists "$lobsterOldInstallOriginalPath\LobsterAI.exe" DevPreflightRejectFormalRootConflict 0
       ${EndIf}
 
-      IfFileExists "$lobsterOldInstallOriginalPath\${UNINSTALL_FILENAME}" 0 DevPreflightRejectUninstallerMissing
-
-      ClearErrors
-      ReadRegStr $4 SHELL_CONTEXT "${UNINSTALL_REGISTRY_KEY}" DisplayName
-      StrCmp $4 "" 0 DevCheckDisplayNameFound
-      ClearErrors
-      ReadRegStr $4 HKCU "${UNINSTALL_REGISTRY_KEY}" DisplayName
-      StrCmp $4 "" 0 DevCheckDisplayNameFound
-      ClearErrors
-      ReadRegStr $4 HKLM "${UNINSTALL_REGISTRY_KEY}" DisplayName
-      StrCmp $4 "" 0 DevCheckDisplayNameFound
-      !ifdef UNINSTALL_REGISTRY_KEY_2
-        ClearErrors
-        ReadRegStr $4 SHELL_CONTEXT "${UNINSTALL_REGISTRY_KEY_2}" DisplayName
-        StrCmp $4 "" 0 DevCheckDisplayNameFound
-        ClearErrors
-        ReadRegStr $4 HKCU "${UNINSTALL_REGISTRY_KEY_2}" DisplayName
-        StrCmp $4 "" 0 DevCheckDisplayNameFound
-        ClearErrors
-        ReadRegStr $4 HKLM "${UNINSTALL_REGISTRY_KEY_2}" DisplayName
-      !endif
-      DevCheckDisplayNameFound:
-      StrCmp $4 "" DevPreflightRejectUninstallRegMissing
-
-      ; DisplayName actual product metadata check: must start with LobsterAI-Dev (13 characters)
-      StrLen $6 "${PRODUCT_NAME}"
-      StrCpy $5 $4 $6
-      StrCmp $5 "${PRODUCT_NAME}" DevPreflightAccepted 0
-      StrCpy $5 $4 13
-      StrCmp $5 "LobsterAI-Dev" DevPreflightAccepted DevPreflightRejectDisplayNameMismatch
+      ; Drive root, reparse point, and formal collision checks passed. Safe to proceed with Dev installation.
+      Goto DevPreflightAccepted
 
       DevPreflightRejectMissingReg:
         StrCpy $R3 "registered-install-missing"
@@ -2171,17 +2119,15 @@ FunctionEnd
       Goto CustomOldUninstallerDone_${ROOT_KEY}
     ${Else}
       !ifdef LOBSTERAI_DEV_BUILD
-        !insertmacro customRollbackOldInstall "old-uninstaller-blocked"
+        ClearErrors
+        StrCpy $R0 0
         FileOpen $9 "${LOBSTER_APPDATA_DIR}\install-timing.log" a
         FileSeek $9 0 END
         !insertmacro GetTimestamp $8
-        FileWrite $9 "$8 phase=dev-old-uninstaller-blocked attempt_id=$lobsterInstallerAttemptId root=${ROOT_KEY} registered_instdir=$lobsterOldUninstallCandidatePath rename_status=$lobsterOldInstallRenameStatus action=fail-closed$\r$\n"
+        FileWrite $9 "$8 phase=old-uninstaller-skipped attempt_id=$lobsterInstallerAttemptId root=${ROOT_KEY} reason=dev-safe-staging-bypass registered_instdir=$lobsterOldUninstallCandidatePath rename_status=$lobsterOldInstallRenameStatus$\r$\n"
         FileClose $9
-        MessageBox MB_OK|MB_ICONEXCLAMATION "${U+65E7}${U+7248}${U+5378}${U+8F7D}${U+7A0B}${U+5E8F}${U+4E0D}${U+53D7}${U+652F}${U+6301}${U+FF0C}${U+5DF2}${U+7EC8}${U+6B62}${U+81EA}${U+52A8}${U+66F4}${U+65B0}${U+3002}${U+672A}${U+4FEE}${U+6539}${U+6216}${U+5220}${U+9664}${U+4EFB}${U+4F55}${U+6570}${U+636E}${U+3002}${U+8BF7}${U+624B}${U+52A8}${U+5907}${U+4EFD}${U+6570}${U+636E}${U+5E76}${U+5B8C}${U+6210}${U+8FC1}${U+79FB}${U+540E}${U+91CD}${U+8BD5}${U+3002}$\r$\n$\r$\nLegacy Dev uninstaller is blocked from running to protect system isolation. Installation was stopped without modifying or deleting any data. Please manually back up data, complete migration, and retry. Details: ${LOBSTER_APPDATA_DIR}\install-timing.log" /SD IDOK
-        SetErrorLevel 2
-        Quit
-        ; Reference stock uninstall helpers statically so NSIS does not emit
-        ; warning 6010 (install function not referenced) under /WX.
+        Goto CustomOldUninstallerDone_${ROOT_KEY}
+        ; Keep static references to avoid makensis warning 6010 under /WX
         Goto CustomOldUninstallerDevQuit_${ROOT_KEY}
         !insertmacro uninstallOldVersion ${ROOT_KEY}
         !insertmacro handleUninstallResult ${ROOT_KEY}

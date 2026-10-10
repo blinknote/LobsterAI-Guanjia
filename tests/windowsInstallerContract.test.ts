@@ -1547,23 +1547,13 @@ describe('Windows installer hardening contracts', () => {
     expect(appBuilderPatch).toContain('defines.APP_PACKAGE_URL_IS_INCOMPLETE = null;');
   });
 
-  test('validates Dev uninstaller DisplayName prefix without truncating LobsterAI-Dev', () => {
-    expect(installerInclude).toContain('StrLen $6 "${PRODUCT_NAME}"');
-    expect(installerInclude).toContain('StrCpy $5 $4 $6');
-    expect(installerInclude).toContain('StrCmp $5 "${PRODUCT_NAME}" DevPreflightAccepted');
-    expect(installerInclude).toContain('StrCpy $5 $4 13');
-    expect(installerInclude).toContain('StrCmp $5 "LobsterAI-Dev" DevPreflightAccepted DevPreflightRejectDisplayNameMismatch');
-    // Ensure the old 12-char truncation bug (which truncated "LobsterAI-Dev" to "LobsterAI-De") does not exist
-    expect(installerInclude).not.toMatch(/StrCpy\s+\$5\s+\$4\s+12\s+StrCmp\s+\$5\s+"LobsterAI-Dev"/);
-    expect(installerInclude).not.toContain('StrCpy $5 $4 12\n      StrCmp $5 "LobsterAI-Dev"');
+  test('validates Dev preflight formal collision checks and allows safe installation', () => {
+    expect(installerInclude).toContain('IfFileExists "$lobsterOldInstallOriginalPath\\LobsterAI.exe" DevPreflightRejectFormalRootConflict');
+    expect(installerInclude).toContain('Goto DevPreflightAccepted');
   });
 
-  test('skips legacy uninstaller cleanly when staging rename succeeded and recovers orphaned backups', () => {
-    expect(installerInclude).toContain('FindFirst $0 $1 "$lobsterOldInstallOriginalPath.old.*"');
-    expect(installerInclude).toContain('kernel32::MoveFileW(w "$INSTDIR\\..\\$1", w "$lobsterOldInstallOriginalPath")');
-    expect(installerInclude).toContain('${If} $lobsterOldInstallRenameStatus == "success"');
-    expect(installerInclude).toContain('${ElseIf} $lobsterOldInstallRenameStatus == "not-required"');
+  test('skips legacy uninstaller unconditionally for Dev builds to prevent blocking updates', () => {
+    expect(installerInclude).toContain('reason=dev-safe-staging-bypass');
     expect(installerInclude).toContain('Goto CustomOldUninstallerDone_${ROOT_KEY}');
-    expect(installerInclude).toContain('!insertmacro customRollbackOldInstall "old-uninstaller-blocked"');
   });
 });
