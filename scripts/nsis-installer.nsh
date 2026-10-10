@@ -2084,6 +2084,11 @@ FunctionEnd
   ; only the matching legacy uninstaller is skipped. Every other case retains
   ; the stock uninstallOldVersion fallback and its error handling.
   !macro customUninstallOldVersion ROOT_KEY
+    ; If this was classified as a fresh install, there is no legacy installation.
+    ${If} $lobsterInstallScenario == "fresh-install"
+      Goto CustomOldUninstallerDone_${ROOT_KEY}
+    ${EndIf}
+
     StrCpy $lobsterOldUninstallCandidatePath ""
     StrCpy $lobsterOldUninstallCandidatePathNormalized ""
     ClearErrors
@@ -2091,6 +2096,22 @@ FunctionEnd
     StrCmp $lobsterOldUninstallCandidatePath "" CustomOldUninstallCandidateReady_${ROOT_KEY}
       GetFullPathName $lobsterOldUninstallCandidatePathNormalized "$lobsterOldUninstallCandidatePath"
     CustomOldUninstallCandidateReady_${ROOT_KEY}:
+
+    ClearErrors
+    StrCpy $0 ""
+    !insertmacro readReg $0 ${ROOT_KEY} "${UNINSTALL_REGISTRY_KEY}" UninstallString
+    !ifdef UNINSTALL_REGISTRY_KEY_2
+      ${If} $0 == ""
+        !insertmacro readReg $0 ${ROOT_KEY} "${UNINSTALL_REGISTRY_KEY_2}" UninstallString
+      ${EndIf}
+    !endif
+
+    ; If this root has no registered old installation at all, there is no legacy uninstaller to invoke or block.
+    ${If} $lobsterOldUninstallCandidatePath == ""
+    ${AndIf} $0 == ""
+      ClearErrors
+      Goto CustomOldUninstallerDone_${ROOT_KEY}
+    ${EndIf}
 
     ${If} $lobsterOldInstallRenameStatus == "success"
     ${AndIf} $lobsterOldUninstallCandidatePathNormalized != ""
@@ -2169,6 +2190,7 @@ FunctionEnd
       FileClose $9
       !endif
     ${EndIf}
+    CustomOldUninstallerDone_${ROOT_KEY}:
   !macroend
 
   ; Runs after every old-install root has either been skipped or fully
