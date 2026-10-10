@@ -523,6 +523,7 @@ const CoworkPromptInput = React.forwardRef<CoworkPromptInputRef, CoworkPromptInp
     const isGuanjia = currentAgentId === AgentId.GuanjiaAssistant || contextAgentId === AgentId.GuanjiaAssistant;
     const agents = useSelector((state: RootState) => state.agent.agents);
     const coworkAgentEngine = useSelector((state: RootState) => state.cowork.config.agentEngine);
+    const systemBuiltinModel = useSelector((state: RootState) => state.model.systemBuiltinModel);
     const availableModels = useSelector((state: RootState) => state.model.availableModels);
     const currentSession = useSelector((state: RootState) => state.cowork.currentSession);
     const isLoggedIn = useSelector((state: RootState) => state.auth.isLoggedIn);
@@ -2886,7 +2887,8 @@ const CoworkPromptInput = React.forwardRef<CoworkPromptInputRef, CoworkPromptInp
     return () => window.removeEventListener(ConfigServiceEvent.Updated, syncFromConfig);
   }, []);
 
-  const largeModelSelector = showModelSelector && !isGuanjia ? (
+  const hasSystemBuiltinOnly = Boolean(systemBuiltinModel) || (availableModels.length === 1 && availableModels[0]?.providerKey === 'system_builtin');
+  const largeModelSelector = showModelSelector && !isGuanjia && !hasSystemBuiltinOnly ? (
     <div className="flex flex-col items-start gap-1">
       <ModelSelector
         compact={useHomeContextLayout}
