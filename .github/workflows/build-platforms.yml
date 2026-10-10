@@ -47,7 +47,7 @@ jobs:
 
       # 1. npm 下载缓存
       - name: Cache npm
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.npm
           key: npm-${{ runner.os }}-${{ hashFiles('.dependencies-hash') }}
@@ -56,7 +56,7 @@ jobs:
 
       # 2. pnpm store 缓存
       - name: Cache pnpm Store
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/Library/pnpm/store
           key: pnpm-${{ runner.os }}-${{ hashFiles('.dependencies-hash') }}
@@ -65,7 +65,7 @@ jobs:
 
       # 3. Electron prebuilt 与 electron-builder 缓存
       - name: Cache Electron & Electron-builder Tools
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             ~/Library/Caches/electron
@@ -76,7 +76,7 @@ jobs:
 
       # 4. OpenClaw 18 个扩展插件缓存
       - name: Cache OpenClaw Plugins
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: vendor/openclaw-plugins
           key: openclaw-plugins-${{ hashFiles('.openclaw-plugins-hash') }}
@@ -85,7 +85,7 @@ jobs:
 
       # 5. OpenClaw 编译后运行时缓存 (mac-arm64)
       - name: Cache OpenClaw Runtime (mac-arm64)
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: vendor/openclaw-runtime/mac-arm64
           key: openclaw-runtime-mac-arm64-${{ hashFiles('scripts/patches/**', 'scripts/*openclaw*', '.openclaw-runtime-hash') }}
@@ -94,7 +94,7 @@ jobs:
 
       # 6. Skill 依赖缓存 (SKILLs/*/node_modules)
       - name: Cache Skill Dependencies
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             SKILLs/imap-smtp-email/node_modules
@@ -172,7 +172,7 @@ jobs:
 
       # 1. npm 下载缓存
       - name: Cache npm
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~\AppData\Local\npm-cache
           key: npm-${{ runner.os }}-${{ hashFiles('.dependencies-hash') }}
@@ -181,7 +181,7 @@ jobs:
 
       # 2. pnpm store 缓存
       - name: Cache pnpm Store
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~\AppData\Local\pnpm\store
           key: pnpm-${{ runner.os }}-${{ hashFiles('.dependencies-hash') }}
@@ -190,7 +190,7 @@ jobs:
 
       # 3. Electron prebuilt 与 electron-builder 缓存
       - name: Cache Electron & Electron-builder Tools
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             ~\AppData\Local\electron\Cache
@@ -201,7 +201,7 @@ jobs:
 
       # 4. Windows 便携外部运行时 (Python & MinGit) 缓存
       - name: Cache Windows External Runtimes
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             resources/python-win
@@ -212,7 +212,7 @@ jobs:
 
       # 5. OpenClaw 18 个扩展插件缓存
       - name: Cache OpenClaw Plugins
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: vendor/openclaw-plugins
           key: openclaw-plugins-${{ hashFiles('.openclaw-plugins-hash') }}
@@ -221,7 +221,7 @@ jobs:
 
       # 6. OpenClaw 编译后运行时缓存 (win-x64)
       - name: Cache OpenClaw Runtime (win-x64)
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: vendor/openclaw-runtime/win-x64
           key: openclaw-runtime-win-x64-${{ hashFiles('scripts/patches/**', 'scripts/*openclaw*', '.openclaw-runtime-hash') }}
@@ -230,7 +230,7 @@ jobs:
 
       # 7. Skill 依赖缓存 (SKILLs/*/node_modules)
       - name: Cache Skill Dependencies
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             SKILLs/imap-smtp-email/node_modules
