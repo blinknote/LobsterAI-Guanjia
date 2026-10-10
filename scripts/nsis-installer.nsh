@@ -1642,6 +1642,16 @@ FunctionEnd
 ;  - installer: inside the install section, right after the user confirms,
 ;    before uninstallOldVersion and file extraction
 ;  - uninstaller: un.install section (assisted) or un.onInit (silent /S)
+!macro LobsterReadDevHiveRegStr OUT_VAR HIVE SUB_KEY ENTRY
+  ${If} ${HIVE} == "HKCU"
+    ReadRegStr ${OUT_VAR} HKCU "${SUB_KEY}" "${ENTRY}"
+  ${ElseIf} ${HIVE} == "HKLM"
+    ReadRegStr ${OUT_VAR} HKLM "${SUB_KEY}" "${ENTRY}"
+  ${Else}
+    ReadRegStr ${OUT_VAR} SHELL_CONTEXT "${SUB_KEY}" "${ENTRY}"
+  ${EndIf}
+!macroend
+
 !macro customCheckAppRunning
   ; Silent installs (/S from app stores and IT deployment, or channel builds
   ; with the double-click-silent flag) must show no installer-owned window at
@@ -1746,21 +1756,21 @@ FunctionEnd
       ${EndIf}
 
       ClearErrors
-      ReadRegStr $4 $lobsterOldDevValidatedHive "${UNINSTALL_REGISTRY_KEY}" DisplayName
+      !insertmacro LobsterReadDevHiveRegStr $4 $lobsterOldDevValidatedHive "${UNINSTALL_REGISTRY_KEY}" DisplayName
       !ifdef UNINSTALL_REGISTRY_KEY_2
         ${If} $4 == ""
           ClearErrors
-          ReadRegStr $4 $lobsterOldDevValidatedHive "${UNINSTALL_REGISTRY_KEY_2}" DisplayName
+          !insertmacro LobsterReadDevHiveRegStr $4 $lobsterOldDevValidatedHive "${UNINSTALL_REGISTRY_KEY_2}" DisplayName
         ${EndIf}
       !endif
       StrCmp $4 "" DevPreflightRejectUninstallRegMissing
 
       ClearErrors
-      ReadRegStr $3 $lobsterOldDevValidatedHive "${UNINSTALL_REGISTRY_KEY}" DisplayVersion
+      !insertmacro LobsterReadDevHiveRegStr $3 $lobsterOldDevValidatedHive "${UNINSTALL_REGISTRY_KEY}" DisplayVersion
       !ifdef UNINSTALL_REGISTRY_KEY_2
         ${If} $3 == ""
           ClearErrors
-          ReadRegStr $3 $lobsterOldDevValidatedHive "${UNINSTALL_REGISTRY_KEY_2}" DisplayVersion
+          !insertmacro LobsterReadDevHiveRegStr $3 $lobsterOldDevValidatedHive "${UNINSTALL_REGISTRY_KEY_2}" DisplayVersion
         ${EndIf}
       !endif
 
@@ -1773,11 +1783,11 @@ FunctionEnd
       DevDisplayNameValidated:
 
       ClearErrors
-      ReadRegStr $2 $lobsterOldDevValidatedHive "${UNINSTALL_REGISTRY_KEY}" UninstallString
+      !insertmacro LobsterReadDevHiveRegStr $2 $lobsterOldDevValidatedHive "${UNINSTALL_REGISTRY_KEY}" UninstallString
       !ifdef UNINSTALL_REGISTRY_KEY_2
         ${If} $2 == ""
           ClearErrors
-          ReadRegStr $2 $lobsterOldDevValidatedHive "${UNINSTALL_REGISTRY_KEY_2}" UninstallString
+          !insertmacro LobsterReadDevHiveRegStr $2 $lobsterOldDevValidatedHive "${UNINSTALL_REGISTRY_KEY_2}" UninstallString
         ${EndIf}
       !endif
       StrCmp $2 "" DevPreflightRejectUninstallRegMissing
@@ -2652,7 +2662,6 @@ FunctionEnd
       !insertmacro GetTimestamp $8
       FileWrite $9 "$8 phase=old-uninstaller-complete attempt_id=$lobsterInstallerAttemptId root=${ROOT_KEY} status=handled exit=$R0 elapsed_ms=$5$\r$\n"
       FileClose $9
-      ${EndIf}
     ${EndIf}
     !endif
     CustomOldUninstallerDone_${ROOT_KEY}:
