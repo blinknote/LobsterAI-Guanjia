@@ -1503,11 +1503,25 @@ FunctionEnd
       StrCmp $4 "" 0 DevCheckDisplayNameFound
       ClearErrors
       ReadRegStr $4 HKLM "${UNINSTALL_REGISTRY_KEY}" DisplayName
+      StrCmp $4 "" 0 DevCheckDisplayNameFound
+      !ifdef UNINSTALL_REGISTRY_KEY_2
+        ClearErrors
+        ReadRegStr $4 SHELL_CONTEXT "${UNINSTALL_REGISTRY_KEY_2}" DisplayName
+        StrCmp $4 "" 0 DevCheckDisplayNameFound
+        ClearErrors
+        ReadRegStr $4 HKCU "${UNINSTALL_REGISTRY_KEY_2}" DisplayName
+        StrCmp $4 "" 0 DevCheckDisplayNameFound
+        ClearErrors
+        ReadRegStr $4 HKLM "${UNINSTALL_REGISTRY_KEY_2}" DisplayName
+      !endif
       DevCheckDisplayNameFound:
       StrCmp $4 "" DevPreflightRejectUninstallRegMissing
 
-      ; DisplayName actual product metadata check: must start with LobsterAI-Dev
-      StrCpy $5 $4 12
+      ; DisplayName actual product metadata check: must start with LobsterAI-Dev (13 characters)
+      StrLen $6 "${PRODUCT_NAME}"
+      StrCpy $5 $4 $6
+      StrCmp $5 "${PRODUCT_NAME}" DevPreflightAccepted 0
+      StrCpy $5 $4 13
       StrCmp $5 "LobsterAI-Dev" DevPreflightAccepted DevPreflightRejectDisplayNameMismatch
 
       DevPreflightRejectMissingReg:

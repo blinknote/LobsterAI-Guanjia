@@ -1546,4 +1546,15 @@ describe('Windows installer hardening contracts', () => {
     expect(appBuilderPatch).toContain('Computed URLs point at a directory');
     expect(appBuilderPatch).toContain('defines.APP_PACKAGE_URL_IS_INCOMPLETE = null;');
   });
+
+  test('validates Dev uninstaller DisplayName prefix without truncating LobsterAI-Dev', () => {
+    expect(installerInclude).toContain('StrLen $6 "${PRODUCT_NAME}"');
+    expect(installerInclude).toContain('StrCpy $5 $4 $6');
+    expect(installerInclude).toContain('StrCmp $5 "${PRODUCT_NAME}" DevPreflightAccepted');
+    expect(installerInclude).toContain('StrCpy $5 $4 13');
+    expect(installerInclude).toContain('StrCmp $5 "LobsterAI-Dev" DevPreflightAccepted DevPreflightRejectDisplayNameMismatch');
+    // Ensure the old 12-char truncation bug (which truncated "LobsterAI-Dev" to "LobsterAI-De") does not exist
+    expect(installerInclude).not.toMatch(/StrCpy\s+\$5\s+\$4\s+12\s+StrCmp\s+\$5\s+"LobsterAI-Dev"/);
+    expect(installerInclude).not.toContain('StrCpy $5 $4 12\n      StrCmp $5 "LobsterAI-Dev"');
+  });
 });
