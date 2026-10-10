@@ -88,6 +88,7 @@ import type {
   OpenClawSessionPolicyConfig,
 } from '../types/cowork';
 import { CoworkSessionStatusValue } from '../types/cowork';
+import { agentService } from './agent';
 import { CoworkQueuedFollowUpCoordinator } from './coworkQueuedFollowUpCoordinator';
 import {
   getPreservedMessageWindow,
@@ -597,6 +598,14 @@ class CoworkService {
     let lastGuanjiaStoreId = guanjiaSessionService.getSnapshot().store?.id;
     let lastGuanjiaUserId = guanjiaSessionService.getSnapshot().user?.id;
 
+    if (lastGuanjiaStatus === 'authenticated') {
+      const currentAgentId = store.getState().agent.currentAgentId;
+      if (currentAgentId === AgentId.Main) {
+        agentService.switchAgent(AgentId.GuanjiaAssistant);
+        void this.loadSessions(AgentId.GuanjiaAssistant);
+      }
+    }
+
     const unsubGuanjia = guanjiaSessionService.subscribe(() => {
       const snap = guanjiaSessionService.getSnapshot();
       const generationChanged = snap.generation !== lastGuanjiaGeneration;
@@ -627,6 +636,11 @@ class CoworkService {
           void this.loadSessions();
         }
         if (snap.status === 'authenticated') {
+          const curAgentId = store.getState().agent.currentAgentId;
+          if (curAgentId === AgentId.Main) {
+            agentService.switchAgent(AgentId.GuanjiaAssistant);
+            void this.loadSessions(AgentId.GuanjiaAssistant);
+          }
           if (typeof window !== 'undefined' && window.electron?.guanjia?.getClientModelConfig) {
             void window.electron.guanjia.getClientModelConfig().then((cfg) => {
               if (cfg?.success && cfg.data) {
@@ -651,6 +665,11 @@ class CoworkService {
             }).catch(() => {});
           }
         } else {
+          const curAgentId = store.getState().agent.currentAgentId;
+          if (curAgentId === AgentId.GuanjiaAssistant) {
+            agentService.switchAgent(AgentId.Main);
+            void this.loadSessions(AgentId.Main);
+          }
           if (store.getState().model.backupServerModels) {
             store.dispatch(setSystemBuiltinModelOnly(null));
           }

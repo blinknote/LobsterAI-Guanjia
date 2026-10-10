@@ -22,6 +22,7 @@ import {
 import { agentService } from '../../services/agent';
 import { coworkService } from '../../services/cowork';
 import { buildCoworkCapabilitySelection } from '../../services/coworkCapabilitySelection';
+import { guanjiaSessionService } from '../../services/guanjiaSession';
 import { i18nService } from '../../services/i18n';
 import { quickActionService } from '../../services/quickAction';
 import { RootState } from '../../store';
@@ -750,7 +751,11 @@ const CoworkView: React.FC<CoworkViewProps> = ({
     const handleNewSession = () => {
       // Only clear when already on home (no session) — preserve __home__ draft when returning from a session
       const shouldClear = !currentSession;
-      coworkService.clearSession({ restoreAgentSkills: true });
+      if (guanjiaSessionService.getSnapshot().status === 'authenticated' && currentAgentId === AgentId.Main) {
+        agentService.switchAgent(AgentId.GuanjiaAssistant);
+      } else {
+        coworkService.clearSession({ restoreAgentSkills: true });
+      }
       dispatch(clearSelection());
       dispatch(setDraftCollaborationMode({
         draftKey: '__home__',
@@ -764,7 +769,7 @@ const CoworkView: React.FC<CoworkViewProps> = ({
     return () => {
       window.removeEventListener(CoworkUiEvent.ShortcutNewSession, handleNewSession);
     };
-  }, [dispatch, currentSession]);
+  }, [dispatch, currentSession, currentAgentId]);
 
   useEffect(() => {
     window.addEventListener(CoworkUiEvent.ShortcutStopSession, handleStopSession);
@@ -950,13 +955,17 @@ const CoworkView: React.FC<CoworkViewProps> = ({
                   className="mt-4 text-2xl font-semibold leading-[var(--lobster-leading-2xl)] tracking-normal text-foreground animate-fade-in-up"
                   style={{ animationDelay: '70ms', animationFillMode: 'both' }}
                 >
-                  {i18nService.t(resolveHomeGreetingKey())}
+                  {currentAgentId === AgentId.GuanjiaAssistant
+                    ? (i18nService.getLanguage() === 'zh' ? '智慧管家业务助手' : 'Smart Butler Assistant')
+                    : i18nService.t(resolveHomeGreetingKey())}
                 </h2>
                 <p
                   className="mt-2 text-[length:var(--lobster-text-promptLarge)] font-normal leading-[var(--lobster-leading-promptLarge)] text-secondary animate-fade-in-up"
                   style={{ animationDelay: '120ms', animationFillMode: 'both' }}
                 >
-                  {i18nService.t('coworkHomeTagline')}
+                  {currentAgentId === AgentId.GuanjiaAssistant
+                    ? (i18nService.getLanguage() === 'zh' ? '门店工单管理、房台轮钟、收银结账与会员服务全流程助手' : 'All-in-one assistant for store tickets, cashier, clocking, and member operations')
+                    : i18nService.t('coworkHomeTagline')}
                 </p>
               </div>
 
@@ -972,7 +981,13 @@ const CoworkView: React.FC<CoworkViewProps> = ({
                   isStreaming={isStreaming}
                   disabled={!isEngineReady}
                   submitDisabled={Boolean(blockingHomeQuotaReason)}
-                  placeholder={i18nService.t('coworkPlaceholder')}
+                  placeholder={
+                    currentAgentId === AgentId.GuanjiaAssistant
+                      ? (i18nService.getLanguage() === 'zh'
+                          ? '输入管家业务指令，如：查询待结账工单、给技师开台、收银结账...'
+                          : 'Enter Guanjia commands, e.g. query tickets, checkout, recharge...')
+                      : i18nService.t('coworkPlaceholder')
+                  }
                   size="large"
                   workingDirectory={currentAgentWorkingDirectory}
                   onWorkingDirectoryChange={async (dir: string) => {
