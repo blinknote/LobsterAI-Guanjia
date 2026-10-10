@@ -489,6 +489,17 @@ Scheduled tasks:
 
 ## Branches, Commits, And PRs
 
+### Client Versioning And Rebuild Rule (Mandatory)
+
+Whenever changes involve client code (renderer, main, preloads, extensions,
+dependencies, or packaging scripts) and require a client rebuild to take
+effect, **the version number in `package.json` MUST be incremented
+(e.g. `0.0.1` -> `0.0.2`) before committing, pushing to Git, and triggering a build**.
+
+Client auto-update detection strictly requires `remoteVersion > currentVersion`.
+Pushing a rebuild without bumping the version prevents existing installed
+clients from detecting or receiving the update via "Check for Updates".
+
 Use branch names like `feat/...` or `fix/...`. Do not use a `codex/...` prefix
 unless the user explicitly asks for it.
 
