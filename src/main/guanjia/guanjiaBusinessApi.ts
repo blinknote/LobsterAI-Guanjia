@@ -344,7 +344,11 @@ export async function requestGuanjiaBusinessApi(
         : queryParamsFromPath?.get('skill_id') || queryParamsFromPath?.get('skillId') || undefined;
 
   let effectiveMethod: 'GET' | 'POST';
-  if (cleanPath === '/api/c/ai/skills/list' || cleanPath === '/api/c/ai/skills/installed') {
+  if (
+    cleanPath === '/api/c/ai/skills/list' ||
+    cleanPath === '/api/c/ai/skills/installed' ||
+    cleanPath === '/api/c/ai/client-model-config'
+  ) {
     if (options.method && options.method !== 'GET') {
       throw new GuanjiaBusinessApiError(`接口路径 "${cleanPath}" 服务端仅支持 GET 请求`, {
         code: 'INVALID_METHOD',
@@ -383,7 +387,7 @@ export async function requestGuanjiaBusinessApi(
     });
   }
 
-  if (!snapshot.store || !snapshot.store.id || !String(snapshot.store.id).trim()) {
+  if (cleanPath !== '/api/c/ai/client-model-config' && (!snapshot.store || !snapshot.store.id || !String(snapshot.store.id).trim())) {
     throw new GuanjiaBusinessApiError('智慧管家当前未选择有效门店(store.id)，拒绝发起业务请求', {
       code: 'MISSING_STORE',
       requestId,
@@ -452,10 +456,10 @@ export async function requestGuanjiaBusinessApi(
     'X-Request-ID': requestId,
   };
 
-  if (snapshot.store.id) {
+  if (snapshot.store?.id) {
     headers['X-Store-Id'] = String(snapshot.store.id);
   }
-  if (snapshot.store.code) {
+  if (snapshot.store?.code) {
     headers['X-Store-Code'] = String(snapshot.store.code);
   }
 

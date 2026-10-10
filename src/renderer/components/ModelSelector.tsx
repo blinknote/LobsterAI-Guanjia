@@ -439,6 +439,7 @@ const ModelSelector: React.FC<ModelSelectorProps> = ({
   const selectedModelKey = selectedModel ? getModelIdentityKey(selectedModel) : '';
   const systemBuiltinModel = useSelector((state: RootState) => state.model.systemBuiltinModel);
   const availableModels = useSelector((state: RootState) => state.model.availableModels);
+  const isOnlyBuiltinModel = Boolean(systemBuiltinModel) && availableModels.length <= 1;
   const serverModels = systemBuiltinModel ? [] : availableModels.filter(m => m.isServerModel);
   const userModels = availableModels.filter(m => !m.isServerModel);
   const modelGroups = [
@@ -650,7 +651,7 @@ const ModelSelector: React.FC<ModelSelectorProps> = ({
   }, [isOpen, moreModelsExpanded]);
 
   const toggleOpen = () => {
-    if (disabled) return;
+    if (disabled || isOnlyBuiltinModel) return;
     if (!isOpen) {
       const nextDirection = resolveDirection();
       setResolvedDirection(nextDirection);
@@ -1248,10 +1249,10 @@ const ModelSelector: React.FC<ModelSelectorProps> = ({
   ) : null;
 
   return (
-    <div ref={containerRef} className={`relative ${disabled ? 'cursor-wait' : 'cursor-pointer'}`}>
+    <div ref={containerRef} className={`relative ${disabled ? 'cursor-wait' : isOnlyBuiltinModel ? 'cursor-default' : 'cursor-pointer'}`}>
       <button
         type="button"
-        disabled={disabled}
+        disabled={disabled || isOnlyBuiltinModel}
         onClick={toggleOpen}
         className={`flex min-w-0 items-center overflow-hidden hover:bg-surface-raised text-foreground transition-colors disabled:opacity-70 disabled:cursor-wait ${triggerClassName} ${isOpen ? 'bg-surface-raised' : ''}`}
       >
@@ -1267,7 +1268,9 @@ const ModelSelector: React.FC<ModelSelectorProps> = ({
             aria-label={i18nService.t('serverModelAgenticNotReady')}
           />
         )}
-        <ChevronDownIcon className={`${triggerIconClassName} shrink-0 dark:text-claude-darkTextSecondary text-claude-textSecondary`} />
+        {!isOnlyBuiltinModel && (
+          <ChevronDownIcon className={`${triggerIconClassName} shrink-0 dark:text-claude-darkTextSecondary text-claude-textSecondary`} />
+        )}
       </button>
 
       {portal && dropdown ? createPortal(dropdown, document.body) : dropdown}

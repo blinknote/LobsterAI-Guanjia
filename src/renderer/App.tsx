@@ -250,6 +250,13 @@ const App: React.FC = () => {
     }
   }, [guanjiaSession.generation, guanjiaSession.store?.id, guanjiaSession.status]);
 
+  // 管家认证状态变更时主动同步模型配置与内置模型独占隔离策略
+  useEffect(() => {
+    if (guanjiaSession.status === 'authenticated') {
+      void coworkService.syncGuanjiaModelConfig();
+    }
+  }, [guanjiaSession.status, guanjiaSession.generation]);
+
   const resolvedGuanjiaStoreName =
     guanjiaSession.status === 'authenticated' && guanjiaSession.store?.name
       ? guanjiaSession.store.name

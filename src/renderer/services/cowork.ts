@@ -669,6 +669,13 @@ class CoworkService {
       }
       return;
     }
+    // 关键前置防护：只要管家已认证，立即先行锁定到内置模型独占，杜绝异步等待间隙露出有道模型
+    if (!store.getState().model.systemBuiltinModel) {
+      store.dispatch(setSystemBuiltinModelOnly({
+        model_name: 'gemini-3.8-flash-high',
+        display_name: '管家系统内置大模型 (gemini-3.8-flash-high)',
+      }));
+    }
     try {
       const cfg = await window.electron.guanjia.getClientModelConfig();
       if (cfg?.success && cfg.data) {
@@ -677,7 +684,7 @@ class CoworkService {
             model_name: cfg.data.model_name,
             display_name: cfg.data.display_name || `管家系统内置大模型 (${cfg.data.model_name})`,
           }));
-        } else {
+        } else if (cfg.data.hide_youdao_models === false) {
           if (store.getState().model.systemBuiltinModel || store.getState().model.backupServerModels) {
             store.dispatch(setSystemBuiltinModelOnly(null));
           }
