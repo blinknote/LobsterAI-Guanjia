@@ -91,6 +91,14 @@ Var lobsterHiddenExecLaunchError
   Var lobsterOldInstallCurrentDirectory
   Var lobsterOldUninstallCandidatePath
   Var lobsterOldUninstallCandidatePathNormalized
+  !ifdef LOBSTERAI_DEV_BUILD
+    Var lobsterOldDevValidatedHive
+    Var lobsterOldDevValidatedRawPath
+    Var lobsterOldDevValidatedCanonical
+    Var lobsterOldDevRecoveryStatus
+    Var lobsterOldDevRecoveryCandidate
+    Var lobsterOldDevResidualPath
+  !endif
   !ifndef LOBSTERAI_DEV_BUILD
   Var lobsterOldUninstallStartTick
   Var lobsterOldUninstallLaunchStatus
@@ -470,6 +478,260 @@ FunctionEnd
     SetErrors
 !macroend
 
+!macro CheckFormalCollisionTarget TARGET_NORMALIZED COLLISION_LABEL
+  ClearErrors
+  ReadRegStr $0 HKCU "Software\63515710-f48a-5414-a457-1d6072fae8c4" InstallLocation
+  StrCmp $0 "" +3 0
+  GetFullPathName $1 "$0"
+  StrCmp $1 "${TARGET_NORMALIZED}" ${COLLISION_LABEL} 0
+
+  ClearErrors
+  ReadRegStr $0 HKLM "Software\63515710-f48a-5414-a457-1d6072fae8c4" InstallLocation
+  StrCmp $0 "" +3 0
+  GetFullPathName $1 "$0"
+  StrCmp $1 "${TARGET_NORMALIZED}" ${COLLISION_LABEL} 0
+
+  ClearErrors
+  ReadRegStr $0 HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\63515710-f48a-5414-a457-1d6072fae8c4" InstallLocation
+  StrCmp $0 "" +3 0
+  GetFullPathName $1 "$0"
+  StrCmp $1 "${TARGET_NORMALIZED}" ${COLLISION_LABEL} 0
+
+  ClearErrors
+  ReadRegStr $0 HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\63515710-f48a-5414-a457-1d6072fae8c4" InstallLocation
+  StrCmp $0 "" +3 0
+  GetFullPathName $1 "$0"
+  StrCmp $1 "${TARGET_NORMALIZED}" ${COLLISION_LABEL} 0
+
+  ClearErrors
+  ReadRegStr $0 HKCU "Software\a0c82b2d-91b7-551b-baa7-ea73950da4ee" InstallLocation
+  StrCmp $0 "" +3 0
+  GetFullPathName $1 "$0"
+  StrCmp $1 "${TARGET_NORMALIZED}" ${COLLISION_LABEL} 0
+
+  ClearErrors
+  ReadRegStr $0 HKLM "Software\a0c82b2d-91b7-551b-baa7-ea73950da4ee" InstallLocation
+  StrCmp $0 "" +3 0
+  GetFullPathName $1 "$0"
+  StrCmp $1 "${TARGET_NORMALIZED}" ${COLLISION_LABEL} 0
+
+  ClearErrors
+  ReadRegStr $0 HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\a0c82b2d-91b7-551b-baa7-ea73950da4ee" InstallLocation
+  StrCmp $0 "" +3 0
+  GetFullPathName $1 "$0"
+  StrCmp $1 "${TARGET_NORMALIZED}" ${COLLISION_LABEL} 0
+
+  ClearErrors
+  ReadRegStr $0 HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\a0c82b2d-91b7-551b-baa7-ea73950da4ee" InstallLocation
+  StrCmp $0 "" +3 0
+  GetFullPathName $1 "$0"
+  StrCmp $1 "${TARGET_NORMALIZED}" ${COLLISION_LABEL} 0
+
+  ClearErrors
+  ReadRegStr $0 HKCU "Software\LobsterAI" InstallLocation
+  StrCmp $0 "" +3 0
+  GetFullPathName $1 "$0"
+  StrCmp $1 "${TARGET_NORMALIZED}" ${COLLISION_LABEL} 0
+
+  ClearErrors
+  ReadRegStr $0 HKLM "Software\LobsterAI" InstallLocation
+  StrCmp $0 "" +3 0
+  GetFullPathName $1 "$0"
+  StrCmp $1 "${TARGET_NORMALIZED}" ${COLLISION_LABEL} 0
+
+  ClearErrors
+  ReadRegStr $0 HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\LobsterAI" InstallLocation
+  StrCmp $0 "" +3 0
+  GetFullPathName $1 "$0"
+  StrCmp $1 "${TARGET_NORMALIZED}" ${COLLISION_LABEL} 0
+
+  ClearErrors
+  ReadRegStr $0 HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\LobsterAI" InstallLocation
+  StrCmp $0 "" +3 0
+  GetFullPathName $1 "$0"
+  StrCmp $1 "${TARGET_NORMALIZED}" ${COLLISION_LABEL} 0
+!macroend
+
+!macro DefineLobsterDevRecoveryFunctions
+  Function lobsterStrStr
+    Exch $R1
+    Exch
+    Exch $R2
+    Push $R3
+    Push $R4
+    Push $R5
+    StrLen $R3 $R1
+    StrLen $R4 $R2
+    IntCmp $R3 0 LobsterStrStrEmpty 0 LobsterStrStrLoop
+    LobsterStrStrEmpty:
+      StrCpy $R2 ""
+      Goto LobsterStrStrDone
+    LobsterStrStrLoop:
+      IntCmp $R4 $R3 LobsterStrStrCheck 0 LobsterStrStrNotFound
+      LobsterStrStrCheck:
+      StrCpy $R5 $R2 $R3
+      StrCmp $R5 $R1 LobsterStrStrDone
+      StrCpy $R2 $R2 "" 1
+      IntOp $R4 $R4 - 1
+      Goto LobsterStrStrLoop
+    LobsterStrStrNotFound:
+      StrCpy $R2 ""
+    LobsterStrStrDone:
+      Pop $R5
+      Pop $R4
+      Pop $R3
+      Pop $R1
+      Exch $R2
+  FunctionEnd
+
+  Function lobsterCheckRegularNonZeroFile
+    Exch $R0
+    Push $R1
+    Push $R2
+    Push $R3
+    StrCpy $R1 "0"
+    System::Call 'kernel32::GetFileAttributesW(w "$R0") i .r2'
+    IntCmp $2 -1 LobsterCheckRegFileDone 0 0
+    IntOp $3 $2 & 0x410
+    IntCmp $3 0 0 LobsterCheckRegFileDone LobsterCheckRegFileDone
+    ClearErrors
+    FileOpen $2 "$R0" r
+    IfErrors LobsterCheckRegFileDone
+    FileSeek $2 0 END $3
+    FileClose $2
+    IntCmp $3 0 LobsterCheckRegFileDone LobsterCheckRegFileDone 0
+    StrCpy $R1 "1"
+    LobsterCheckRegFileDone:
+    Pop $R3
+    Pop $R2
+    Exch $R1
+    Exch
+    Pop $R0
+  FunctionEnd
+
+  Function lobsterVerifyCandidateLogEvidence
+    Exch $R0
+    Exch
+    Exch $R1
+    Push $R2
+    Push $R3
+    Push $R4
+    Push $R5
+    Push $R6
+    Push $R7
+
+    StrCpy $R6 "0"
+    StrCpy $R2 ""
+
+    ClearErrors
+    FileOpen $R3 "${LOBSTER_APPDATA_DIR}\install-timing.log" r
+    IfErrors LobsterLogEvidenceDone
+
+    FileSeek $R3 0 END $R7
+    FileSeek $R3 0 SET
+    IntCmp $R7 0 LobsterLogEvidenceClose LobsterLogEvidenceClose 0
+    IntCmp $R7 10485760 LobsterLogEvidenceClose LobsterLogEvidenceClose 0
+
+    StrCpy $R4 0
+    LobsterLogScanPass1:
+      IntOp $R4 $R4 + 1
+      IntCmp $R4 1000 LobsterLogEvidenceClose LobsterLogEvidenceClose 0
+      ClearErrors
+      FileRead $R3 $R5
+      IfErrors LobsterLogEvidenceClose
+
+      Push "$R5"
+      Push "phase=old-install-rename-complete"
+      Call lobsterStrStr
+      Pop $0
+      StrCmp $0 "" LobsterLogScanPass1
+
+      Push "$R5"
+      Push "status=success"
+      Call lobsterStrStr
+      Pop $0
+      StrCmp $0 "" LobsterLogScanPass1
+
+      Push "$R5"
+      Push "backup_path=$R1"
+      Call lobsterStrStr
+      Pop $0
+      StrCmp $0 "" LobsterLogScanPass1
+
+      Push "$R5"
+      Push "attempt_id="
+      Call lobsterStrStr
+      Pop $0
+      StrCmp $0 "" LobsterLogEvidenceClose
+      StrCpy $R2 "$0" "" 11
+      StrCpy $1 0
+      LobsterAttemptIdLenLoop:
+        StrCpy $2 "$R2" 1 $1
+        StrCmp $2 " " LobsterAttemptIdLenFound
+        StrCmp $2 "$\r" LobsterAttemptIdLenFound
+        StrCmp $2 "$\n" LobsterAttemptIdLenFound
+        StrCmp $2 "" LobsterAttemptIdLenFound
+        IntOp $1 $1 + 1
+        Goto LobsterAttemptIdLenLoop
+      LobsterAttemptIdLenFound:
+      StrCpy $R2 "$R2" $1
+      StrCmp $R2 "" LobsterLogEvidenceClose
+      Goto LobsterLogScanPass2Start
+
+    LobsterLogScanPass2Start:
+    FileSeek $R3 0 SET
+    StrCpy $R4 0
+    LobsterLogScanPass2:
+      IntOp $R4 $R4 + 1
+      IntCmp $R4 1000 LobsterLogEvidenceClose LobsterLogEvidenceClose 0
+      ClearErrors
+      FileRead $R3 $R5
+      IfErrors LobsterLogEvidenceClose
+
+      Push "$R5"
+      Push "phase=old-install-rename-start"
+      Call lobsterStrStr
+      Pop $0
+      StrCmp $0 "" LobsterLogScanPass2
+
+      Push "$R5"
+      Push "attempt_id=$R2"
+      Call lobsterStrStr
+      Pop $0
+      StrCmp $0 "" LobsterLogScanPass2
+
+      Push "$R5"
+      Push "instdir=$R0"
+      Call lobsterStrStr
+      Pop $0
+      StrCmp $0 "" 0 LobsterLogEvidenceVerified
+
+      Push "$R5"
+      Push "registered_instdir=$R0"
+      Call lobsterStrStr
+      Pop $0
+      StrCmp $0 "" LobsterLogScanPass2 0
+
+      LobsterLogEvidenceVerified:
+      StrCpy $R6 "1"
+      Goto LobsterLogEvidenceClose
+
+    LobsterLogEvidenceClose:
+    FileClose $R3
+
+    LobsterLogEvidenceDone:
+    Pop $R7
+    Pop $R5
+    Pop $R4
+    Pop $R3
+    Pop $R2
+    Pop $R1
+    Exch $R6
+    Exch
+    Pop $R0
+  FunctionEnd
+!macroend
+
 !macro customHeader
   !ifndef BUILD_UNINSTALLER
     ; The custom include can be parsed before electron-builder's asynchronous
@@ -479,6 +741,9 @@ FunctionEnd
     ; The staging functions reference $appPackageStagingDir, declared at the
     ; top of the patched installer.nsi -- also only available by now.
     !insertmacro DefineLobsterPayloadStagingFunctions
+    !ifdef LOBSTERAI_DEV_BUILD
+      !insertmacro DefineLobsterDevRecoveryFunctions
+    !endif
   !endif
 
   ; Request admin privileges for script execution (tar extract, etc.)
@@ -1411,6 +1676,14 @@ FunctionEnd
     StrCpy $lobsterLegacySkillsRestoreStatus "not-required"
     StrCpy $lobsterOldAppRelaunchStatus "not-attempted"
     StrCpy $lobsterOldAppRelaunchError "none"
+    !ifdef LOBSTERAI_DEV_BUILD
+      StrCpy $lobsterOldDevValidatedHive ""
+      StrCpy $lobsterOldDevValidatedRawPath ""
+      StrCpy $lobsterOldDevValidatedCanonical ""
+      StrCpy $lobsterOldDevRecoveryStatus "not-needed"
+      StrCpy $lobsterOldDevRecoveryCandidate ""
+      StrCpy $lobsterOldDevResidualPath ""
+    !endif
 
     ; The fresh decision is read-only and precedes every external helper,
     ; process stop, legacy Skills action, old uninstaller and directory rename.
@@ -1434,58 +1707,241 @@ FunctionEnd
       IntCmp $1 0 DevPathAttributesChecked DevPreflightRejectReparseRoot DevPreflightRejectReparseRoot
       DevPathAttributesChecked:
 
-      ; Formal collision lookup: real electron-builder GUID keys and legacy product keys
-      ClearErrors
-      ReadRegStr $0 HKCU "Software\a0c82b2d-91b7-551b-baa7-ea73950da4ee" InstallLocation
-      StrCmp $0 "" 0 DevCheckFormalConflict
-      ClearErrors
-      ReadRegStr $0 HKLM "Software\a0c82b2d-91b7-551b-baa7-ea73950da4ee" InstallLocation
-      StrCmp $0 "" 0 DevCheckFormalConflict
-      ClearErrors
-      ReadRegStr $0 HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\a0c82b2d-91b7-551b-baa7-ea73950da4ee" InstallLocation
-      StrCmp $0 "" 0 DevCheckFormalConflict
-      ClearErrors
-      ReadRegStr $0 HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\a0c82b2d-91b7-551b-baa7-ea73950da4ee" InstallLocation
-      StrCmp $0 "" 0 DevCheckFormalConflict
-      ClearErrors
-      ReadRegStr $0 HKCU "Software\LobsterAI" InstallLocation
-      StrCmp $0 "" 0 DevCheckFormalConflict
-      ClearErrors
-      ReadRegStr $0 HKLM "Software\LobsterAI" InstallLocation
-      StrCmp $0 "" 0 DevCheckFormalConflict
-      ClearErrors
-      ReadRegStr $0 HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\LobsterAI" InstallLocation
-      StrCmp $0 "" 0 DevCheckFormalConflict
-      ClearErrors
-      ReadRegStr $0 HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\LobsterAI" InstallLocation
-      StrCmp $0 "" DevFormalConflictDone 0
-      DevCheckFormalConflict:
-        GetFullPathName $1 "$0"
-        StrCmp $1 $lobsterOldInstallOriginalPathNormalized DevPreflightRejectFormalRootConflict DevFormalConflictDone
-      DevFormalConflictDone:
+      !insertmacro CheckFormalCollisionTarget "$lobsterOldInstallOriginalPathNormalized" DevPreflightRejectFormalRootConflict
 
       StrCpy $0 ""
       ClearErrors
       ReadRegStr $0 SHELL_CONTEXT "${INSTALL_REGISTRY_KEY}" InstallLocation
-      StrCmp $0 "" 0 DevCheckRegContextFound
+      StrCmp $0 "" DevCheckTryHKCU 0
+      StrCpy $lobsterOldDevValidatedHive "SHELL_CONTEXT"
+      Goto DevCheckRegContextFound
+
+      DevCheckTryHKCU:
       ClearErrors
       ReadRegStr $0 HKCU "${INSTALL_REGISTRY_KEY}" InstallLocation
-      StrCmp $0 "" 0 DevCheckRegContextFound
+      StrCmp $0 "" DevCheckTryHKLM 0
+      StrCpy $lobsterOldDevValidatedHive "HKCU"
+      Goto DevCheckRegContextFound
+
+      DevCheckTryHKLM:
       ClearErrors
       ReadRegStr $0 HKLM "${INSTALL_REGISTRY_KEY}" InstallLocation
+      StrCmp $0 "" DevPreflightRejectMissingReg 0
+      StrCpy $lobsterOldDevValidatedHive "HKLM"
+
       DevCheckRegContextFound:
-      StrCmp $0 "" DevPreflightRejectMissingReg
-      GetFullPathName $1 "$0"
-      StrCmp $1 $lobsterOldInstallOriginalPathNormalized 0 DevPreflightRejectPathMismatch
+      StrCpy $lobsterOldDevValidatedRawPath "$0"
+      GetFullPathName $lobsterOldDevValidatedCanonical "$0"
+      StrCmp $lobsterOldDevValidatedCanonical $lobsterOldInstallOriginalPathNormalized 0 DevPreflightRejectPathMismatch
 
       ${If} $installMode == "all"
-        ClearErrors
-        ReadRegStr $3 HKCU "${INSTALL_REGISTRY_KEY}" InstallLocation
-        StrCmp $3 "" DevDualRegCheckDone
-        ; Any per-user registration alongside machine install is an ambiguous/conflicting dual registration
-        Goto DevPreflightRejectDualReg
-        DevDualRegCheckDone:
+        ${If} $lobsterOldDevValidatedHive != "HKCU"
+          ClearErrors
+          ReadRegStr $3 HKCU "${INSTALL_REGISTRY_KEY}" InstallLocation
+          StrCmp $3 "" DevDualRegCheckDone
+          ; Any per-user registration alongside machine install is an ambiguous/conflicting dual registration
+          Goto DevPreflightRejectDualReg
+          DevDualRegCheckDone:
+        ${EndIf}
       ${EndIf}
+
+      ClearErrors
+      ReadRegStr $4 $lobsterOldDevValidatedHive "${UNINSTALL_REGISTRY_KEY}" DisplayName
+      !ifdef UNINSTALL_REGISTRY_KEY_2
+        ${If} $4 == ""
+          ClearErrors
+          ReadRegStr $4 $lobsterOldDevValidatedHive "${UNINSTALL_REGISTRY_KEY_2}" DisplayName
+        ${EndIf}
+      !endif
+      StrCmp $4 "" DevPreflightRejectUninstallRegMissing
+
+      ClearErrors
+      ReadRegStr $3 $lobsterOldDevValidatedHive "${UNINSTALL_REGISTRY_KEY}" DisplayVersion
+      !ifdef UNINSTALL_REGISTRY_KEY_2
+        ${If} $3 == ""
+          ClearErrors
+          ReadRegStr $3 $lobsterOldDevValidatedHive "${UNINSTALL_REGISTRY_KEY_2}" DisplayVersion
+        ${EndIf}
+      !endif
+
+      StrCmp $3 "" DevDisplayNameBaseOnly
+      StrCmp $4 "${PRODUCT_NAME} $3" DevDisplayNameValidated 0
+      StrCmp $4 "${PRODUCT_NAME} $3 (all users)" DevDisplayNameValidated 0
+      DevDisplayNameBaseOnly:
+      StrCmp $4 "${PRODUCT_NAME}" DevDisplayNameValidated 0
+      StrCmp $4 "${PRODUCT_NAME} (all users)" DevDisplayNameValidated DevPreflightRejectDisplayNameMismatch
+      DevDisplayNameValidated:
+
+      ClearErrors
+      ReadRegStr $2 $lobsterOldDevValidatedHive "${UNINSTALL_REGISTRY_KEY}" UninstallString
+      !ifdef UNINSTALL_REGISTRY_KEY_2
+        ${If} $2 == ""
+          ClearErrors
+          ReadRegStr $2 $lobsterOldDevValidatedHive "${UNINSTALL_REGISTRY_KEY_2}" UninstallString
+        ${EndIf}
+      !endif
+      StrCmp $2 "" DevPreflightRejectUninstallRegMissing
+
+      !insertmacro GetInQuotes $1 "$2"
+      StrCmp $1 "" DevUninstallStringUnquoted
+      GetFullPathName $5 "$1"
+      GetFullPathName $6 "$lobsterOldInstallOriginalPath\${UNINSTALL_FILENAME}"
+      StrCmp $5 $6 DevUninstallStringTargetMatches DevPreflightRejectUninstallRegMissing
+
+      DevUninstallStringUnquoted:
+      GetFullPathName $6 "$lobsterOldInstallOriginalPath\${UNINSTALL_FILENAME}"
+      StrLen $7 "$6"
+      StrCpy $5 "$2" $7
+      GetFullPathName $5 "$5"
+      StrCmp $5 $6 DevUninstallStringTargetMatches DevPreflightRejectUninstallRegMissing
+
+      DevUninstallStringTargetMatches:
+
+      Push "$lobsterOldInstallOriginalPath\${APP_EXECUTABLE_FILENAME}"
+      Call lobsterCheckRegularNonZeroFile
+      Pop $0
+      StrCmp $0 "1" 0 DevNormalDirIncomplete
+      Push "$lobsterOldInstallOriginalPath\${UNINSTALL_FILENAME}"
+      Call lobsterCheckRegularNonZeroFile
+      Pop $0
+      StrCmp $0 "1" 0 DevNormalDirIncomplete
+      Push "$lobsterOldInstallOriginalPath\resources\app.asar"
+      Call lobsterCheckRegularNonZeroFile
+      Pop $0
+      StrCmp $0 "1" DevExeCheckPassed DevNormalDirIncomplete
+
+      DevNormalDirIncomplete:
+      GetFullPathName $R4 "$lobsterOldInstallOriginalPath\.."
+      StrLen $R6 "$R4"
+      IntOp $R7 $R6 + 1
+      StrCpy $R5 "$lobsterOldInstallOriginalPath" "" $R7
+      StrLen $R8 "$R5.old."
+
+      StrCpy $R1 0
+      StrCpy $R2 ""
+
+      FindFirst $0 $1 "$lobsterOldInstallOriginalPath.old.*"
+      DevOrphanLoop:
+        StrCmp $0 "" DevOrphanDone
+        StrCmp $1 "" DevOrphanDone
+        StrCmp $1 "." DevOrphanNext
+        StrCmp $1 ".." DevOrphanNext
+
+        StrCpy $2 "$1" $R8
+        StrCmp $2 "$R5.old." 0 DevOrphanNext
+
+        StrCpy $2 "$R4\$1"
+
+        System::Call 'kernel32::GetFileAttributesW(w "$2") i .r3'
+        IntCmp $3 -1 DevOrphanNext 0 0
+        IntOp $4 $3 & 0x10
+        IntCmp $4 0 DevOrphanNext 0 0
+        IntOp $4 $3 & 0x400
+        IntCmp $4 0 0 DevOrphanNext DevOrphanNext
+
+        Push "$2\${APP_EXECUTABLE_FILENAME}"
+        Call lobsterCheckRegularNonZeroFile
+        Pop $3
+        StrCmp $3 "1" 0 DevOrphanNext
+
+        Push "$2\${UNINSTALL_FILENAME}"
+        Call lobsterCheckRegularNonZeroFile
+        Pop $3
+        StrCmp $3 "1" 0 DevOrphanNext
+
+        Push "$2\resources\app.asar"
+        Call lobsterCheckRegularNonZeroFile
+        Pop $3
+        StrCmp $3 "1" 0 DevOrphanNext
+
+        Push "$2"
+        Push "$lobsterOldInstallOriginalPath"
+        Call lobsterVerifyCandidateLogEvidence
+        Pop $3
+        StrCmp $3 "1" 0 DevOrphanNext
+
+        IntOp $R1 $R1 + 1
+        StrCpy $R2 "$2"
+
+      DevOrphanNext:
+        FindNext $0 $1
+        Goto DevOrphanLoop
+
+      DevOrphanDone:
+      FindClose $0
+
+      IntCmp $R1 1 DevOrphanUniqueCandidate DevPreflightRejectExeMissing DevPreflightRejectExeMissing
+
+      DevOrphanUniqueCandidate:
+      IfFileExists "$lobsterOldInstallOriginalPath\*.*" 0 DevOrphanRestoreCandidate
+        System::Call 'kernel32::GetCurrentProcessId()i .r4'
+        System::Call 'kernel32::GetTickCount()i .r5'
+        StrCpy $lobsterOldDevResidualPath "$lobsterOldInstallOriginalPath.failed.recovery.$4.$5"
+        System::Call 'kernel32::MoveFileW(w "$lobsterOldInstallOriginalPath", w "$lobsterOldDevResidualPath") i .r4 ?e'
+        Pop $3
+        IntCmp $4 0 DevOrphanResidualMoveFailed DevOrphanRestoreCandidate DevOrphanRestoreCandidate
+
+      DevOrphanResidualMoveFailed:
+        FileOpen $9 "${LOBSTER_APPDATA_DIR}\install-timing.log" a
+        FileSeek $9 0 END
+        !insertmacro GetTimestamp $8
+        FileWrite $9 "$8 phase=dev-recovery-residual-move-failed attempt_id=$lobsterInstallerAttemptId candidate=$R2 target=$lobsterOldInstallOriginalPath residual=$lobsterOldDevResidualPath error=$3$\r$\n"
+        FileClose $9
+        MessageBox MB_OK|MB_ICONEXCLAMATION "${U+65E0}${U+6CD5}${U+5904}${U+7406}${U+65E7}${U+7248}${U+6B8B}${U+7559}${U+76EE}${U+5F55}${U+FF0C}${U+5B89}${U+88C5}${U+5DF2}${U+7EC8}${U+6B62}${U+3002}$\r$\n$\r$\nFailed to displace residual target files before recovery (error=$3). Installation stopped. Details: ${LOBSTER_APPDATA_DIR}\install-timing.log" /SD IDOK
+        SetErrorLevel 2
+        Quit
+
+      DevOrphanRestoreCandidate:
+      System::Call 'kernel32::MoveFileW(w "$R2", w "$lobsterOldInstallOriginalPath") i .r4 ?e'
+      Pop $3
+      IntCmp $4 0 DevOrphanRestoreFailed DevOrphanRestoreVerify DevOrphanRestoreVerify
+
+      DevOrphanRestoreFailed:
+        FileOpen $9 "${LOBSTER_APPDATA_DIR}\install-timing.log" a
+        FileSeek $9 0 END
+        !insertmacro GetTimestamp $8
+        FileWrite $9 "$8 phase=dev-recovery-restore-failed attempt_id=$lobsterInstallerAttemptId candidate=$R2 target=$lobsterOldInstallOriginalPath error=$3$\r$\n"
+        FileClose $9
+        StrCmp $lobsterOldDevResidualPath "" +2
+          System::Call 'kernel32::MoveFileW(w "$lobsterOldDevResidualPath", w "$lobsterOldInstallOriginalPath") i .r0'
+        MessageBox MB_OK|MB_ICONEXCLAMATION "${U+6062}${U+590D}${U+5386}${U+53F2}${U+5B89}${U+88C5}${U+5907}${U+4EFD}${U+5931}${U+8D25}${U+FF0C}${U+5B89}${U+88C5}${U+5DF2}${U+7EC8}${U+6B62}${U+3002}$\r$\n$\r$\nFailed to restore orphaned backup to installation directory (error=$3). All copies preserved. Details: ${LOBSTER_APPDATA_DIR}\install-timing.log" /SD IDOK
+        SetErrorLevel 2
+        Quit
+
+      DevOrphanRestoreVerify:
+      Push "$lobsterOldInstallOriginalPath\${APP_EXECUTABLE_FILENAME}"
+      Call lobsterCheckRegularNonZeroFile
+      Pop $0
+      StrCmp $0 "1" 0 DevOrphanVerifyFailed
+      Push "$lobsterOldInstallOriginalPath\${UNINSTALL_FILENAME}"
+      Call lobsterCheckRegularNonZeroFile
+      Pop $0
+      StrCmp $0 "1" 0 DevOrphanVerifyFailed
+      Push "$lobsterOldInstallOriginalPath\resources\app.asar"
+      Call lobsterCheckRegularNonZeroFile
+      Pop $0
+      StrCmp $0 "1" 0 DevOrphanVerifyFailed
+
+      StrCpy $lobsterOldDevRecoveryStatus "restored"
+      StrCpy $lobsterOldDevRecoveryCandidate "$R2"
+      FileOpen $9 "${LOBSTER_APPDATA_DIR}\install-timing.log" a
+      FileSeek $9 0 END
+      !insertmacro GetTimestamp $8
+      FileWrite $9 "$8 phase=dev-recovery-restore-complete attempt_id=$lobsterInstallerAttemptId candidate=$R2 target=$lobsterOldInstallOriginalPath residual=$lobsterOldDevResidualPath status=success$\r$\n"
+      FileClose $9
+      Goto DevExeCheckPassed
+
+      DevOrphanVerifyFailed:
+        FileOpen $9 "${LOBSTER_APPDATA_DIR}\install-timing.log" a
+        FileSeek $9 0 END
+        !insertmacro GetTimestamp $8
+        FileWrite $9 "$8 phase=dev-recovery-verify-failed attempt_id=$lobsterInstallerAttemptId candidate=$R2 target=$lobsterOldInstallOriginalPath$\r$\n"
+        FileClose $9
+        MessageBox MB_OK|MB_ICONEXCLAMATION "${U+6062}${U+590D}${U+7684}${U+5B89}${U+88C5}${U+6587}${U+4EF6}${U+6821}${U+9A8C}${U+5931}${U+8D25}${U+FF0C}${U+5B89}${U+88C5}${U+5DF2}${U+7EC8}${U+6B62}${U+3002}$\r$\n$\r$\nRestored installation files failed verification. All copies preserved. Details: ${LOBSTER_APPDATA_DIR}\install-timing.log" /SD IDOK
+        SetErrorLevel 2
+        Quit
+
+      DevExeCheckPassed:
 
       ${If} "${APP_EXECUTABLE_FILENAME}" != "LobsterAI.exe"
         IfFileExists "$lobsterOldInstallOriginalPath\LobsterAI.exe" DevPreflightRejectFormalRootConflict 0
@@ -1515,9 +1971,6 @@ FunctionEnd
       DevPreflightRejectFormalRootConflict:
         StrCpy $R3 "formal-install-root-conflict"
         Goto DevPreflightReject
-      DevPreflightRejectUninstallerMissing:
-        StrCpy $R3 "dev-uninstaller-missing"
-        Goto DevPreflightReject
       DevPreflightRejectUninstallRegMissing:
         StrCpy $R3 "uninstall-registry-missing"
         Goto DevPreflightReject
@@ -1529,9 +1982,15 @@ FunctionEnd
         FileOpen $9 "${LOBSTER_APPDATA_DIR}\install-timing.log" a
         FileSeek $9 0 END
         !insertmacro GetTimestamp $8
+        ${If} $lobsterOldDevRecoveryStatus == "restored"
+          FileWrite $9 "$8 phase=dev-install-preflight-rejected attempt_id=$lobsterInstallerAttemptId reason=$R3 instdir=$lobsterOldInstallOriginalPath app_id=${APP_ID} product=${PRODUCT_NAME} action=fail-closed-recovery-restored candidate=$lobsterOldDevRecoveryCandidate residual=$lobsterOldDevResidualPath$\r$\n"
+          FileClose $9
+          MessageBox MB_OK|MB_ICONEXCLAMATION "${U+68C0}${U+6D4B}${U+5230}${U+73B0}${U+6709}${U+5B89}${U+88C5}${U+65E0}${U+6CD5}${U+8FDB}${U+884C}${U+5B89}${U+5168}${U+81EA}${U+52A8}${U+8FC1}${U+79FB}${U+FF08}${U+5DF2}${U+6062}${U+590D}${U+5386}${U+53F2}${U+5907}${U+4EFD}${U+4F46}${U+6821}${U+9A8C}${U+5931}${U+8D25}${U+FF1A}$R3${U+FF09}${U+3002}${U+5B89}${U+88C5}${U+7A0B}${U+5E8F}${U+5DF2}${U+7EC8}${U+6B62}${U+FF0C}${U+8BF7}${U+624B}${U+52A8}${U+68C0}${U+67E5}${U+5B89}${U+88C5}${U+76EE}${U+5F55}${U+540E}${U+91CD}${U+8BD5}${U+3002}$\r$\n$\r$\nLobsterAI-Dev restored previous backup but detected that the installation cannot be safely migrated ($R3). Installation stopped. Please manually inspect data and retry. Details: ${LOBSTER_APPDATA_DIR}\install-timing.log" /SD IDOK
+        ${Else}
         FileWrite $9 "$8 phase=dev-install-preflight-rejected attempt_id=$lobsterInstallerAttemptId reason=$R3 instdir=$lobsterOldInstallOriginalPath app_id=${APP_ID} product=${PRODUCT_NAME} action=fail-closed-no-mutation$\r$\n"
         FileClose $9
         MessageBox MB_OK|MB_ICONEXCLAMATION "${U+68C0}${U+6D4B}${U+5230}${U+73B0}${U+6709}${U+5B89}${U+88C5}${U+65E0}${U+6CD5}${U+8FDB}${U+884C}${U+5B89}${U+5168}${U+81EA}${U+52A8}${U+8FC1}${U+79FB}${U+FF08}${U+5B89}${U+88C5}${U+76EE}${U+5F55}${U+672A}${U+53D7}${U+9A8C}${U+8BC1}${U+6216}${U+65E7}${U+5378}${U+8F7D}${U+7A0B}${U+5E8F}${U+4E0D}${U+53D7}${U+652F}${U+6301}${U+FF1A}$R3${U+FF09}${U+3002}${U+4E3A}${U+4FDD}${U+62A4}${U+6570}${U+636E}${U+5B89}${U+5168}${U+FF0C}${U+5B89}${U+88C5}${U+7A0B}${U+5E8F}${U+5DF2}${U+7EC8}${U+6B62}${U+FF0C}${U+672A}${U+4FEE}${U+6539}${U+6216}${U+5220}${U+9664}${U+4EFB}${U+4F55}${U+6570}${U+636E}${U+3002}${U+8BF7}${U+624B}${U+52A8}${U+5907}${U+4EFD}${U+6570}${U+636E}${U+5E76}${U+5B8C}${U+6210}${U+8FC1}${U+79FB}${U+540E}${U+91CD}${U+8BD5}${U+3002}$\r$\n$\r$\nLobsterAI-Dev detected that the existing installation cannot be safely migrated automatically (unverified installation directory or unsupported legacy uninstaller: $R3). To preserve data safety, installation was stopped without modifying or deleting any data. Please manually back up data, complete migration, and retry. Details: ${LOBSTER_APPDATA_DIR}\install-timing.log" /SD IDOK
+        ${EndIf}
         SetErrorLevel 2
         Quit
 
@@ -1998,45 +2457,42 @@ FunctionEnd
 
     CustomCheckFreshInstall:
       !ifdef LOBSTERAI_DEV_BUILD
-        ; Formal collision check on fresh install: target must not match registered formal install
-        ClearErrors
-        ReadRegStr $0 HKCU "Software\a0c82b2d-91b7-551b-baa7-ea73950da4ee" InstallLocation
-        StrCmp $0 "" 0 DevFreshFormalCheck
-        ClearErrors
-        ReadRegStr $0 HKLM "Software\a0c82b2d-91b7-551b-baa7-ea73950da4ee" InstallLocation
-        StrCmp $0 "" 0 DevFreshFormalCheck
-        ClearErrors
-        ReadRegStr $0 HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\a0c82b2d-91b7-551b-baa7-ea73950da4ee" InstallLocation
-        StrCmp $0 "" 0 DevFreshFormalCheck
-        ClearErrors
-        ReadRegStr $0 HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\a0c82b2d-91b7-551b-baa7-ea73950da4ee" InstallLocation
-        StrCmp $0 "" 0 DevFreshFormalCheck
-        ClearErrors
         StrLen $0 "$lobsterOldInstallOriginalPath"
-        IntCmp $0 3 DevFreshFormalCollision DevFreshFormalCollision 0
-        ClearErrors
-        ReadRegStr $0 HKCU "Software\LobsterAI" InstallLocation
-        StrCmp $0 "" 0 DevFreshFormalCheck
-        ClearErrors
-        ReadRegStr $0 HKLM "Software\LobsterAI" InstallLocation
-        StrCmp $0 "" 0 DevFreshFormalCheck
-        ClearErrors
-        ReadRegStr $0 HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\LobsterAI" InstallLocation
-        StrCmp $0 "" 0 DevFreshFormalCheck
-        ClearErrors
-        ReadRegStr $0 HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\LobsterAI" InstallLocation
-        StrCmp $0 "" DevFreshFormalCheckDone 0
-        DevFreshFormalCheck:
-          GetFullPathName $1 "$0"
-          StrCmp $1 $lobsterOldInstallOriginalPathNormalized DevFreshFormalCollision DevFreshFormalCheckDone
+        IntCmp $0 3 DevFreshDriveRoot DevFreshDriveRoot 0
+        System::Call 'kernel32::GetFileAttributesW(w "$lobsterOldInstallOriginalPath") i .r0'
+        IntCmp $0 -1 DevFreshReparseDone 0 0
+        IntOp $1 $0 & 0x400
+        IntCmp $1 0 DevFreshReparseDone DevFreshReparseRoot DevFreshReparseRoot
+        DevFreshReparseDone:
+
+        !insertmacro CheckFormalCollisionTarget "$lobsterOldInstallOriginalPathNormalized" DevFreshFormalCollision
+
+        IfFileExists "$lobsterOldInstallOriginalPath\${APP_EXECUTABLE_FILENAME}" DevFreshTargetNotEmpty 0
+        IfFileExists "$lobsterOldInstallOriginalPath\${UNINSTALL_FILENAME}" DevFreshTargetNotEmpty 0
+        IfFileExists "$lobsterOldInstallOriginalPath\resources\app.asar" DevFreshTargetNotEmpty 0
+
+        Goto DevFreshFormalCheckDone
+
+        DevFreshDriveRoot:
+          StrCpy $R3 "drive-root-not-permitted"
+          Goto DevFreshReject
+        DevFreshReparseRoot:
+          StrCpy $R3 "reparse-point-not-permitted"
+          Goto DevFreshReject
         DevFreshFormalCollision:
           StrCpy $R3 "formal-install-root-conflict"
+          Goto DevFreshReject
+        DevFreshTargetNotEmpty:
+          StrCpy $R3 "target-directory-not-empty"
+          Goto DevFreshReject
+
+        DevFreshReject:
           FileOpen $9 "${LOBSTER_APPDATA_DIR}\install-timing.log" a
           FileSeek $9 0 END
           !insertmacro GetTimestamp $8
-          FileWrite $9 "$8 phase=dev-install-preflight-rejected attempt_id=$lobsterInstallerAttemptId reason=$R3 instdir=$lobsterOldInstallOriginalPath action=fail-closed-fresh-formal-collision$\r$\n"
+          FileWrite $9 "$8 phase=dev-install-preflight-rejected attempt_id=$lobsterInstallerAttemptId reason=$R3 instdir=$lobsterOldInstallOriginalPath action=fail-closed-fresh-guard$\r$\n"
           FileClose $9
-          MessageBox MB_OK|MB_ICONEXCLAMATION "${U+68C0}${U+6D4B}${U+5230}${U+73B0}${U+6709}${U+5B89}${U+88C5}${U+65E0}${U+6CD5}${U+8FDB}${U+884C}${U+5B89}${U+5168}${U+81EA}${U+52A8}${U+8FC1}${U+79FB}${U+FF08}${U+5B89}${U+88C5}${U+76EE}${U+5F55}${U+672A}${U+53D7}${U+9A8C}${U+8BC1}${U+6216}${U+65E7}${U+5378}${U+8F7D}${U+7A0B}${U+5E8F}${U+4E0D}${U+53D7}${U+652F}${U+6301}${U+FF1A}$R3${U+FF09}${U+3002}${U+4E3A}${U+4FDD}${U+62A4}${U+6570}${U+636E}${U+5B89}${U+5168}${U+FF0C}${U+5B89}${U+88C5}${U+7A0B}${U+5E8F}${U+5DF2}${U+7EC8}${U+6B62}${U+FF0C}${U+672A}${U+4FEE}${U+6539}${U+6216}${U+5220}${U+9664}${U+4EFB}${U+4F55}${U+6570}${U+636E}${U+3002}${U+8BF7}${U+624B}${U+52A8}${U+5907}${U+4EFD}${U+6570}${U+636E}${U+5E76}${U+5B8C}${U+6210}${U+8FC1}${U+79FB}${U+540E}${U+91CD}${U+8BD5}${U+3002}$\r$\n$\r$\nLobsterAI-Dev detected that the installation target conflicts with the registered formal LobsterAI directory ($R3). Installation was stopped without modifying or deleting any data. Details: ${LOBSTER_APPDATA_DIR}\install-timing.log" /SD IDOK
+          MessageBox MB_OK|MB_ICONEXCLAMATION "${U+68C0}${U+6D4B}${U+5230}${U+73B0}${U+6709}${U+5B89}${U+88C5}${U+65E0}${U+6CD5}${U+8FDB}${U+884C}${U+5B89}${U+5168}${U+81EA}${U+52A8}${U+8FC1}${U+79FB}${U+FF08}${U+5B89}${U+88C5}${U+76EE}${U+5F55}${U+672A}${U+53D7}${U+9A8C}${U+8BC1}${U+6216}${U+65E7}${U+5378}${U+8F7D}${U+7A0B}${U+5E8F}${U+4E0D}${U+53D7}${U+652F}${U+6301}${U+FF1A}$R3${U+FF09}${U+3002}${U+4E3A}${U+4FDD}${U+62A4}${U+6570}${U+636E}${U+5B89}${U+5168}${U+FF0C}${U+5B89}${U+88C5}${U+7A0B}${U+5E8F}${U+5DF2}${U+7EC8}${U+6B62}${U+FF0C}${U+672A}${U+4FEE}${U+6539}${U+6216}${U+5220}${U+9664}${U+4EFB}${U+4F55}${U+6570}${U+636E}${U+3002}${U+8BF7}${U+624B}${U+52A8}${U+5907}${U+4EFD}${U+6570}${U+636E}${U+5E76}${U+5B8C}${U+6210}${U+8FC1}${U+79FB}${U+540E}${U+91CD}${U+8BD5}${U+3002}$\r$\n$\r$\nLobsterAI-Dev detected an invalid or conflicting installation target ($R3). Installation was stopped without modifying or deleting any data. Details: ${LOBSTER_APPDATA_DIR}\install-timing.log" /SD IDOK
           SetErrorLevel 2
           Quit
         DevFreshFormalCheckDone:
@@ -2097,14 +2553,44 @@ FunctionEnd
       Goto CustomOldUninstallerDone_${ROOT_KEY}
     ${EndIf}
 
+    !ifdef LOBSTERAI_DEV_BUILD
+      StrCpy $1 "false"
+      ${If} $lobsterOldInstallRenameStatus == "success"
+      ${AndIf} $lobsterOldUninstallCandidatePath != ""
+      ${AndIf} $lobsterOldUninstallCandidatePath == $lobsterOldDevValidatedRawPath
+      ${AndIf} $lobsterOldDevValidatedCanonical == $lobsterOldInstallOriginalPathNormalized
+        StrCpy $1 "true"
+      ${EndIf}
+
+      ${If} $1 == "true"
+        ClearErrors
+        StrCpy $R0 0
+        FileOpen $9 "${LOBSTER_APPDATA_DIR}\install-timing.log" a
+        FileSeek $9 0 END
+        !insertmacro GetTimestamp $8
+        FileWrite $9 "$8 phase=old-uninstaller-skipped attempt_id=$lobsterInstallerAttemptId root=${ROOT_KEY} reason=rename-success registered_instdir=$lobsterOldUninstallCandidatePath backup_path=$lobsterOldInstallBackupPath$\r$\n"
+        FileClose $9
+        Goto CustomOldUninstallerDone_${ROOT_KEY}
+      ${Else}
+        !insertmacro customRollbackOldInstall "old-uninstaller-blocked"
+        FileOpen $9 "${LOBSTER_APPDATA_DIR}\install-timing.log" a
+        FileSeek $9 0 END
+        !insertmacro GetTimestamp $8
+        FileWrite $9 "$8 phase=dev-old-uninstaller-blocked attempt_id=$lobsterInstallerAttemptId root=${ROOT_KEY} registered_instdir=$lobsterOldUninstallCandidatePath rename_status=$lobsterOldInstallRenameStatus action=fail-closed$\r$\n"
+        FileClose $9
+        MessageBox MB_OK|MB_ICONEXCLAMATION "${U+65E7}${U+7248}${U+5378}${U+8F7D}${U+7A0B}${U+5E8F}${U+4E0D}${U+53D7}${U+652F}${U+6301}${U+FF0C}${U+5DF2}${U+7EC8}${U+6B62}${U+81EA}${U+52A8}${U+66F4}${U+65B0}${U+3002}${U+672A}${U+4FEE}${U+6539}${U+6216}${U+5220}${U+9664}${U+4EFB}${U+4F55}${U+6570}${U+636E}${U+3002}${U+8BF7}${U+624B}${U+52A8}${U+5907}${U+4EFD}${U+6570}${U+636E}${U+5E76}${U+5B8C}${U+6210}${U+8FC1}${U+79FB}${U+540E}${U+91CD}${U+8BD5}${U+3002}$\r$\n$\r$\nLegacy Dev uninstaller is blocked from running to protect system isolation. Installation was stopped without modifying or deleting any data. Please manually back up data, complete migration, and retry. Details: ${LOBSTER_APPDATA_DIR}\install-timing.log" /SD IDOK
+        SetErrorLevel 2
+        Quit
+        Goto CustomOldUninstallerDevSkip_${ROOT_KEY}
+        !insertmacro uninstallOldVersion ${ROOT_KEY}
+        !insertmacro handleUninstallResult ${ROOT_KEY}
+        CustomOldUninstallerDevSkip_${ROOT_KEY}:
+      ${EndIf}
+    !else
     StrCpy $1 "false"
     ${If} $lobsterOldInstallRenameStatus == "success"
-      StrCpy $1 "true"
-    ${ElseIf} $lobsterOldInstallRenameStatus == "not-required"
-      StrCpy $1 "true"
-    ${ElseIf} $lobsterOldUninstallCandidatePath == ""
-      StrCpy $1 "true"
-    ${ElseIf} $0 == ""
+    ${AndIf} $lobsterOldUninstallCandidatePathNormalized != ""
+    ${AndIf} $lobsterOldUninstallCandidatePathNormalized == $lobsterOldInstallOriginalPathNormalized
       StrCpy $1 "true"
     ${EndIf}
 
@@ -2118,21 +2604,6 @@ FunctionEnd
       FileClose $9
       Goto CustomOldUninstallerDone_${ROOT_KEY}
     ${Else}
-      !ifdef LOBSTERAI_DEV_BUILD
-        ClearErrors
-        StrCpy $R0 0
-        FileOpen $9 "${LOBSTER_APPDATA_DIR}\install-timing.log" a
-        FileSeek $9 0 END
-        !insertmacro GetTimestamp $8
-        FileWrite $9 "$8 phase=old-uninstaller-skipped attempt_id=$lobsterInstallerAttemptId root=${ROOT_KEY} reason=dev-safe-staging-bypass registered_instdir=$lobsterOldUninstallCandidatePath rename_status=$lobsterOldInstallRenameStatus$\r$\n"
-        FileClose $9
-        Goto CustomOldUninstallerDone_${ROOT_KEY}
-        ; Keep static references to avoid makensis warning 6010 under /WX
-        Goto CustomOldUninstallerDevQuit_${ROOT_KEY}
-        !insertmacro uninstallOldVersion ${ROOT_KEY}
-        !insertmacro handleUninstallResult ${ROOT_KEY}
-        CustomOldUninstallerDevQuit_${ROOT_KEY}:
-      !else
       System::Call 'kernel32::GetTickCount()i .r4'
       StrCpy $lobsterOldUninstallStartTick $4
       FileOpen $9 "${LOBSTER_APPDATA_DIR}\install-timing.log" a
@@ -2181,8 +2652,9 @@ FunctionEnd
       !insertmacro GetTimestamp $8
       FileWrite $9 "$8 phase=old-uninstaller-complete attempt_id=$lobsterInstallerAttemptId root=${ROOT_KEY} status=handled exit=$R0 elapsed_ms=$5$\r$\n"
       FileClose $9
-      !endif
+      ${EndIf}
     ${EndIf}
+    !endif
     CustomOldUninstallerDone_${ROOT_KEY}:
   !macroend
 

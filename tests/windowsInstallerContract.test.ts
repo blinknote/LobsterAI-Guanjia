@@ -136,7 +136,7 @@ describe('Windows installer hardening contracts', () => {
     // invocation-mode gate may sit between the rename-start log and the
     // ladder.
     const ladder = installerInclude.slice(
-      installerInclude.indexOf('phase=old-install-rename-start'),
+      installerInclude.indexOf('phase=old-install-rename-start attempt_id='),
       installerInclude.indexOf('OldInstallRenameEligible:'),
     );
     expect(ladder).toContain('"registered-install-missing"');
@@ -1040,7 +1040,7 @@ describe('Windows installer hardening contracts', () => {
       'phase=skill-backup-manifest-postcheck-missing',
     );
     const failedAbort = installerInclude.indexOf('SkillBackupFailedAbort:');
-    const swapStart = installerInclude.indexOf('phase=old-install-rename-start');
+    const swapStart = installerInclude.indexOf('phase=old-install-rename-start attempt_id=');
 
     expect(backupComplete).toBeGreaterThan(-1);
     expect(postcheck).toBeGreaterThan(backupComplete);
@@ -1547,13 +1547,168 @@ describe('Windows installer hardening contracts', () => {
     expect(appBuilderPatch).toContain('defines.APP_PACKAGE_URL_IS_INCOMPLETE = null;');
   });
 
-  test('validates Dev preflight formal collision checks and allows safe installation', () => {
-    expect(installerInclude).toContain('IfFileExists "$lobsterOldInstallOriginalPath\\LobsterAI.exe" DevPreflightRejectFormalRootConflict');
-    expect(installerInclude).toContain('Goto DevPreflightAccepted');
+  test('checks formal collisions across all HKCU and HKLM roots before any mutation', () => {
+    expect(installerInclude).toContain(
+      '!macro CheckFormalCollisionTarget TARGET_NORMALIZED COLLISION_LABEL',
+    );
+    const macroStart = installerInclude.indexOf(
+      '!macro CheckFormalCollisionTarget TARGET_NORMALIZED COLLISION_LABEL',
+    );
+    const macroEnd = installerInclude.indexOf('!macroend', macroStart);
+    const macroBody = installerInclude.slice(macroStart, macroEnd);
+
+    // Checks real electron-builder stock UUID.v5 com.lobsterai.app GUID, legacy product GUID, and named keys
+    for (const key of [
+      'Software\\63515710-f48a-5414-a457-1d6072fae8c4',
+      'Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\63515710-f48a-5414-a457-1d6072fae8c4',
+      'Software\\a0c82b2d-91b7-551b-baa7-ea73950da4ee',
+      'Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\a0c82b2d-91b7-551b-baa7-ea73950da4ee',
+      'Software\\LobsterAI',
+      'Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\LobsterAI',
+    ]) {
+      expect(macroBody).toContain(`ReadRegStr $0 HKCU "${key}" InstallLocation`);
+      expect(macroBody).toContain(`ReadRegStr $0 HKLM "${key}" InstallLocation`);
+    }
+
+    // Both existing target preflight and fresh target preflight use the collision macro
+    expect(installerInclude).toContain(
+      '!insertmacro CheckFormalCollisionTarget "$lobsterOldInstallOriginalPathNormalized" DevPreflightRejectFormalRootConflict',
+    );
+    expect(installerInclude).toContain(
+      '!insertmacro CheckFormalCollisionTarget "$lobsterOldInstallOriginalPathNormalized" DevFreshFormalCollision',
+    );
   });
 
-  test('skips legacy uninstaller unconditionally for Dev builds to prevent blocking updates', () => {
-    expect(installerInclude).toContain('reason=dev-safe-staging-bypass');
-    expect(installerInclude).toContain('Goto CustomOldUninstallerDone_${ROOT_KEY}');
+  test('validates Dev registration, DisplayName, and UninstallString before permitting staging', () => {
+    const preflightStart = installerInclude.indexOf(
+      '!ifdef LOBSTERAI_DEV_BUILD\n      ; Dev guard for existing/non-empty targets',
+    );
+    const preflightAccepted = installerInclude.indexOf('DevPreflightAccepted:', preflightStart);
+    const preflight = installerInclude.slice(preflightStart, preflightAccepted);
+
+    // Captures raw registered path and verifies canonical path matches normalized original
+    expect(preflight).toContain('StrCpy $lobsterOldDevValidatedRawPath "$0"');
+    expect(preflight).toContain('GetFullPathName $lobsterOldDevValidatedCanonical "$0"');
+    expect(preflight).toContain(
+      'StrCmp $lobsterOldDevValidatedCanonical $lobsterOldInstallOriginalPathNormalized 0 DevPreflightRejectPathMismatch',
+    );
+    expect(preflight).toContain('DevPreflightRejectDualReg');
+
+    // Validates DisplayName format with product name and version/all-users suffixes
+    expect(preflight).toContain('StrCmp $4 "${PRODUCT_NAME} $3" DevDisplayNameValidated 0');
+    expect(preflight).toContain('StrCmp $4 "${PRODUCT_NAME} $3 (all users)" DevDisplayNameValidated 0');
+    expect(preflight).toContain('StrCmp $4 "${PRODUCT_NAME}" DevDisplayNameValidated 0');
+    expect(preflight).toContain(
+      'StrCmp $4 "${PRODUCT_NAME} (all users)" DevDisplayNameValidated DevPreflightRejectDisplayNameMismatch',
+    );
+    expect(preflight).toContain('DevPreflightRejectDisplayNameMismatch');
+
+    // Validates UninstallString points to the exact uninstaller executable in the install root
+    expect(preflight).toContain('!insertmacro GetInQuotes $1 "$2"');
+    expect(preflight).toContain(
+      'GetFullPathName $6 "$lobsterOldInstallOriginalPath\\${UNINSTALL_FILENAME}"',
+    );
+    expect(preflight).toContain('DevPreflightRejectUninstallRegMissing');
+  });
+
+  test('recovers orphaned backups only with verified install log evidence and preserves residual targets', () => {
+    expect(installerInclude).toContain('Function lobsterVerifyCandidateLogEvidence');
+    expect(installerInclude).toContain('Function lobsterCheckRegularNonZeroFile');
+
+    // Log evidence verifies bounded size, matching success rename, and matching attempt id
+    const logVerifierStart = installerInclude.indexOf('Function lobsterVerifyCandidateLogEvidence');
+    const logVerifierEnd = installerInclude.indexOf('FunctionEnd', logVerifierStart);
+    const logVerifier = installerInclude.slice(logVerifierStart, logVerifierEnd);
+    expect(logVerifier).toContain('10485760'); // <= 10MB
+    expect(logVerifier).toContain('phase=old-install-rename-complete');
+    expect(logVerifier).toContain('status=success');
+    expect(logVerifier).toContain('backup_path=$R1');
+    expect(logVerifier).toContain('phase=old-install-rename-start');
+    expect(logVerifier).toContain('instdir=$R0');
+    expect(logVerifier).toContain('registered_instdir=$R0');
+
+    // Preflight searches for exact pattern .old.* and requires unique candidate (never arbitrary newest)
+    expect(installerInclude).toContain('FindFirst $0 $1 "$lobsterOldInstallOriginalPath.old.*"');
+    expect(installerInclude).toContain(
+      'IntCmp $R1 1 DevOrphanUniqueCandidate DevPreflightRejectExeMissing DevPreflightRejectExeMissing',
+    );
+
+    // Residual target is displaced aside to unique path, preserving all files before candidate restore
+    expect(installerInclude).toContain(
+      'StrCpy $lobsterOldDevResidualPath "$lobsterOldInstallOriginalPath.failed.recovery.$4.$5"',
+    );
+    expect(installerInclude).toContain('phase=dev-recovery-residual-move-failed');
+
+    // Successful restoration sets typed status and logs complete evidence
+    expect(installerInclude).toContain('StrCpy $lobsterOldDevRecoveryStatus "restored"');
+    expect(installerInclude).toContain('phase=dev-recovery-restore-complete');
+
+    // If restoration fails or verified files fail, residual is put back and all copies preserved
+    expect(installerInclude).toContain('phase=dev-recovery-restore-failed');
+    expect(installerInclude).toContain('phase=dev-recovery-verify-failed');
+    expect(installerInclude).toContain('All copies preserved');
+
+    // Preflight ordering: orphan recovery runs before Skills backup, which runs before staging rename
+    const orphanRecovery = installerInclude.indexOf('DevOrphanRestoreCandidate:');
+    const skillsBackup = installerInclude.indexOf('phase=skill-backup-complete');
+    const stagingRename = installerInclude.indexOf('phase=old-install-rename-start attempt_id=');
+    expect(orphanRecovery).toBeGreaterThan(-1);
+    expect(skillsBackup).toBeGreaterThan(orphanRecovery);
+    expect(stagingRename).toBeGreaterThan(skillsBackup);
+  });
+
+  test('skips legacy uninstaller only on exact per-root Dev match and fail-closed rolls back otherwise', () => {
+    // Unconditional Dev bypass is forbidden: no unconditional skip or bypass reasons permitted
+    expect(installerInclude).not.toContain('dev-safe-staging-bypass');
+    expect(installerInclude).not.toContain('reason=dev-safe-staging-bypass');
+
+    const uninstallMacroStart = installerInclude.indexOf('!macro customUninstallOldVersion ROOT_KEY');
+    const uninstallMacroEnd = installerInclude.indexOf('!macroend', uninstallMacroStart);
+    const uninstallMacro = installerInclude.slice(uninstallMacroStart, uninstallMacroEnd);
+
+    // Dev builds skip ONLY when staging succeeded AND registered root matches the pre-validated raw/canonical path
+    expect(uninstallMacro).toContain('${If} $lobsterOldInstallRenameStatus == "success"');
+    expect(uninstallMacro).toContain('${AndIf} $lobsterOldUninstallCandidatePath != ""');
+    expect(uninstallMacro).toContain('${AndIf} $lobsterOldUninstallCandidatePath == $lobsterOldDevValidatedRawPath');
+    expect(uninstallMacro).toContain(
+      '${AndIf} $lobsterOldDevValidatedCanonical == $lobsterOldInstallOriginalPathNormalized',
+    );
+
+    // Otherwise, Dev builds fail closed with rollback and error exit
+    expect(uninstallMacro).toContain('!insertmacro customRollbackOldInstall "old-uninstaller-blocked"');
+    expect(uninstallMacro).toContain('phase=dev-old-uninstaller-blocked');
+    expect(uninstallMacro).toContain('action=fail-closed');
+    expect(uninstallMacro).toContain('SetErrorLevel 2');
+    expect(uninstallMacro).toContain('Quit');
+
+    // Formal builds retain exact per-root matching without waiving uninstaller for nonmatching roots
+    expect(uninstallMacro).toContain(
+      '${AndIf} $lobsterOldUninstallCandidatePathNormalized == $lobsterOldInstallOriginalPathNormalized',
+    );
+  });
+
+  test('guards fresh installations against drive roots, reparse points, formal collisions, and dirty targets', () => {
+    const freshStart = installerInclude.indexOf('CustomCheckFreshInstall:');
+    const freshEnd = installerInclude.indexOf('DevFreshFormalCheckDone:', freshStart);
+    const fresh = installerInclude.slice(freshStart, freshEnd);
+
+    expect(fresh).toContain('IntCmp $0 3 DevFreshDriveRoot DevFreshDriveRoot 0');
+    expect(fresh).toContain('IntOp $1 $0 & 0x400');
+    expect(fresh).toContain('DevFreshReparseRoot');
+    expect(fresh).toContain('!insertmacro CheckFormalCollisionTarget');
+    expect(fresh).toContain('DevFreshFormalCollision');
+
+    // Verifies genuine empty target before allowing fresh install bypass
+    expect(fresh).toContain(
+      'IfFileExists "$lobsterOldInstallOriginalPath\\${APP_EXECUTABLE_FILENAME}" DevFreshTargetNotEmpty 0',
+    );
+    expect(fresh).toContain(
+      'IfFileExists "$lobsterOldInstallOriginalPath\\${UNINSTALL_FILENAME}" DevFreshTargetNotEmpty 0',
+    );
+    expect(fresh).toContain(
+      'IfFileExists "$lobsterOldInstallOriginalPath\\resources\\app.asar" DevFreshTargetNotEmpty 0',
+    );
+    expect(fresh).toContain('target-directory-not-empty');
+    expect(fresh).toContain('phase=dev-install-preflight-rejected');
   });
 });
