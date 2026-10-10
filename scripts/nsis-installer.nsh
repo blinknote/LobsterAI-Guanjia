@@ -1487,7 +1487,29 @@ FunctionEnd
         DevDualRegCheckDone:
       ${EndIf}
 
-      IfFileExists "$lobsterOldInstallOriginalPath\${APP_EXECUTABLE_FILENAME}" 0 DevPreflightRejectExeMissing
+      IfFileExists "$lobsterOldInstallOriginalPath\${APP_EXECUTABLE_FILENAME}" DevExeCheckPassed 0
+      ; Check if a previous aborted installer attempt left an orphaned .old.* backup
+      FindFirst $0 $1 "$lobsterOldInstallOriginalPath.old.*"
+      DevPreflightOrphanLoop:
+        StrCmp $0 "" DevPreflightOrphanDone
+        StrCmp $1 "" DevPreflightOrphanDone
+        StrCmp $1 "." DevPreflightOrphanNext
+        StrCmp $1 ".." DevPreflightOrphanNext
+        IfFileExists "$INSTDIR\..\$1\${APP_EXECUTABLE_FILENAME}" 0 DevPreflightOrphanNext
+          FindClose $0
+          System::Call 'kernel32::MoveFileW(w "$INSTDIR\..\$1", w "$lobsterOldInstallOriginalPath") i .r0'
+          Goto DevExeCheckReverify
+        DevPreflightOrphanNext:
+        FindNext $0 $1
+        Goto DevPreflightOrphanLoop
+      DevPreflightOrphanDone:
+      FindClose $0
+      IfFileExists "$lobsterOldInstallOriginalPath\*.*" 0 DevTargetFolderEmptyOrAbsent
+      DevExeCheckReverify:
+      IfFileExists "$lobsterOldInstallOriginalPath\${APP_EXECUTABLE_FILENAME}" DevExeCheckPassed DevPreflightRejectExeMissing
+      DevTargetFolderEmptyOrAbsent:
+      Goto DevPreflightAccepted
+      DevExeCheckPassed:
 
       ${If} "${APP_EXECUTABLE_FILENAME}" != "LobsterAI.exe"
         IfFileExists "$lobsterOldInstallOriginalPath\LobsterAI.exe" DevPreflightRejectFormalRootConflict 0
@@ -2127,9 +2149,18 @@ FunctionEnd
       Goto CustomOldUninstallerDone_${ROOT_KEY}
     ${EndIf}
 
+    StrCpy $1 "false"
     ${If} $lobsterOldInstallRenameStatus == "success"
-    ${AndIf} $lobsterOldUninstallCandidatePathNormalized != ""
-    ${AndIf} $lobsterOldUninstallCandidatePathNormalized == $lobsterOldInstallOriginalPathNormalized
+      StrCpy $1 "true"
+    ${ElseIf} $lobsterOldInstallRenameStatus == "not-required"
+      StrCpy $1 "true"
+    ${ElseIf} $lobsterOldUninstallCandidatePath == ""
+      StrCpy $1 "true"
+    ${ElseIf} $0 == ""
+      StrCpy $1 "true"
+    ${EndIf}
+
+    ${If} $1 == "true"
       ClearErrors
       StrCpy $R0 0
       FileOpen $9 "${LOBSTER_APPDATA_DIR}\install-timing.log" a
@@ -2137,8 +2168,10 @@ FunctionEnd
       !insertmacro GetTimestamp $8
       FileWrite $9 "$8 phase=old-uninstaller-skipped attempt_id=$lobsterInstallerAttemptId root=${ROOT_KEY} reason=rename-success registered_instdir=$lobsterOldUninstallCandidatePath backup_path=$lobsterOldInstallBackupPath$\r$\n"
       FileClose $9
+      Goto CustomOldUninstallerDone_${ROOT_KEY}
     ${Else}
       !ifdef LOBSTERAI_DEV_BUILD
+        !insertmacro customRollbackOldInstall "old-uninstaller-blocked"
         FileOpen $9 "${LOBSTER_APPDATA_DIR}\install-timing.log" a
         FileSeek $9 0 END
         !insertmacro GetTimestamp $8

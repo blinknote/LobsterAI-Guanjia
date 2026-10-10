@@ -1557,4 +1557,13 @@ describe('Windows installer hardening contracts', () => {
     expect(installerInclude).not.toMatch(/StrCpy\s+\$5\s+\$4\s+12\s+StrCmp\s+\$5\s+"LobsterAI-Dev"/);
     expect(installerInclude).not.toContain('StrCpy $5 $4 12\n      StrCmp $5 "LobsterAI-Dev"');
   });
+
+  test('skips legacy uninstaller cleanly when staging rename succeeded and recovers orphaned backups', () => {
+    expect(installerInclude).toContain('FindFirst $0 $1 "$lobsterOldInstallOriginalPath.old.*"');
+    expect(installerInclude).toContain('kernel32::MoveFileW(w "$INSTDIR\\..\\$1", w "$lobsterOldInstallOriginalPath")');
+    expect(installerInclude).toContain('${If} $lobsterOldInstallRenameStatus == "success"');
+    expect(installerInclude).toContain('${ElseIf} $lobsterOldInstallRenameStatus == "not-required"');
+    expect(installerInclude).toContain('Goto CustomOldUninstallerDone_${ROOT_KEY}');
+    expect(installerInclude).toContain('!insertmacro customRollbackOldInstall "old-uninstaller-blocked"');
+  });
 });
