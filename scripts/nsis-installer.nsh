@@ -91,8 +91,10 @@ Var lobsterHiddenExecLaunchError
   Var lobsterOldInstallCurrentDirectory
   Var lobsterOldUninstallCandidatePath
   Var lobsterOldUninstallCandidatePathNormalized
+  !ifndef LOBSTERAI_DEV_BUILD
   Var lobsterOldUninstallStartTick
   Var lobsterOldUninstallLaunchStatus
+  !endif
   Var lobsterNewInstallValidationStatus
   Var lobsterNewInstallValidationReason
   !ifndef APP_PACKAGE_URL
