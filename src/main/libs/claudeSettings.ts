@@ -14,6 +14,10 @@ import {
   type ModelThinkingConfig,
   parseModelThinkingConfig,
 } from '../../shared/providers/modelThinking';
+import {
+  getCachedGuanjiaModelConfig,
+  isGuanjiaSystemModelActive,
+} from '../guanjia/guanjiaModelConfig';
 import type { SqliteStore } from '../sqliteStore';
 import type { CoworkApiConfig } from './coworkConfigStore';
 import { type AnthropicApiFormat,normalizeProviderApiFormat } from './coworkFormatTransform';
@@ -538,6 +542,41 @@ function tryLobsteraiServerFallback(modelId?: string): MatchedProvider | null {
 }
 
 function resolveMatchedProvider(appConfig: AppConfig): { matched: MatchedProvider | null; error?: string } {
+  if (isGuanjiaSystemModelActive()) {
+    const guanjiaCfg = getCachedGuanjiaModelConfig();
+    const modelId = guanjiaCfg?.model_name || 'gemini-3.8-flash-high';
+    const displayName = guanjiaCfg?.display_name || `管家系统内置模型 (${modelId})`;
+    const baseURL = guanjiaCfg?.api_base_url || 'https://cpa.qszy.me/v1';
+    const apiKey = guanjiaCfg?.api_key || 'sk-lobsterai-local';
+    return {
+      matched: {
+        providerName: 'system_builtin',
+        providerConfig: {
+          enabled: true,
+          apiKey,
+          baseUrl: baseURL,
+          models: [{
+            id: modelId,
+            name: displayName,
+            supportsImage: true,
+            supportsThinking: true,
+            contextWindow: 128000,
+            maxTokens: 8192,
+          }],
+        },
+        modelId,
+        apiFormat: 'openai',
+        baseURL,
+        supportsImage: true,
+        supportsVideo: false,
+        supportsThinking: true,
+        modelName: displayName,
+        contextWindow: 128000,
+        maxTokens: 8192,
+      },
+    };
+  }
+
   const providers = appConfig.providers ?? {};
 
   const resolveFallbackModel = (): {
@@ -801,6 +840,33 @@ export function getCurrentApiConfig(target: OpenAICompatProxyTarget = 'local'): 
  * Used by OpenClaw config sync which has its own model routing.
  */
 export function resolveRawApiConfig(): ApiConfigResolution {
+  if (isGuanjiaSystemModelActive()) {
+    const guanjiaCfg = getCachedGuanjiaModelConfig();
+    const modelId = guanjiaCfg?.model_name || 'gemini-3.8-flash-high';
+    const displayName = guanjiaCfg?.display_name || `管家系统内置模型 (${modelId})`;
+    const baseURL = guanjiaCfg?.api_base_url || 'https://cpa.qszy.me/v1';
+    const apiKey = guanjiaCfg?.api_key || 'sk-lobsterai-local';
+    return {
+      config: {
+        apiKey,
+        baseURL,
+        model: modelId,
+        apiType: 'openai',
+      },
+      providerMetadata: {
+        providerName: 'system_builtin',
+        authType: 'apikey',
+        codingPlanEnabled: false,
+        supportsImage: true,
+        supportsVideo: false,
+        supportsThinking: true,
+        modelName: displayName,
+        contextWindow: 128000,
+        maxTokens: 8192,
+      },
+    };
+  }
+
   const sqliteStore = getStore();
   if (!sqliteStore) {
     console.debug('[ClaudeSettings] resolveRawApiConfig: store is null, storeGetter not set yet');
@@ -886,6 +952,12 @@ export function resolveRawApiConfig(): ApiConfigResolution {
  */
 export function resolveAllProviderApiKeys(): Record<string, string> {
   const result: Record<string, string> = {};
+
+  if (isGuanjiaSystemModelActive()) {
+    const guanjiaCfg = getCachedGuanjiaModelConfig();
+    const apiKey = guanjiaCfg?.api_key?.trim() || 'sk-lobsterai-local';
+    result.SYSTEM_BUILTIN = apiKey;
+  }
 
   // lobsterai-server token is now managed by the token proxy
   // (openclawTokenProxy.ts) — no longer injected as an env var.
@@ -983,12 +1055,36 @@ export function listProviderSourceEntries(): ProviderSourceEntry[] {
 }
 
 export function resolveAllEnabledProviderConfigs(): ProviderRawConfig[] {
-  const sqliteStore = getStore();
-  if (!sqliteStore) return [];
-  const appConfig = sqliteStore.get<AppConfig>('app_config');
-  if (!appConfig?.providers) return [];
-
   const result: ProviderRawConfig[] = [];
+
+  if (isGuanjiaSystemModelActive()) {
+    const guanjiaCfg = getCachedGuanjiaModelConfig();
+    const modelName = guanjiaCfg?.model_name || 'gemini-3.8-flash-high';
+    const displayName = guanjiaCfg?.display_name || `管家系统内置模型 (${modelName})`;
+    const effectiveBaseUrl = guanjiaCfg?.api_base_url || 'https://cpa.qszy.me/v1';
+    const effectiveApiKey = guanjiaCfg?.api_key || 'sk-lobsterai-local';
+    result.push({
+      providerName: 'system_builtin',
+      baseURL: effectiveBaseUrl,
+      apiKey: effectiveApiKey || 'sk-lobsterai-local',
+      apiType: 'openai',
+      authType: 'apikey',
+      codingPlanEnabled: false,
+      models: [{
+        id: modelName,
+        name: displayName,
+        supportsImage: true,
+        supportsThinking: true,
+        contextWindow: 128000,
+        maxTokens: 8192,
+      }],
+    });
+  }
+
+  const sqliteStore = getStore();
+  if (!sqliteStore) return result;
+  const appConfig = sqliteStore.get<AppConfig>('app_config');
+  if (!appConfig?.providers) return result;
 
   for (const [providerName, providerConfig] of Object.entries(appConfig.providers)) {
     if (!providerConfig?.enabled) continue;

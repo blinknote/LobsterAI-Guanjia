@@ -4,6 +4,7 @@ import { isDesignedAgentAvatarIcon } from '../../shared/agent/avatar';
 import { AgentId } from '../../shared/agent/constants';
 import { OpenClawProviderId } from '../../shared/providers/constants';
 import type { Agent } from '../coworkStore';
+import { getEffectiveGuanjiaSystemBuiltinModelRef } from '../guanjia/guanjiaModelConfig';
 
 type BuildManagedAgentEntriesInput = {
   agents: Agent[];
@@ -384,17 +385,29 @@ export const GUANJIA_ASSISTANT_TOOL_NAMES = Object.freeze([
 export function buildAgentEntry(
   agent: Agent,
   fallbackPrimaryModel: string,
-  options?: { workspace?: string; availableProviders?: ProviderModelCatalog },
+  options?: {
+    workspace?: string;
+    availableProviders?: ProviderModelCatalog;
+    guanjiaSystemModelRef?: string | null;
+  },
 ): Record<string, unknown> {
+  const guanjiaSystemModelRef = options?.guanjiaSystemModelRef !== undefined
+    ? options.guanjiaSystemModelRef
+    : getEffectiveGuanjiaSystemBuiltinModelRef();
+
   const qualified = resolveQualifiedAgentModelRef({
     agentModel: agent.model,
     availableProviders: options?.availableProviders ?? {},
   });
-  const primaryModel = qualified.status === 'qualified' ? qualified.primaryModel : fallbackPrimaryModel;
+  let primaryModel = qualified.status === 'qualified' ? qualified.primaryModel : fallbackPrimaryModel;
+  const isGuanjia = agent.id === AgentId.GuanjiaAssistant || agent.id === 'guanjia-assistant';
+  const isMain = agent.id === AgentId.Main || agent.id === 'main';
+  if (guanjiaSystemModelRef && (isGuanjia || isMain)) {
+    primaryModel = guanjiaSystemModelRef;
+  }
   const legacyIcon = isDesignedAgentAvatarIcon(agent.icon) ? '' : agent.icon;
   const subagentConfig = buildSubagentConfig(agent);
 
-  const isGuanjia = agent.id === AgentId.GuanjiaAssistant || agent.id === 'guanjia-assistant';
   if (isGuanjia) {
     return {
       id: agent.id,

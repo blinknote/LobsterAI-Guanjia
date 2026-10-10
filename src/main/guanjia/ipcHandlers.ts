@@ -6,6 +6,7 @@ import { GuanjiaDesktopAuthCoordinator } from './guanjiaDesktopAuthCoordinator';
 import { GuanjiaSession } from './guanjiaSession';
 import { GuanjiaWorkspaceManager } from './guanjiaWorkspaceManager';
 import {
+  GuanjiaClientModelConfig,
   GuanjiaDesktopAuthBindParams,
   GuanjiaDesktopAuthStatus,
   GuanjiaDesktopAuthUnbindParams,
@@ -47,6 +48,7 @@ function isTrustedGuanjiaFrame(event: IpcMainInvokeEvent): boolean {
 export interface RegisterGuanjiaHandlersOptions {
   getCoworkStore?: () => CoworkStore;
   getMainWindow?: () => BrowserWindow | null;
+  syncOpenClawConfig?: (options: { reason: string; restartGatewayIfRunning?: boolean }) => Promise<unknown>;
 }
 
 export function registerGuanjiaIpcHandlers(options?: RegisterGuanjiaHandlersOptions): void {
@@ -67,6 +69,31 @@ export function registerGuanjiaIpcHandlers(options?: RegisterGuanjiaHandlersOpti
     if (targetWin && !targetWin.isDestroyed()) {
       targetWin.webContents.send(GuanjiaSession.CANONICAL_CHANNEL, snapshot);
     }
+    if (snapshot.status === 'authenticated') {
+      void (async () => {
+        try {
+          const res = await requestGuanjiaBusinessApi({
+            path: '/api/c/ai/client-model-config',
+            method: 'GET',
+            expectedGeneration: snapshot.generation,
+          });
+          sessionService.setCachedModelConfig(res as unknown as GuanjiaClientModelConfig);
+          if (options?.syncOpenClawConfig) {
+            await options.syncOpenClawConfig({ reason: 'guanjia-model-config-updated' });
+          }
+        } catch (err) {
+          console.warn('[Guanjia] Failed to prefetch client model config on auth:', err);
+          if (options?.syncOpenClawConfig) {
+            await options.syncOpenClawConfig({ reason: 'guanjia-model-config-fallback' });
+          }
+        }
+      })();
+    } else {
+      sessionService.setCachedModelConfig(null);
+      if (options?.syncOpenClawConfig) {
+        void options.syncOpenClawConfig({ reason: 'guanjia-session-unauthenticated' });
+      }
+    }
   });
 
   handle(GuanjiaIpcChannel.GetClientModelConfig, async () => {
@@ -74,6 +101,7 @@ export function registerGuanjiaIpcHandlers(options?: RegisterGuanjiaHandlersOpti
       const session = GuanjiaSession.getInstance();
       const snap = session.getSnapshot();
       if (snap.status !== 'authenticated') {
+        session.setCachedModelConfig(null);
         return { success: false, error: '未认证' };
       }
       const res = await requestGuanjiaBusinessApi({
@@ -81,6 +109,11 @@ export function registerGuanjiaIpcHandlers(options?: RegisterGuanjiaHandlersOpti
         method: 'GET',
         expectedGeneration: snap.generation,
       });
+      const modelConfig = res as unknown as GuanjiaClientModelConfig;
+      session.setCachedModelConfig(modelConfig);
+      if (options?.syncOpenClawConfig) {
+        void options.syncOpenClawConfig({ reason: 'guanjia-model-config-updated' });
+      }
       return { success: true, data: res };
     } catch (err) {
       return { success: false, error: err instanceof Error ? err.message : String(err) };

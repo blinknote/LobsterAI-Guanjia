@@ -2313,7 +2313,21 @@ interface IElectronAPI {
       getContext: () => Promise<unknown>;
       executeAction: (payload: unknown) => Promise<unknown>;
       getAuditLogs: () => Promise<unknown>;
-      getClientModelConfig: () => Promise<{ success: boolean; data?: { client_ai_provider: string; model_name?: string; display_name?: string; hide_youdao_models: boolean; balance?: number }; error?: string }>;
+      getClientModelConfig: () => Promise<{
+        success: boolean;
+        data?: {
+          client_ai_provider: string;
+          provider_name?: string;
+          model_name?: string;
+          display_name?: string;
+          hide_youdao_models: boolean;
+          balance?: number;
+          api_base_url?: string;
+          api_key?: string;
+          api_type?: string;
+        };
+        error?: string;
+      }>;
       native?: import('../../shared/guanjia/native').ScopedNativeApi;
       desktopAuth?: import('../../shared/guanjia/native').DesktopAuthApi;
     };

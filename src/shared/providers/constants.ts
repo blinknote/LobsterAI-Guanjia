@@ -43,6 +43,7 @@ export const ProviderName = {
   Custom: 'custom',
   LobsteraiServer: 'lobsterai-server',
   Copilot: 'github-copilot',
+  SystemBuiltin: 'system_builtin',
 } as const;
 export type ProviderName = typeof ProviderName[keyof typeof ProviderName];
 
@@ -72,6 +73,7 @@ export const OpenClawProviderId = {
   Ollama: 'ollama',
   LmStudio: 'lm-studio',
   Lobster: 'lobster',
+  SystemBuiltin: 'system_builtin',
 } as const;
 export type OpenClawProviderId = typeof OpenClawProviderId[keyof typeof OpenClawProviderId];
 

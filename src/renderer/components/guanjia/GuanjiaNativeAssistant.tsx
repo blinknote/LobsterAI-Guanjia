@@ -24,8 +24,28 @@ function decodeVerifiedMemberAssets(action: GuanjiaPendingAction) {
   const remainingTimes = assets.remaining_times;
   const deductAmount = assets.deduct_amount;
   const afterBalance = assets.after_total_balance;
+  const rechargeAmount = assets.recharge_amount;
+  const refundAmount = assets.refund_amount;
+  const orderNo = assets.order_no;
+  const actualPaidAmount = assets.actual_paid_amount;
+  const maxRefundable = assets.max_refundable_amount;
+  const deductTimes = assets.deduct_times;
 
-  if (!rawMemberName && balance == null && principal == null && bonus == null && remainingTimes == null && deductAmount == null && afterBalance == null) {
+  if (
+    !rawMemberName &&
+    balance == null &&
+    principal == null &&
+    bonus == null &&
+    remainingTimes == null &&
+    deductAmount == null &&
+    afterBalance == null &&
+    rechargeAmount == null &&
+    refundAmount == null &&
+    !orderNo &&
+    actualPaidAmount == null &&
+    maxRefundable == null &&
+    deductTimes == null
+  ) {
     return null;
   }
 
@@ -37,6 +57,12 @@ function decodeVerifiedMemberAssets(action: GuanjiaPendingAction) {
     remainingTimes: remainingTimes != null ? String(remainingTimes) : undefined,
     deductAmount: deductAmount != null ? String(deductAmount) : undefined,
     afterBalance: afterBalance != null ? String(afterBalance) : undefined,
+    rechargeAmount: rechargeAmount != null ? String(rechargeAmount) : undefined,
+    refundAmount: refundAmount != null ? String(refundAmount) : undefined,
+    orderNo: orderNo ? String(orderNo) : undefined,
+    actualPaidAmount: actualPaidAmount != null ? String(actualPaidAmount) : undefined,
+    maxRefundable: maxRefundable != null ? String(maxRefundable) : undefined,
+    deductTimes: deductTimes != null ? String(deductTimes) : undefined,
   };
 }
 
@@ -953,6 +979,21 @@ export const GuanjiaNativeAssistant: React.FC<GuanjiaNativeAssistantProps> = ({
                     )}
                     {decoded.deductAmount != null && (
                       <span>{tGuanjia('guanjiaDeductAmount')}：¥{decoded.deductAmount}</span>
+                    )}
+                    {decoded.rechargeAmount != null && (
+                      <span>{tGuanjia('guanjiaRechargeAmount')}：¥{decoded.rechargeAmount}</span>
+                    )}
+                    {decoded.refundAmount != null && (
+                      <span>{tGuanjia('guanjiaRefundAmount')}：¥{decoded.refundAmount}</span>
+                    )}
+                    {decoded.orderNo && (
+                      <span>{tGuanjia('guanjiaOrderNo')}：{decoded.orderNo}</span>
+                    )}
+                    {decoded.actualPaidAmount != null && (
+                      <span>{tGuanjia('guanjiaActualPaidAmount')}：¥{decoded.actualPaidAmount}</span>
+                    )}
+                    {decoded.deductTimes != null && (
+                      <span>{tGuanjia('guanjiaDeductTimes')}：{decoded.deductTimes}{tGuanjia('guanjiaTimesCardUnit')}</span>
                     )}
                     {decoded.afterBalance != null && (
                       <span>{tGuanjia('guanjiaAfterBalance')}：¥{decoded.afterBalance}</span>

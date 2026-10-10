@@ -1,5 +1,12 @@
+import {
+  getCachedGuanjiaModelConfig,
+  getEffectiveGuanjiaSystemBuiltinModelRef,
+  isGuanjiaSystemModelActive,
+  setCachedGuanjiaModelConfig,
+  setGuanjiaAuthenticated,
+} from './guanjiaModelConfig';
 import { GuanjiaWorkspaceManager } from './guanjiaWorkspaceManager';
-import { GuanjiaIpcChannel, GuanjiaLoginPayload, GuanjiaSessionSnapshot, GuanjiaSsoCredentials, GuanjiaStoreSnapshot, GuanjiaUserSnapshot } from './types';
+import { GuanjiaClientModelConfig, GuanjiaIpcChannel, GuanjiaLoginPayload, GuanjiaSessionSnapshot, GuanjiaSsoCredentials, GuanjiaStoreSnapshot, GuanjiaUserSnapshot } from './types';
 
 function record(value: unknown): Record<string, unknown> | null {
   return value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null;
@@ -36,12 +43,25 @@ export class GuanjiaSession {
   public getCredentials(): { token: string; userId: string; username: string } | null {
     return this.snapshot.status === 'authenticated' && this.credentials ? { ...this.credentials } : null;
   }
+  public getCachedModelConfig(): GuanjiaClientModelConfig | null {
+    return getCachedGuanjiaModelConfig();
+  }
+  public setCachedModelConfig(config: GuanjiaClientModelConfig | null): void {
+    setCachedGuanjiaModelConfig(config);
+  }
+  public isSystemBuiltinActive(): boolean {
+    return isGuanjiaSystemModelActive();
+  }
+  public getSystemBuiltinModelRef(): string | null {
+    return getEffectiveGuanjiaSystemBuiltinModelRef();
+  }
   public subscribe(listener: (snapshot: GuanjiaSessionSnapshot) => void): () => void {
     this.listeners.add(listener);
     return () => { this.listeners.delete(listener); };
   }
   private publish(snapshot: GuanjiaSessionSnapshot): GuanjiaSessionSnapshot {
     this.snapshot = { ...snapshot, updatedAt: Date.now() };
+    setGuanjiaAuthenticated(snapshot.status === 'authenticated');
     for (const listener of this.listeners) {
       try { listener(this.getSnapshot()); } catch (err) { console.error('[GuanjiaSession] Listener failed:', err); }
     }
@@ -50,6 +70,7 @@ export class GuanjiaSession {
   private begin(): number {
     this.credentials = null;
     this.restorePromise = null;
+    setGuanjiaAuthenticated(false);
     const generation = ++this.generation;
     this.publish({ status: 'restoring', generation, user: null, store: null });
     return generation;
@@ -57,6 +78,7 @@ export class GuanjiaSession {
   private fail(generation: number, error: unknown): GuanjiaSessionSnapshot {
     if (generation !== this.generation) return this.getSnapshot();
     this.credentials = null;
+    setGuanjiaAuthenticated(false);
     GuanjiaWorkspaceManager.getInstance().clearSsoCredentials();
     void GuanjiaWorkspaceManager.getInstance().clearSessionCredentials(generation).catch(() => {});
     return this.publish({ status: 'temporarily_unavailable', generation, user: null, store: null, error: error instanceof Error ? error.message : '服务暂不可用，请重试' });
@@ -91,6 +113,17 @@ export class GuanjiaSession {
     }
     if (generation !== this.generation) return this.getSnapshot();
     this.credentials = { token, userId: String(user.id), username: user.employeeNo, source };
+    setCachedGuanjiaModelConfig({
+      client_ai_provider: 'system_builtin',
+      provider_name: 'system_builtin',
+      model_name: 'gemini-3.8-flash-high',
+      display_name: '管家系统内置模型 (gemini-3.8-flash-high)',
+      balance: 0,
+      hide_youdao_models: true,
+      api_base_url: 'https://cpa.qszy.me/v1',
+      api_key: '',
+      api_type: 'openai',
+    });
     return this.publish({ status: 'authenticated', generation, user, store });
   }
   public async adoptCandidate(
@@ -181,6 +214,7 @@ export class GuanjiaSession {
     const token = this.credentials?.token;
     this.credentials = null;
     this.restorePromise = null;
+    setGuanjiaAuthenticated(false);
     const generation = ++this.generation;
     const manager = GuanjiaWorkspaceManager.getInstance();
     manager.clearSsoCredentials();
@@ -262,6 +296,7 @@ export class GuanjiaSession {
   public invalidate(reason?: string): void {
     this.credentials = null;
     this.restorePromise = null;
+    setGuanjiaAuthenticated(false);
     const generation = ++this.generation;
     const manager = GuanjiaWorkspaceManager.getInstance();
     manager.clearSsoCredentials();
@@ -269,3 +304,12 @@ export class GuanjiaSession {
     void manager.clearSessionCredentials(generation).catch((error) => console.warn('[GuanjiaSession] Credential clearing failed:', error));
   }
 }
+
+export {
+  getCachedGuanjiaModelConfig,
+  getEffectiveGuanjiaSystemBuiltinModelRef,
+  isGuanjiaSessionAuthenticated,
+  isGuanjiaSystemModelActive,
+  setCachedGuanjiaModelConfig,
+  setGuanjiaAuthenticated,
+} from './guanjiaModelConfig';

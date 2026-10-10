@@ -168,6 +168,18 @@ export interface GuanjiaFinancialAuditLog {
   extra?: Record<string, unknown>;
 }
 
+export interface GuanjiaClientModelConfig {
+  client_ai_provider: string;
+  provider_name?: string;
+  model_name?: string;
+  display_name?: string;
+  balance?: number;
+  hide_youdao_models?: boolean;
+  api_base_url?: string;
+  api_key?: string;
+  api_type?: 'openai' | 'anthropic';
+}
+
 export interface GuanjiaModelProvider {
   id: string;
   name: string;

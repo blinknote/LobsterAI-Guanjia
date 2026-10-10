@@ -10,11 +10,19 @@ import {
   getAllServerModelMetadata,
   ServerModelRunGateReason,
   updateServerModelMetadata,
+  resolveAllEnabledProviderConfigs,
+  resolveAllProviderApiKeys,
+  resolveRawApiConfig,
 } from './claudeSettings';
+import {
+  setCachedGuanjiaModelConfig,
+  setGuanjiaAuthenticated,
+} from '../guanjia/guanjiaModelConfig';
 
 beforeEach(() => {
   clearServerModelMetadata();
   vi.restoreAllMocks();
+  setGuanjiaAuthenticated(false);
 });
 
 describe('server model metadata cache', () => {
@@ -158,6 +166,54 @@ describe('server model metadata cache', () => {
       modelId: 'future-model',
       runtimeProfile: 'server-controlled-compat-json',
     }])).toBe(false);
+  });
+});
+
+describe('system_builtin provider resolution with guanjia', () => {
+  test('registers system_builtin provider and keys when guanjia is authenticated', () => {
+    setGuanjiaAuthenticated(true);
+    setCachedGuanjiaModelConfig({
+      client_ai_provider: 'system_builtin',
+      provider_name: 'system_builtin',
+      model_name: 'gemini-3.8-flash-high',
+      display_name: '管家系统内置模型 (gemini-3.8-flash-high)',
+      api_base_url: 'https://cpa.qszy.me/v1',
+      api_key: 'sk-test-guanjia-key',
+      api_type: 'openai',
+      hide_youdao_models: true,
+    });
+
+    const providers = resolveAllEnabledProviderConfigs();
+    const systemBuiltin = providers.find((p) => p.providerName === 'system_builtin');
+    expect(systemBuiltin).toBeDefined();
+    expect(systemBuiltin).toMatchObject({
+      providerName: 'system_builtin',
+      baseURL: 'https://cpa.qszy.me/v1',
+      apiKey: 'sk-test-guanjia-key',
+      apiType: 'openai',
+      models: [{
+        id: 'gemini-3.8-flash-high',
+        name: '管家系统内置模型 (gemini-3.8-flash-high)',
+      }],
+    });
+
+    const apiKeys = resolveAllProviderApiKeys();
+    expect(apiKeys.SYSTEM_BUILTIN).toBe('sk-test-guanjia-key');
+
+    const raw = resolveRawApiConfig();
+    expect(raw.config).toMatchObject({
+      model: 'gemini-3.8-flash-high',
+      baseURL: 'https://cpa.qszy.me/v1',
+      apiKey: 'sk-test-guanjia-key',
+      apiType: 'openai',
+    });
+    expect(raw.providerMetadata?.providerName).toBe('system_builtin');
+  });
+
+  test('does not register system_builtin provider when guanjia is not authenticated', () => {
+    setGuanjiaAuthenticated(false);
+    const raw = resolveRawApiConfig();
+    expect(raw.providerMetadata?.providerName).not.toBe('system_builtin');
   });
 });
 

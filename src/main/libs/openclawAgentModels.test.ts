@@ -100,6 +100,82 @@ describe('buildAgentEntry', () => {
     });
   });
 
+  test('resolves guanjia-assistant to system_builtin model when guanjia system model is active', () => {
+    const result = buildAgentEntry({
+      id: 'guanjia-assistant',
+      name: '智慧管家助理',
+      description: '',
+      systemPrompt: '',
+      identity: '',
+      model: '',
+      workingDirectory: '',
+      icon: '',
+      skillIds: [],
+      enabled: true,
+      isDefault: false,
+      source: 'preset',
+      presetId: 'guanjia-assistant',
+      createdAt: 0,
+      updatedAt: 0,
+    }, 'lobsterai-server/deepseek-flash', {
+      guanjiaSystemModelRef: 'system_builtin/gemini-3.8-flash-high',
+    });
+
+    expect(result).toMatchObject({
+      id: 'guanjia-assistant',
+      model: { primary: 'system_builtin/gemini-3.8-flash-high' },
+    });
+  });
+
+  test('resolves main agent to system_builtin model when guanjia system model is active', () => {
+    const result = buildAgentEntry({
+      id: 'main',
+      name: 'main',
+      description: '',
+      systemPrompt: '',
+      identity: '',
+      model: '',
+      workingDirectory: '',
+      icon: '',
+      skillIds: [],
+      enabled: true,
+      isDefault: true,
+      source: 'custom',
+      presetId: '',
+      createdAt: 0,
+      updatedAt: 0,
+    }, 'lobsterai-server/deepseek-flash', {
+      guanjiaSystemModelRef: 'system_builtin/gemini-3.8-flash-high',
+    });
+
+    expect(result).toMatchObject({
+      id: 'main',
+      model: { primary: 'system_builtin/gemini-3.8-flash-high' },
+    });
+  });
+
+  test('falls back to fallbackPrimaryModel for guanjia-assistant when guanjia system model is not active', () => {
+    const result = buildAgentEntry({
+      id: 'guanjia-assistant',
+      name: '智慧管家助理',
+      description: '',
+      systemPrompt: '',
+      identity: '',
+      model: '',
+      workingDirectory: '',
+      icon: '',
+      skillIds: [],
+      enabled: true,
+      isDefault: false,
+      source: 'preset',
+      presetId: 'guanjia-assistant',
+      createdAt: 0,
+      updatedAt: 0,
+    }, 'lobsterai-server/deepseek-flash', {
+      guanjiaSystemModelRef: null,
+    });
+  });
+
   test('falls back to the default model when agent model is an ambiguous bare id', () => {
     const result = buildAgentEntry({
       id: 'main',

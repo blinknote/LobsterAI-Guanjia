@@ -47,6 +47,7 @@ import {
 } from '../../shared/providers/lobsterAIRequestOptions';
 import type { ModelThinkingConfig } from '../../shared/providers/modelThinking';
 import type { Agent, CoworkConfig, CoworkExecutionMode } from '../coworkStore';
+import { getEffectiveGuanjiaSystemBuiltinModelRef } from '../guanjia/guanjiaModelConfig';
 import type { DiscordInstanceConfig, IMSettings, TelegramInstanceConfig } from '../im/types';
 import type { DingTalkInstanceConfig, EmailMultiInstanceConfig, FeishuInstanceConfig, NeteaseBeeChanConfig, NimInstanceConfig, PopoInstanceConfig, QQInstanceConfig, WecomInstanceConfig, WeixinOpenClawConfig } from '../im/types';
 import { DiscordDmPolicy } from '../im/types';
@@ -1069,6 +1070,12 @@ const PROVIDER_REGISTRY: Record<string, ProviderDescriptor> = {
   [ProviderName.LmStudio]: {
     providerId: OpenClawProviderId.LmStudio,
     resolveApi: ({ apiType, baseURL }) => mapApiTypeToOpenClawApi(apiType, undefined, baseURL),
+    normalizeBaseUrl: stripChatCompletionsSuffix,
+  },
+
+  [ProviderName.SystemBuiltin]: {
+    providerId: OpenClawProviderId.SystemBuiltin,
+    resolveApi: () => OpenClawApiConst.OpenAICompletions as OpenClawTransportApi,
     normalizeBaseUrl: stripChatCompletionsSuffix,
   },
 
@@ -3941,10 +3948,12 @@ export class OpenClawConfigSync {
     const agents = agentsOverride ?? this.getAgents?.() ?? [];
     const mainAgent = agents.find(agent => agent.id === AgentId.Main);
     const workspace = stateDir ? getMainAgentWorkspacePath(stateDir) : undefined;
+    const guanjiaBuiltinRef = getEffectiveGuanjiaSystemBuiltinModelRef();
+    const effectiveDefaultPrimaryModel = guanjiaBuiltinRef || defaultPrimaryModel;
 
     const list: Array<Record<string, unknown>> = [
       mainAgent
-        ? buildAgentEntry(mainAgent, defaultPrimaryModel, { availableProviders, workspace })
+        ? buildAgentEntry(mainAgent, effectiveDefaultPrimaryModel, { availableProviders, workspace })
         : {
             id: AgentId.Main,
             ...(workspace ? { workspace } : {}),
@@ -3952,12 +3961,12 @@ export class OpenClawConfigSync {
               name: DefaultAgentProfile.Name,
             },
             model: {
-              primary: defaultPrimaryModel,
+              primary: effectiveDefaultPrimaryModel,
             },
           },
       ...buildManagedAgentEntries({
         agents,
-        fallbackPrimaryModel: defaultPrimaryModel,
+        fallbackPrimaryModel: effectiveDefaultPrimaryModel,
         stateDir,
         availableProviders,
       }),

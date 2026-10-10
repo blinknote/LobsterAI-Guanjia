@@ -11545,6 +11545,7 @@ if (!gotTheLock) {
   registerGuanjiaIpcHandlers({
     getCoworkStore,
     getMainWindow: () => mainWindow,
+    syncOpenClawConfig,
   });
 
   GuanjiaDesktopAuthCoordinator.getInstance().setOfficialAccessors(
