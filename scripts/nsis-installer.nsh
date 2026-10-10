@@ -1946,11 +1946,6 @@ FunctionEnd
         MessageBox MB_OK|MB_ICONEXCLAMATION "${U+65E0}${U+6CD5}${U+5B89}${U+5168}${U+79FB}${U+52A8}${U+73B0}${U+6709}${U+5B89}${U+88C5}${U+76EE}${U+5F55}${U+4EE5}${U+8FDB}${U+884C}${U+66F4}${U+65B0}${U+FF08}${U+6587}${U+4EF6}${U+53EF}${U+80FD}${U+88AB}${U+5360}${U+7528}${U+FF09}${U+3002}${U+66F4}${U+65B0}${U+5DF2}${U+7EC8}${U+6B62}${U+FF0C}${U+672A}${U+5220}${U+9664}${U+4EFB}${U+4F55}${U+5E94}${U+7528}${U+6587}${U+4EF6}${U+3002}${U+66F4}${U+65B0}${U+8FC7}${U+7A0B}${U+4E2D}${U+5DF2}${U+5C1D}${U+8BD5}${U+505C}${U+6B62}${U+65E7}${U+7248}${U+672C}${U+8FDB}${U+7A0B}${U+FF0C}${U+8BF7}${U+5173}${U+95ED}${U+76F8}${U+5173}${U+7A0B}${U+5E8F}${U+540E}${U+91CD}${U+65B0}${U+542F}${U+52A8}${U+5E94}${U+7528}${U+6216}${U+91CD}${U+8BD5}${U+3002}$\r$\n$\r$\nThe update stopped before replacing the existing installation because the directory could not be moved (files may be in use, win32_error=$lobsterOldInstallRenameError). No files were deleted. Running processes were stopped during the update attempt; please close any remaining applications and restart LobsterAI-Dev. Details: ${LOBSTER_APPDATA_DIR}\install-timing.log" /SD IDOK
         SetErrorLevel 2
         Quit
-        ; Reference handleUninstallResult statically so NSIS does not emit
-        ; warning 6010 (install function not referenced) under /WX.
-        Goto CustomOldUninstallerDevQuit_${ROOT_KEY}
-        !insertmacro handleUninstallResult ${ROOT_KEY}
-        CustomOldUninstallerDevQuit_${ROOT_KEY}:
       !else
         Goto OldInstallRenameComplete
       !endif
@@ -2115,6 +2110,12 @@ FunctionEnd
         MessageBox MB_OK|MB_ICONEXCLAMATION "${U+65E7}${U+7248}${U+5378}${U+8F7D}${U+7A0B}${U+5E8F}${U+4E0D}${U+53D7}${U+652F}${U+6301}${U+FF0C}${U+5DF2}${U+7EC8}${U+6B62}${U+81EA}${U+52A8}${U+66F4}${U+65B0}${U+3002}${U+672A}${U+4FEE}${U+6539}${U+6216}${U+5220}${U+9664}${U+4EFB}${U+4F55}${U+6570}${U+636E}${U+3002}${U+8BF7}${U+624B}${U+52A8}${U+5907}${U+4EFD}${U+6570}${U+636E}${U+5E76}${U+5B8C}${U+6210}${U+8FC1}${U+79FB}${U+540E}${U+91CD}${U+8BD5}${U+3002}$\r$\n$\r$\nLegacy Dev uninstaller is blocked from running to protect system isolation. Installation was stopped without modifying or deleting any data. Please manually back up data, complete migration, and retry. Details: ${LOBSTER_APPDATA_DIR}\install-timing.log" /SD IDOK
         SetErrorLevel 2
         Quit
+        ; Reference stock uninstall helpers statically so NSIS does not emit
+        ; warning 6010 (install function not referenced) under /WX.
+        Goto CustomOldUninstallerDevQuit_${ROOT_KEY}
+        !insertmacro uninstallOldVersion ${ROOT_KEY}
+        !insertmacro handleUninstallResult ${ROOT_KEY}
+        CustomOldUninstallerDevQuit_${ROOT_KEY}:
       !else
       System::Call 'kernel32::GetTickCount()i .r4'
       StrCpy $lobsterOldUninstallStartTick $4
