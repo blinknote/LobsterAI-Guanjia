@@ -183,11 +183,13 @@ async function runImport() {
   console.log(`==> [ImportWindows] Canonical version from current checkout: ${canonicalVersion}`);
 
   // 4. Locate and verify workflow workspace installer artifacts (EXCLUSIVELY workflow workspace, NO fallback)
+  const customTargetDir = process.argv[2] ? path.resolve(process.argv[2]) : null;
   const workspaceTargetDir = path.resolve('.circleci-workspace/installer');
   const artifactsTargetDir = path.resolve('artifacts/windows');
-  const targetDir = (fs.existsSync(workspaceTargetDir) && fs.existsSync(path.join(workspaceTargetDir, 'UPDATE_IDENTITY.json')))
-    ? workspaceTargetDir
-    : artifactsTargetDir;
+  const targetDir = customTargetDir
+    || ((fs.existsSync(workspaceTargetDir) && fs.existsSync(path.join(workspaceTargetDir, 'UPDATE_IDENTITY.json')))
+      ? workspaceTargetDir
+      : artifactsTargetDir);
   if (!fs.existsSync(targetDir) || !fs.existsSync(path.join(targetDir, 'UPDATE_IDENTITY.json'))) {
     throw new Error(
       `Missing installer artifacts at: ${targetDir}. ` +

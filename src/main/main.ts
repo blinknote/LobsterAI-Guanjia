@@ -2283,8 +2283,8 @@ const formatAutoLaunchStatusForLog = (status: AutoLaunchStatus): string => {
 const getAppUpdateCoordinator = (): AppUpdateCoordinator => {
   if (!appUpdateCoordinator) {
     const isDevTarget =
-      process.platform === 'win32'
-      && process.arch === 'x64'
+      ((process.platform === 'win32' && process.arch === 'x64')
+        || (process.platform === 'darwin' && process.arch === 'arm64'))
       && APP_NAME === 'LobsterAI-Dev'
       && APP_USER_MODEL_ID === 'com.lobsterai.dev.app';
 

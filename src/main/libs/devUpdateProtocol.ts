@@ -12,9 +12,10 @@ import {
   type DevUpdateChannelPayload,
   type DevUpdateReleasePayload,
   type DevUpdateSignedEnvelope,
+  getDevUpdateScope,
 } from '../../shared/appUpdate/devUpdateTypes';
 
-export { DEV_UPDATE_SCOPE };
+export { DEV_UPDATE_SCOPE, getDevUpdateScope };
 
 export const DEV_UPDATE_FEED_URL = 'https://updates.a-j.app';
 export const DEV_UPDATE_CHANNEL_CHECK_PATH = '/api/v1/channel/check';
@@ -243,12 +244,13 @@ export function validateDevScope(scope: unknown): boolean {
   if (!scope || typeof scope !== 'object') return false;
   const s = scope as Record<string, unknown>;
   return (
-    s.product === DEV_UPDATE_SCOPE.product
-    && s.appId === DEV_UPDATE_SCOPE.appId
-    && s.channel === DEV_UPDATE_SCOPE.channel
-    && s.platform === DEV_UPDATE_SCOPE.platform
-    && s.arch === DEV_UPDATE_SCOPE.arch
-    && s.packageType === DEV_UPDATE_SCOPE.packageType
+    s.product === 'LobsterAI-Dev'
+    && s.appId === 'com.lobsterai.dev.app'
+    && s.channel === 'dev'
+    && (
+      (s.platform === 'win32' && s.arch === 'x64' && s.packageType === 'nsis-full')
+      || (s.platform === 'darwin' && s.arch === 'arm64' && s.packageType === 'dmg')
+    )
   );
 }
 
@@ -389,7 +391,8 @@ export function validateInstallerDownloadUrl(rawUrl: string, releaseId: string, 
   if (!/^[a-zA-Z0-9_-]+$/.test(releaseId)) {
     return false;
   }
-  if (!/^[a-zA-Z0-9._-]+$/.test(fileName) || !fileName.toLowerCase().endsWith('.exe')) {
+  const isExtValid = fileName.toLowerCase().endsWith('.exe') || fileName.toLowerCase().endsWith('.dmg');
+  if (!/^[a-zA-Z0-9._-]+$/.test(fileName) || !isExtValid) {
     return false;
   }
 
@@ -454,7 +457,8 @@ export function validateReleasePayload(payload: unknown): DevUpdateReleasePayloa
   if (typeof p.sourceCommit !== 'string' || !/^[0-9a-f]{40}$/.test(p.sourceCommit)) {
     throw new DevUpdateVerificationError('invalid-source-commit', 'Invalid sourceCommit format (must be 40 hex chars)');
   }
-  if (typeof p.fileName !== 'string' || !/^[a-zA-Z0-9._-]+$/.test(p.fileName) || !p.fileName.toLowerCase().endsWith('.exe')) {
+  const isFileExtValid = typeof p.fileName === 'string' && (p.fileName.toLowerCase().endsWith('.exe') || p.fileName.toLowerCase().endsWith('.dmg'));
+  if (typeof p.fileName !== 'string' || !/^[a-zA-Z0-9._-]+$/.test(p.fileName) || !isFileExtValid) {
     throw new DevUpdateVerificationError('invalid-file-name', 'Invalid fileName');
   }
   if (typeof p.size !== 'number' || !Number.isSafeInteger(p.size) || p.size <= 0 || p.size > MAX_INSTALLER_BYTES) {
@@ -570,12 +574,12 @@ export function validateChannelPayload(payload: unknown): DevUpdateChannelPayloa
 
   return {
     schemaVersion: 1,
-    product: DEV_UPDATE_SCOPE.product,
-    appId: DEV_UPDATE_SCOPE.appId,
-    channel: DEV_UPDATE_SCOPE.channel,
-    platform: DEV_UPDATE_SCOPE.platform,
-    arch: DEV_UPDATE_SCOPE.arch,
-    packageType: DEV_UPDATE_SCOPE.packageType,
+    product: p.product as any,
+    appId: p.appId as any,
+    channel: p.channel as any,
+    platform: p.platform as any,
+    arch: p.arch as any,
+    packageType: p.packageType as any,
     nonce: p.nonce,
     revision: p.revision,
     issuedAt: p.issuedAt,

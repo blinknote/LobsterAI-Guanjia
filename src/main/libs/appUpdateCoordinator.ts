@@ -999,7 +999,7 @@ export class AppUpdateCoordinator {
             errorMessage: null,
           });
         },
-        info.dev ? { expectedSize: info.dev.size, expectedSha256: info.dev.sha256 } : undefined,
+        ...(info.dev ? [{ expectedSize: info.dev.size, expectedSha256: info.dev.sha256 }] : []),
       );
       const filePath = download.filePath;
       if (info.gray && !this.grayUpdates?.isCurrent(info)) {

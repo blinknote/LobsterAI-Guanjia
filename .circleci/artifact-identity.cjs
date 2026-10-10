@@ -19,6 +19,186 @@ const REQUIRED_BRANCH = 'feat/smartbutler-integration';
 const APPROVED_BRANCHES = new Set(['feat/smartbutler-integration', 'main']);
 
 /**
+ * Collect verified macOS DMG installer and generate UPDATE_IDENTITY.json & BUILD_INFO.txt.
+ * Extracts metadata from packaged app.asar and built Mach-O binary.
+ * @param {string} repoRoot
+ */
+async function collectArtifactIdentityMac(repoRoot = path.resolve(__dirname, '..')) {
+  console.log(`==> [ArtifactIdentity] Starting macOS artifact binding in: ${repoRoot}`);
+
+  const canonicalVersion = readCanonicalVersion(repoRoot);
+  console.log(`    Canonical package version: ${canonicalVersion}`);
+
+  const sourceCommit = resolveSourceCommit(repoRoot);
+  console.log(`    Source Commit: ${sourceCommit}`);
+
+  const releaseDir = path.join(repoRoot, 'release');
+  const macArmDir = path.join(releaseDir, 'mac-arm64');
+  let macAppDir = path.join(macArmDir, `${EXPECTED_PRODUCT}.app`);
+  if (!fs.existsSync(macAppDir) && fs.existsSync(macArmDir)) {
+    const entries = fs.readdirSync(macArmDir).filter((e) => e.endsWith('.app'));
+    if (entries.length > 0) {
+      macAppDir = path.join(macArmDir, entries[0]);
+    }
+  }
+  if (!fs.existsSync(macAppDir)) {
+    throw new Error(`Missing mac-arm64 .app bundle: ${macAppDir}`);
+  }
+
+  // Extract and inspect actual build-identity.json inside Contents/Resources/app.asar
+  const appAsarPath = path.join(macAppDir, 'Contents', 'Resources', 'app.asar');
+  if (!fs.existsSync(appAsarPath)) {
+    throw new Error(`Missing packaged app.asar at: ${appAsarPath}`);
+  }
+
+  const markerBuf = extractFileFromAsar(appAsarPath, 'dist-electron/build-identity.json');
+  const marker = JSON.parse(markerBuf.toString('utf8'));
+  if (!marker.productName || marker.productName !== EXPECTED_PRODUCT) {
+    throw new Error(`Packaged build-identity.json productName mismatch in app.asar: expected "${EXPECTED_PRODUCT}", got "${marker.productName}"`);
+  }
+  if (!marker.appId || marker.appId !== EXPECTED_APP_ID) {
+    throw new Error(`Packaged build-identity.json appId mismatch in app.asar: expected "${EXPECTED_APP_ID}", got "${marker.appId}"`);
+  }
+  if (!marker.version || marker.version !== canonicalVersion) {
+    throw new Error(`Packaged build-identity.json version mismatch in app.asar: expected "${canonicalVersion}", got "${marker.version}"`);
+  }
+  if (!marker.sourceCommit || marker.sourceCommit.toLowerCase() !== sourceCommit.toLowerCase()) {
+    throw new Error(`Packaged build-identity.json commit mismatch in app.asar: expected "${sourceCommit}", got "${marker.sourceCommit}"`);
+  }
+  console.log(`==> [ArtifactIdentity] Verified app.asar packaged build-identity.json matches commit ${sourceCommit}`);
+
+  // Extract and inspect actual package.json inside resources/app.asar
+  const appPkgBuf = extractFileFromAsar(appAsarPath, 'package.json');
+  const appPkg = JSON.parse(appPkgBuf.toString('utf8'));
+  if (!appPkg.version || appPkg.version !== canonicalVersion) {
+    throw new Error(`Packaged app.asar package.json version mismatch: expected "${canonicalVersion}", got "${appPkg.version}"`);
+  }
+
+  // Extract and inspect actual appConstants inside resources/app.asar
+  const appConstantsBuf = extractFileFromAsar(appAsarPath, 'dist-electron/main/appConstants.js');
+  const appConstantsCode = appConstantsBuf.toString('utf8');
+  const { appName, appUserModelId } = parseAppConstantsExports(appConstantsCode);
+  if (appName !== EXPECTED_PRODUCT) {
+    throw new Error(`Packaged appConstants APP_NAME export mismatch: expected "${EXPECTED_PRODUCT}", got "${appName}"`);
+  }
+  if (appUserModelId !== EXPECTED_APP_ID) {
+    throw new Error(`Packaged appConstants APP_USER_MODEL_ID export mismatch: expected "${EXPECTED_APP_ID}", got "${appUserModelId}"`);
+  }
+
+  // Inspect Mach-O executable
+  const executablePath = path.join(macAppDir, 'Contents', 'MacOS', marker.productName);
+  if (!fs.existsSync(executablePath)) {
+    throw new Error(`Missing macOS executable: ${executablePath}`);
+  }
+  const executableStat = fs.lstatSync(executablePath);
+  if (!executableStat.isFile() || executableStat.isSymbolicLink() || executableStat.size <= 0) {
+    throw new Error(`Invalid macOS executable: ${executablePath}`);
+  }
+  const executableSha256 = await computeFileSha256(executablePath);
+  console.log(`==> [ArtifactIdentity] Inspecting macOS binary: ${executablePath}`);
+  console.log(`    Executable SHA256: ${executableSha256}`);
+  console.log(`    Executable Size: ${executableStat.size} bytes`);
+
+  // Scan release directory for newly produced DMG anchored to darwin-arm64-version-official
+  const installerRegex = new RegExp(
+    `^LobsterAI-Dev-darwin-arm64-${canonicalVersion.replace(/\\./g, '\\.')}-official\\.dmg$`,
+    'i'
+  );
+  const allEntries = fs.readdirSync(releaseDir, { withFileTypes: true });
+  const installerCandidates = allEntries.filter((entry) => {
+    if (!entry.isFile()) return false;
+    return installerRegex.test(entry.name);
+  }).map((entry) => entry.name);
+
+  if (installerCandidates.length === 0) {
+    throw new Error(
+      `No DMG installer found in ${releaseDir} matching pattern: LobsterAI-Dev-darwin-arm64-${canonicalVersion}-official.dmg`
+    );
+  }
+  if (installerCandidates.length > 1) {
+    throw new Error(
+      `Ambiguous DMG installers found in ${releaseDir}: expected exactly 1, found ${installerCandidates.length} (${installerCandidates.join(', ')})`
+    );
+  }
+
+  const installerFileName = installerCandidates[0];
+  const installerFilePath = path.join(releaseDir, installerFileName);
+  const installerStat = fs.lstatSync(installerFilePath);
+
+  if (!installerStat.isFile() || installerStat.isSymbolicLink() || installerStat.size <= 0) {
+    throw new Error(`Installer file is empty, symlink, or not a regular file: ${installerFilePath}`);
+  }
+  if (installerStat.size > MAX_INSTALLER_SIZE) {
+    throw new Error(`Installer file size (${installerStat.size} bytes) exceeds 1 GiB limit (${MAX_INSTALLER_SIZE} bytes)`);
+  }
+
+  const installerSha256 = await computeFileSha256(installerFilePath);
+  console.log(`==> [ArtifactIdentity] Computing DMG SHA256 for: ${installerFileName}`);
+  console.log(`    Installer Size: ${installerStat.size} bytes`);
+  console.log(`    Installer SHA256: ${installerSha256}`);
+
+  const changeLog = resolveChangeLog(repoRoot, canonicalVersion);
+  const provenance = resolveProvenance();
+
+  const packagedApp = {
+    productName: appName,
+    appId: appUserModelId,
+    version: marker.version,
+    sourceCommit: marker.sourceCommit,
+    arch: 'arm64',
+    peMachine: null,
+    executableSha256,
+  };
+
+  const identity = {
+    schemaVersion: 1,
+    product: appName,
+    appId: appUserModelId,
+    channel: 'dev',
+    platform: 'darwin',
+    arch: 'arm64',
+    packageType: 'dmg',
+    version: canonicalVersion,
+    sourceCommit,
+    fileName: installerFileName,
+    size: installerStat.size,
+    sha256: installerSha256,
+    changeLog,
+    provenance,
+    packagedApp,
+  };
+
+  const buildDate = new Date().toISOString();
+  const buildInfoText = [
+    `Commit: ${sourceCommit}`,
+    `BuildDate: ${buildDate}`,
+    '',
+    `${installerSha256}  ${installerFileName}`,
+    '',
+  ].join('\n');
+
+  const targetDirs = [
+    path.join(repoRoot, 'artifacts', 'macos'),
+  ];
+  for (const targetDir of targetDirs) {
+    if (!fs.existsSync(targetDir)) {
+      fs.mkdirSync(targetDir, { recursive: true });
+    }
+    const destPath = path.join(targetDir, installerFileName);
+    fs.copyFileSync(installerFilePath, destPath);
+    fs.writeFileSync(path.join(targetDir, 'UPDATE_IDENTITY.json'), JSON.stringify(identity, null, 2) + '\n', 'utf8');
+    fs.writeFileSync(path.join(targetDir, 'BUILD_INFO.txt'), buildInfoText, 'utf8');
+    console.log(`==> [ArtifactIdentity] Written to ${targetDir}:`);
+    console.log(`    - ${installerFileName} (${installerStat.size} bytes)`);
+    console.log(`    - UPDATE_IDENTITY.json`);
+    console.log(`    - BUILD_INFO.txt`);
+  }
+
+  console.log(`==> [ArtifactIdentity] macOS collection and verification completed successfully.`);
+  return { identity, installerFileName, installerFilePath };
+}
+
+/**
  * Extract a file from an asar archive using pure Node.js Buffer and fs.
  * Does not require external @electron/asar package or node_modules checkout.
  * @param {string} asarPath
@@ -638,14 +818,19 @@ async function verifyArtifactDirectory(dir, expectedCommit, expectedVersion) {
   if (identity.channel !== EXPECTED_CHANNEL) {
     throw new Error(`Invalid channel: expected ${EXPECTED_CHANNEL}, found ${identity.channel}`);
   }
-  if (identity.platform !== EXPECTED_PLATFORM) {
-    throw new Error(`Invalid platform: expected ${EXPECTED_PLATFORM}, found ${identity.platform}`);
+  const isMac = identity.platform === 'darwin';
+  const expectedPlatform = isMac ? 'darwin' : EXPECTED_PLATFORM;
+  const expectedArch = isMac ? 'arm64' : EXPECTED_ARCH;
+  const expectedPackageType = isMac ? 'dmg' : EXPECTED_PACKAGE_TYPE;
+
+  if (identity.platform !== expectedPlatform) {
+    throw new Error(`Invalid platform: expected ${expectedPlatform}, found ${identity.platform}`);
   }
-  if (identity.arch !== EXPECTED_ARCH) {
-    throw new Error(`Invalid arch: expected ${EXPECTED_ARCH}, found ${identity.arch}`);
+  if (identity.arch !== expectedArch) {
+    throw new Error(`Invalid arch: expected ${expectedArch}, found ${identity.arch}`);
   }
-  if (identity.packageType !== EXPECTED_PACKAGE_TYPE) {
-    throw new Error(`Invalid packageType: expected ${EXPECTED_PACKAGE_TYPE}, found ${identity.packageType}`);
+  if (identity.packageType !== expectedPackageType) {
+    throw new Error(`Invalid packageType: expected ${expectedPackageType}, found ${identity.packageType}`);
   }
   if (identity.version !== expectedVersion) {
     throw new Error(`Invalid version: expected current checkout version "${expectedVersion}", found "${identity.version}"`);
@@ -667,10 +852,12 @@ async function verifyArtifactDirectory(dir, expectedCommit, expectedVersion) {
   if (path.basename(identity.fileName) !== identity.fileName || identity.fileName.includes('/') || identity.fileName.includes('\\') || identity.fileName.includes('..')) {
     throw new Error(`Unsafe fileName path components detected: "${identity.fileName}"`);
   }
-  const expectedFileNameRegex = new RegExp(
-    `^LobsterAI-Dev-Setup-x64-${identity.version.replace(/\\./g, '\\.')}-official(?:-silent)?\\.exe$`,
-    'i'
-  );
+  const expectedFileNameRegex = isMac
+    ? new RegExp(`^LobsterAI-Dev-darwin-arm64-${identity.version.replace(/\\./g, '\\.')}-official\\.dmg$`, 'i')
+    : new RegExp(
+      `^LobsterAI-Dev-Setup-x64-${identity.version.replace(/\\./g, '\\.')}-official(?:-silent)?\\.exe$`,
+      'i'
+    );
   if (!expectedFileNameRegex.test(identity.fileName)) {
     throw new Error(`identity.fileName "${identity.fileName}" does not match exact anchored naming convention for version ${identity.version}`);
   }
@@ -722,8 +909,10 @@ async function verifyArtifactDirectory(dir, expectedCommit, expectedVersion) {
   }
 
   // Check packagedApp consistency
-  if (!identity.packagedApp || identity.packagedApp.peMachine !== EXPECTED_PE_MACHINE) {
-    throw new Error(`Invalid packagedApp peMachine: expected ${EXPECTED_PE_MACHINE}`);
+  if (!isMac) {
+    if (!identity.packagedApp || identity.packagedApp.peMachine !== EXPECTED_PE_MACHINE) {
+      throw new Error(`Invalid packagedApp peMachine: expected ${EXPECTED_PE_MACHINE}`);
+    }
   }
   if (!identity.packagedApp.executableSha256 || !/^[0-9a-f]{64}$/i.test(identity.packagedApp.executableSha256)) {
     throw new Error('Invalid packagedApp executableSha256');
@@ -735,16 +924,17 @@ async function verifyArtifactDirectory(dir, expectedCommit, expectedVersion) {
     throw new Error(`packagedApp sourceCommit mismatch: ${identity.packagedApp.sourceCommit} vs ${identity.sourceCommit}`);
   }
 
-  // Check binary exists as regular file and verify no extra EXEs are tolerated
-  const exeFiles = allDirEntries.filter((e) => e.name.endsWith('.exe'));
-  if (exeFiles.length === 0) {
-    throw new Error(`No installer executable found in directory: ${dir}`);
+  // Check binary exists as regular file and verify no extra installer files are tolerated
+  const binaryExt = isMac ? '.dmg' : '.exe';
+  const binFiles = allDirEntries.filter((e) => e.name.endsWith(binaryExt));
+  if (binFiles.length === 0) {
+    throw new Error(`No installer ${binaryExt} found in directory: ${dir}`);
   }
-  if (exeFiles.length > 1) {
-    throw new Error(`Extra executable files tolerated error: expected exactly 1 EXE (${identity.fileName}), found: ${exeFiles.map(e => e.name).join(', ')}`);
+  if (binFiles.length > 1) {
+    throw new Error(`Extra installer files tolerated error: expected exactly 1 ${binaryExt} (${identity.fileName}), found: ${binFiles.map(e => e.name).join(', ')}`);
   }
-  if (exeFiles[0].name !== identity.fileName) {
-    throw new Error(`Executable file name mismatch: expected "${identity.fileName}", found "${exeFiles[0].name}"`);
+  if (binFiles[0].name !== identity.fileName) {
+    throw new Error(`Executable file name mismatch: expected "${identity.fileName}", found "${binFiles[0].name}"`);
   }
 
   // Verify that only the 3 expected files exist in directory: installer, identity, BUILD_INFO
@@ -795,8 +985,15 @@ async function verifyArtifactDirectory(dir, expectedCommit, expectedVersion) {
 // CLI entry point
 if (require.main === module) {
   const action = process.argv[2] || 'collect';
-  if (action === 'collect') {
+  if (action === 'collect' || action === 'collect-windows') {
     collectArtifactIdentity()
+      .then(() => process.exit(0))
+      .catch((err) => {
+        console.error('[ArtifactIdentity] Error:', err.message);
+        process.exit(1);
+      });
+  } else if (action === 'collect-macos') {
+    collectArtifactIdentityMac()
       .then(() => process.exit(0))
       .catch((err) => {
         console.error('[ArtifactIdentity] Error:', err.message);
@@ -861,5 +1058,6 @@ module.exports = {
   parseAppConstantsExports,
   stampBuildMarker,
   collectArtifactIdentity,
+  collectArtifactIdentityMac,
   verifyArtifactDirectory,
 };

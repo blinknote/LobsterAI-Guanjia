@@ -1,15 +1,35 @@
 import type { AppUpdateInfo } from './constants';
 
-export const DEV_UPDATE_SCOPE = {
-  product: 'LobsterAI-Dev',
-  appId: 'com.lobsterai.dev.app',
-  channel: 'dev',
-  platform: 'win32',
-  arch: 'x64',
-  packageType: 'nsis-full',
-} as const;
+export type DevPlatform = 'win32' | 'darwin';
+export type DevArch = 'x64' | 'arm64';
+export type DevPackageType = 'nsis-full' | 'dmg';
 
-export type DevUpdateScope = typeof DEV_UPDATE_SCOPE;
+export function getDevUpdateScope(
+  platform: string = process.platform,
+  arch: string = process.arch,
+) {
+  if (platform === 'darwin' && arch === 'arm64') {
+    return {
+      product: 'LobsterAI-Dev',
+      appId: 'com.lobsterai.dev.app',
+      channel: 'dev',
+      platform: 'darwin',
+      arch: 'arm64',
+      packageType: 'dmg',
+    } as const;
+  }
+  return {
+    product: 'LobsterAI-Dev',
+    appId: 'com.lobsterai.dev.app',
+    channel: 'dev',
+    platform: 'win32',
+    arch: 'x64',
+    packageType: 'nsis-full',
+  } as const;
+}
+
+export const DEV_UPDATE_SCOPE = getDevUpdateScope();
+export type DevUpdateScope = ReturnType<typeof getDevUpdateScope>;
 
 export interface DevUpdateSignedEnvelope {
   keyId: string;
@@ -32,9 +52,9 @@ export interface DevUpdateReleasePayload {
   product: 'LobsterAI-Dev';
   appId: 'com.lobsterai.dev.app';
   channel: 'dev';
-  platform: 'win32';
-  arch: 'x64';
-  packageType: 'nsis-full';
+  platform: DevPlatform;
+  arch: DevArch;
+  packageType: DevPackageType;
   releaseId: string;
   version: string;
   sourceCommit: string;
@@ -65,9 +85,9 @@ export interface DevUpdateChannelCheckRequest {
   product: 'LobsterAI-Dev';
   appId: 'com.lobsterai.dev.app';
   channel: 'dev';
-  platform: 'win32';
-  arch: 'x64';
-  packageType: 'nsis-full';
+  platform: DevPlatform;
+  arch: DevArch;
+  packageType: DevPackageType;
   nonce: string;
   currentVersion: string;
   highestRevision: number;
@@ -79,9 +99,9 @@ export interface DevUpdateChannelPayload {
   product: 'LobsterAI-Dev';
   appId: 'com.lobsterai.dev.app';
   channel: 'dev';
-  platform: 'win32';
-  arch: 'x64';
-  packageType: 'nsis-full';
+  platform: DevPlatform;
+  arch: DevArch;
+  packageType: DevPackageType;
   nonce: string;
   revision: number;
   issuedAt: number;

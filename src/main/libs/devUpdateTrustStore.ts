@@ -13,12 +13,12 @@ import {
   type AppUpdateInfo,
 } from '../../shared/appUpdate/constants';
 import {
-  DEV_UPDATE_SCOPE,
   type DevUpdateAllowedReceiptRecord,
   type DevUpdateReadyRecord,
   type DevUpdateReleasePayload,
   type DevUpdateRestoredReady,
   type DevUpdateSignedEnvelope,
+  getDevUpdateScope,
 } from '../../shared/appUpdate/devUpdateTypes';
 import {
   CHANNEL_SIGN_DOMAIN,
@@ -29,6 +29,7 @@ import {
   RELEASE_SIGN_DOMAIN,
   TRUSTED_DEV_UPDATE_PUBLIC_KEYS,
   validateChannelPayload,
+  validateDevScope,
   validateReleasePayload,
   verifyEd25519Signature,
 } from './devUpdateProtocol';
@@ -186,7 +187,7 @@ export class DevUpdateTrustStore {
     }
     try {
       const parsedScope = JSON.parse(scopeRow.value);
-      if (JSON.stringify(parsedScope) !== JSON.stringify(DEV_UPDATE_SCOPE)) {
+      if (!validateDevScope(parsedScope)) {
         this.isCorruptedLatch = true;
         throw new Error(`${APP_UPDATE_DEV_STORE_CORRUPTED_ERROR}: Scope mismatch in metadata`);
       }
@@ -260,7 +261,7 @@ export class DevUpdateTrustStore {
     const initMeta = this.db.prepare('INSERT INTO metadata (key, value) VALUES (?, ?)');
     const initTx = this.db.transaction(() => {
       initMeta.run('schema_version', '1');
-      initMeta.run('scope', JSON.stringify(DEV_UPDATE_SCOPE));
+      initMeta.run('scope', JSON.stringify(getDevUpdateScope()));
       initMeta.run('highest_revision', '0');
     });
     initTx();

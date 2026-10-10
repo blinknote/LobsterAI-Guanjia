@@ -111,12 +111,29 @@ jobs:
           npm run build
           npm run compile:electron
           npm run build:skills
+          node .circleci/artifact-identity.cjs stamp
           npx electron-builder --mac --arm64 --config scripts/electron-builder-config.cjs --publish never
+
+      - name: Collect macOS Installer & Identity
+        run: node .circleci/artifact-identity.cjs collect-macos
+
+      - name: Import macOS Dev Update to updates.a-j.app
+        if: env.LOBSTERAI_UPDATES_IMPORT_TOKEN != ''
+        timeout-minutes: 20
+        run: node .circleci/import-windows.cjs artifacts/macos
+        env:
+          LOBSTERAI_UPDATES_IMPORT_TOKEN: ${{ secrets.LOBSTERAI_UPDATES_IMPORT_TOKEN }}
+          CIRCLE_PROJECT_ID: "0482e18c-23dd-4029-a3f8-237687fe401d"
+          CIRCLE_BRANCH: ${{ github.ref_name }}
+          CIRCLE_SHA1: ${{ github.sha }}
 
       - uses: actions/upload-artifact@v4
         with:
           name: macos-build
-          path: release/*.dmg
+          path: |
+            release/*.dmg
+            artifacts/macos/UPDATE_IDENTITY.json
+            artifacts/macos/BUILD_INFO.txt
           if-no-files-found: error
           retention-days: 7
 

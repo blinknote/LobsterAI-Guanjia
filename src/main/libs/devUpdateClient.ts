@@ -11,13 +11,13 @@ import {
   type AppUpdateInfo,
 } from '../../shared/appUpdate/constants';
 import {
-  DEV_UPDATE_SCOPE,
   type DevUpdateCandidateRef,
   type DevUpdateChannelCheckRequest,
   type DevUpdateCheckResult,
   type DevUpdateReadyRecord,
   type DevUpdateReleasePayload,
   type DevUpdateSignedEnvelope,
+  getDevUpdateScope,
 } from '../../shared/appUpdate/devUpdateTypes';
 import {
   CHANNEL_EXPIRY_SECONDS,
@@ -75,14 +75,15 @@ export class DevUpdateClient {
   }
 
   /**
-   * Check if current runtime environment matches the strict Windows x64 Dev identity.
+   * Check if current runtime environment matches the strict Dev identity (win32-x64 or darwin-arm64).
    */
   isDevUpdateEligible(): boolean {
+    const isWinX64 = this.platform === 'win32' && this.arch === 'x64';
+    const isMacArm64 = this.platform === 'darwin' && this.arch === 'arm64';
     return (
-      this.platform === DEV_UPDATE_SCOPE.platform
-      && this.arch === DEV_UPDATE_SCOPE.arch
-      && this.productName === DEV_UPDATE_SCOPE.product
-      && this.appId === DEV_UPDATE_SCOPE.appId
+      (isWinX64 || isMacArm64)
+      && this.productName === 'LobsterAI-Dev'
+      && this.appId === 'com.lobsterai.dev.app'
     );
   }
 
@@ -156,14 +157,15 @@ export class DevUpdateClient {
     const nonce = crypto.randomBytes(16).toString('hex');
     const highestRevision = this.trustStore.getHighestRevision();
 
+    const currentScope = getDevUpdateScope(this.platform, this.arch);
     const requestBody: DevUpdateChannelCheckRequest = {
       schemaVersion: 1,
-      product: DEV_UPDATE_SCOPE.product,
-      appId: DEV_UPDATE_SCOPE.appId,
-      channel: DEV_UPDATE_SCOPE.channel,
-      platform: DEV_UPDATE_SCOPE.platform,
-      arch: DEV_UPDATE_SCOPE.arch,
-      packageType: DEV_UPDATE_SCOPE.packageType,
+      product: currentScope.product,
+      appId: currentScope.appId,
+      channel: currentScope.channel,
+      platform: currentScope.platform,
+      arch: currentScope.arch,
+      packageType: currentScope.packageType,
       nonce,
       currentVersion,
       highestRevision,
