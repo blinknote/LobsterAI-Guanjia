@@ -500,6 +500,12 @@ Client auto-update detection strictly requires `remoteVersion > currentVersion`.
 Pushing a rebuild without bumping the version prevents existing installed
 clients from detecting or receiving the update via "Check for Updates".
 
+**Non-Client Updates & Release Trigger Discipline**:
+- If a change does NOT touch client code (backend Python, DB migrations, or web console), **do NOT rebuild or repackage the client, do NOT bump package.json version, and do NOT trigger client CI builds**.
+- Client packaging workflow (`build-platforms.yml`) is strictly triggered by **release tags (`v*`, e.g. `v0.0.19`)** or manual `workflow_dispatch`. Pushing to ordinary branches (including `main`) does NOT build or package the client.
+- When a release tag triggers the build, GitHub Actions packages macOS DMG & Windows EXE, uploads to the update platform (`updates.a-j.app`), and **automatically publishes a GitHub Release (`draft: false`)** with all installer assets attached.
+
+
 Use branch names like `feat/...` or `fix/...`. Do not use a `codex/...` prefix
 unless the user explicitly asks for it.
 
