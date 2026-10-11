@@ -5653,7 +5653,7 @@ export class OpenClawRuntimeAdapter extends EventEmitter implements CoworkRuntim
     // Normalize only agent-level model refs (may need provider migration).
     // Session modelOverride is user-selected and must not be rewritten.
     const currentModel = session.modelOverride
-      ? rawCurrentModel
+      ? this.normalizeModelRef(session.modelOverride)
       : (rawCurrentModel ? this.normalizeModelRef(rawCurrentModel) : '');
     if (!session.modelOverride && currentModel && currentModel !== rawCurrentModel && agent?.id) {
       this.store.updateAgent(agent.id, { model: currentModel });
@@ -6763,7 +6763,7 @@ export class OpenClawRuntimeAdapter extends EventEmitter implements CoworkRuntim
   private resolveCurrentModelForSession(sessionId: string): string {
     const session = this.store.getSession(sessionId);
     if (session?.modelOverride) {
-      return session.modelOverride;
+      return this.normalizeModelRef(session.modelOverride);
     }
     const agent = session?.agentId ? this.store.getAgent(session.agentId) : null;
     const rawCurrentModel = agent?.model || '';

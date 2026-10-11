@@ -247,6 +247,10 @@ import {
 } from './enterpriseAccount/membershipRevocation';
 import { GuanjiaDesktopAuthCoordinator } from './guanjia/guanjiaDesktopAuthCoordinator';
 import {
+  getEffectiveGuanjiaSystemBuiltinModelRef,
+  isGuanjiaSystemModelActive,
+} from './guanjia/guanjiaModelConfig';
+import {
   canAccessGuanjiaSession,
   filterAccessibleSessions,
   handleGuanjiaNativeToolCall,
@@ -1731,6 +1735,12 @@ const openClawConfigHasServerModels = (modelIds: string[]): boolean => {
 
 const normalizeOpenClawModelRef = (modelRef: string): string => {
   const normalized = modelRef.trim();
+  if (isGuanjiaSystemModelActive()) {
+    const sysRef = getEffectiveGuanjiaSystemBuiltinModelRef();
+    if (sysRef) {
+      return sysRef;
+    }
+  }
   if (!normalized) return normalized;
 
   const qualification = resolveQualifiedAgentModelRef({
@@ -5801,6 +5811,12 @@ if (!gotTheLock) {
     modelOverride?: string;
     agentId?: string;
   }): string => {
+    if (isGuanjiaSystemModelActive()) {
+      const sysRef = getEffectiveGuanjiaSystemBuiltinModelRef();
+      if (sysRef) {
+        return sysRef;
+      }
+    }
     const session = options.sessionId
       ? getCoworkStore().getSession(options.sessionId)
       : null;
