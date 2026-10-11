@@ -14,8 +14,6 @@ on:
         default: true
         type: boolean
   push:
-    branches:
-      - main
     tags:
       - 'v*'
 
@@ -36,6 +34,7 @@ jobs:
       NODE_OPTIONS: "--max-old-space-size=6144"
       CSC_IDENTITY_AUTO_DISCOVERY: "false"
       LOBSTERAI_UNSIGNED_BUILD: "1"
+      CIRCLE_BRANCH: ${{ github.ref_type == 'tag' && 'main' || github.ref_name }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -139,7 +138,7 @@ jobs:
         env:
           LOBSTERAI_UPDATES_IMPORT_TOKEN: ${{ secrets.LOBSTERAI_UPDATES_IMPORT_TOKEN }}
           CIRCLE_PROJECT_ID: "0482e18c-23dd-4029-a3f8-237687fe401d"
-          CIRCLE_BRANCH: ${{ github.ref_name }}
+          CIRCLE_BRANCH: ${{ github.ref_type == 'tag' && 'main' || github.ref_name }}
           CIRCLE_SHA1: ${{ github.sha }}
 
       - uses: actions/upload-artifact@v4
@@ -161,6 +160,7 @@ jobs:
       CSC_IDENTITY_AUTO_DISCOVERY: "false"
       LOBSTERAI_UNSIGNED_WINDOWS: "1"
       LOBSTERAI_UNSIGNED_BUILD: "1"
+      CIRCLE_BRANCH: ${{ github.ref_type == 'tag' && 'main' || github.ref_name }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -291,7 +291,7 @@ jobs:
         env:
           LOBSTERAI_UPDATES_IMPORT_TOKEN: ${{ secrets.LOBSTERAI_UPDATES_IMPORT_TOKEN }}
           CIRCLE_PROJECT_ID: "0482e18c-23dd-4029-a3f8-237687fe401d"
-          CIRCLE_BRANCH: ${{ github.ref_name }}
+          CIRCLE_BRANCH: ${{ github.ref_type == 'tag' && 'main' || github.ref_name }}
           CIRCLE_SHA1: ${{ github.sha }}
 
       - uses: actions/upload-artifact@v4
@@ -301,11 +301,13 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  # ========== 创建 Release ==========
+  # ========== 创建并发布 Release ==========
   create-release:
     needs: [build-macos, build-windows]
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+    if: startsWith(github.ref, 'refs/tags/v')
     steps:
       - uses: actions/checkout@v4
 
@@ -314,13 +316,14 @@ jobs:
         with:
           path: artifacts
 
-      - name: Create Release
+      - name: Publish Release
         uses: softprops/action-gh-release@v1
         with:
+          name: Release ${{ github.ref_name }}
           files: |
             artifacts/macos-build/*.dmg
             artifacts/windows-build/*.exe
-          draft: true
+          draft: false
           prerelease: ${{ contains(github.ref, '-beta') || contains(github.ref, '-alpha') || contains(github.ref, '-rc') }}
           generate_release_notes: true
         env:
