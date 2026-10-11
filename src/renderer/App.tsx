@@ -988,7 +988,10 @@ const App: React.FC = () => {
       if (mainView !== 'guanjia') {
         setMainView('guanjia');
       }
-      window.setTimeout(() => {
+      window.setTimeout(async () => {
+        try {
+          await window.electron?.guanjia?.focusView?.();
+        } catch { /* ignore */ }
         document.getElementById('guanjia-main-container')?.focus();
       }, 50);
       setAriaLiveAnnouncement('已切换到管家主区');
@@ -1003,11 +1006,62 @@ const App: React.FC = () => {
     } else if (nextRegion === 'sidebar') {
       setIsSidebarCollapsed(false);
       window.setTimeout(() => {
-        document.getElementById('guanjia-sidebar-card')?.focus();
+        const navTarget =
+          document.getElementById('guanjia-sidebar-card')
+          || document.querySelector<HTMLElement>('[data-onboarding-target="new-task"]')
+          || document.querySelector<HTMLElement>('aside button, aside [tabindex="0"]');
+        navTarget?.focus();
       }, 50);
       setAriaLiveAnnouncement('已切换到侧栏');
     }
   }, [mainView]);
+
+  const handleJumpToGuanjia = useCallback(() => {
+    if (mainView !== 'guanjia') {
+      setMainView('guanjia');
+    }
+    guanjiaFocusRegionRef.current = 'main';
+    window.setTimeout(async () => {
+      try {
+        if (window.electron?.guanjia?.focusView) {
+          const res = await window.electron.guanjia.focusView();
+          if (res?.success) {
+            setAriaLiveAnnouncement('已进入管家管理界面，按 F6 或 Alt+N 可跳回导航栏');
+            return;
+          }
+        }
+      } catch (err) {
+        console.warn('[App] focusView failed:', err);
+      }
+      document.getElementById('guanjia-main-container')?.focus();
+      setAriaLiveAnnouncement('已进入管家管理界面，按 F6 或 Alt+N 可跳回导航栏');
+    }, 60);
+  }, [mainView]);
+
+  const handleFocusNavigation = useCallback(() => {
+    setIsSidebarCollapsed(false);
+    guanjiaFocusRegionRef.current = 'sidebar';
+    window.setTimeout(() => {
+      const navTarget =
+        document.getElementById('guanjia-sidebar-card')
+        || document.querySelector<HTMLElement>('[data-onboarding-target="new-task"]')
+        || document.querySelector<HTMLElement>('aside button, aside [tabindex="0"]');
+      if (navTarget) {
+        navTarget.focus();
+      }
+    }, 50);
+    setAriaLiveAnnouncement('已跳回LobsterAI导航栏，可使用上下光标键选择功能，按 F6 或 Alt+G 可进入管家界面');
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !window.electron?.guanjia?.onFocusNavigation) {
+      return;
+    }
+    const cleanup = window.electron.guanjia.onFocusNavigation(() => {
+      handleFocusNavigation();
+    });
+    return cleanup;
+  }, [handleFocusNavigation]);
 
   const handleSkillsConnectorsSectionChange = useCallback(
     (section: SkillsConnectorsSection) => {
@@ -1821,13 +1875,6 @@ const App: React.FC = () => {
         return;
       }
 
-      // 全局快捷键：Ctrl+= 或 Cmd+= 循环焦点切换并播报
-      if ((event.ctrlKey || event.metaKey) && (event.key === '=' || event.key === '+')) {
-        event.preventDefault();
-        handleCycleGuanjiaFocus();
-        return;
-      }
-
       if (showSettings) {
         if (matchesAction(ShortcutAction.ShowShortcuts)) {
           event.preventDefault();
@@ -1837,6 +1884,56 @@ const App: React.FC = () => {
       }
 
       if (showUpdateModal || isPermissionModalOpen || isUpdateInteractionBlocked) return;
+
+      const isCmdOrCtrl = event.ctrlKey || event.metaKey;
+
+      // 无障碍双向切换快捷键：F6（在管家界面与侧栏导航栏之间无缝切换）
+      if (event.key === 'F6') {
+        event.preventDefault();
+        if (mainView === 'guanjia') {
+          const activeEl = document.activeElement;
+          const isSidebarFocused = activeEl && (
+            activeEl.id === 'guanjia-sidebar-card' ||
+            Boolean(activeEl.closest('aside')) ||
+            Boolean(activeEl.closest('#sidebar'))
+          );
+          if (isSidebarFocused) {
+            handleJumpToGuanjia();
+          } else {
+            handleFocusNavigation();
+          }
+        } else {
+          handleJumpToGuanjia();
+        }
+        return;
+      }
+
+      // 跳转到管家管理界面：Alt+G 或 Ctrl+Alt+G / Cmd+Alt+G
+      if (
+        (event.altKey && event.key.toLowerCase() === 'g') ||
+        (isCmdOrCtrl && event.altKey && event.key.toLowerCase() === 'g')
+      ) {
+        event.preventDefault();
+        handleJumpToGuanjia();
+        return;
+      }
+
+      // 跳出到LobsterAI导航栏：Alt+N 或 Ctrl+Alt+N / Cmd+Alt+N
+      if (
+        (event.altKey && event.key.toLowerCase() === 'n') ||
+        (isCmdOrCtrl && event.altKey && event.key.toLowerCase() === 'n')
+      ) {
+        event.preventDefault();
+        handleFocusNavigation();
+        return;
+      }
+
+      // 全局快捷键：Ctrl+= 或 Cmd+= 循环焦点切换并播报
+      if (isCmdOrCtrl && (event.key === '=' || event.key === '+')) {
+        event.preventDefault();
+        handleCycleGuanjiaFocus();
+        return;
+      }
 
       if (matchesAction(ShortcutAction.Search)) {
         const shortcutTarget = resolveConversationSearchShortcutTarget({
@@ -2021,6 +2118,8 @@ const App: React.FC = () => {
     handleShowSettings,
     handleShowSkills,
     handleCycleGuanjiaFocus,
+    handleFocusNavigation,
+    handleJumpToGuanjia,
     handleToggleSidebar,
     isUpdateInteractionBlocked,
     mainView,

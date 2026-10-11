@@ -77,6 +77,12 @@ export const GuanjiaSidebarCard: React.FC<GuanjiaSidebarCardProps> = ({
     if (e.key === 'Enter' || e.key === ' ') {
       e.preventDefault();
       onClick?.();
+    } else if (e.key === 'ArrowDown') {
+      const nextBtn = document.querySelector<HTMLElement>('[data-onboarding-target="new-task"]');
+      if (nextBtn) {
+        e.preventDefault();
+        nextBtn.focus();
+      }
     }
   };
 

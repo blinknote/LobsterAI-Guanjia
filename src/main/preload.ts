@@ -1595,6 +1595,13 @@ contextBridge.exposeInMainWorld('electron', {
         canGoBack: boolean;
         canGoForward: boolean;
       }>,
+    focusView: () =>
+      ipcRenderer.invoke(GuanjiaIpcChannel.FocusView) as Promise<{ success: boolean }>,
+    onFocusNavigation: (callback: () => void) => {
+      const handler = () => callback();
+      ipcRenderer.on(GuanjiaIpcChannel.FocusNavigation, handler);
+      return () => ipcRenderer.removeListener(GuanjiaIpcChannel.FocusNavigation, handler);
+    },
     clearAssistantSession: () =>
       ipcRenderer.invoke(GuanjiaIpcChannel.ClearAssistantSession) as Promise<{
         success: boolean;

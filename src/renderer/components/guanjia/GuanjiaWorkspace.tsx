@@ -578,6 +578,11 @@ export const GuanjiaWorkspace: React.FC<GuanjiaWorkspaceProps> = ({
           onTransitionEnd={handleTransitionEnd}
           tabIndex={0}
           aria-label={tGuanjia('guanjiaMainAreaLabel')}
+          onFocus={(e) => {
+            if (e.target === e.currentTarget && attachStatus === 'attached' && isEffectiveVisible) {
+              void window.electron?.guanjia?.focusView?.();
+            }
+          }}
           className="relative flex h-full flex-col overflow-hidden transition-[flex] duration-200 ease-out focus:outline-none focus:ring-1 focus:ring-primary"
           style={{
             flex: isAssistantOpen ? 7 : 1,

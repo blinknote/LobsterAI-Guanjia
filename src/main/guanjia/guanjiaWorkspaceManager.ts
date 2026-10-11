@@ -8,6 +8,7 @@ import {
   GuanjiaActionRequest,
   GuanjiaActionResult,
   GuanjiaFinancialAuditLog,
+  GuanjiaIpcChannel,
   GuanjiaSsoCredentials,
   GuanjiaWorkspaceContext,
 } from './types';
@@ -105,6 +106,32 @@ export class GuanjiaWorkspaceManager {
       },
     });
 
+    // 快捷键看门狗：在嵌入式 WebContentsView 内部捕获无障碍跳转按键，跳出到主窗口导航栏
+    this.view.webContents.on('before-input-event', (event, input) => {
+      if (input.type !== 'keyDown') return;
+
+      const isCmdOrCtrl = Boolean(input.control || input.meta);
+      const isAlt = Boolean(input.alt);
+      const key = input.key || '';
+      const code = input.code || '';
+
+      // 1. F6 快捷键（无障碍分栏/视图切换）
+      const isF6 = key === 'F6' || key === 'f6' || code === 'F6';
+
+      // 2. Alt+N 或 Ctrl+Alt+N / Cmd+Alt+N（跳转到导航栏 Navigation）
+      const isJumpToNav =
+        (isAlt && (key.toLowerCase() === 'n' || code === 'KeyN')) ||
+        (isCmdOrCtrl && isAlt && (key.toLowerCase() === 'n' || code === 'KeyN'));
+
+      // 3. Ctrl+= 或 Cmd+= (原有循环焦点快捷键)
+      const isCycleFocus = isCmdOrCtrl && (key === '=' || key === '+' || code === 'Equal');
+
+      if (isF6 || isJumpToNav || isCycleFocus) {
+        event.preventDefault();
+        this.focusMainWindowNavigation();
+      }
+    });
+
     // 监听导航事件，保持状态
     this.view.webContents.on('did-fail-load', (_event, errorCode, errorDescription) => {
       console.warn(`[GuanjiaWorkspaceView] Page load failed (${errorCode}): ${errorDescription}`);
@@ -126,6 +153,40 @@ export class GuanjiaWorkspaceManager {
     });
 
     return this.view;
+  }
+
+  /**
+   * 无障碍跳出：将焦点归还给宿主主窗口导航栏
+   */
+  public focusMainWindowNavigation(): void {
+    const targetWin = this.attachedWindow || BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
+    if (targetWin && !targetWin.isDestroyed()) {
+      try {
+        if (!targetWin.isFocused()) {
+          targetWin.focus();
+        }
+        targetWin.webContents.focus();
+        targetWin.webContents.send(GuanjiaIpcChannel.FocusNavigation);
+      } catch (err) {
+        console.warn('[GuanjiaWorkspaceManager] Failed to focus main window navigation:', err);
+      }
+    }
+  }
+
+  /**
+   * 无障碍跳入：将焦点赋予嵌入的管家管理界面 WebContentsView
+   */
+  public focusView(): boolean {
+    if (this.view && !this.view.webContents.isDestroyed() && this.isVisible) {
+      try {
+        this.view.webContents.focus();
+        return true;
+      } catch (err) {
+        console.warn('[GuanjiaWorkspaceManager] Failed to focus WebContentsView:', err);
+        return false;
+      }
+    }
+    return false;
   }
 
   /**

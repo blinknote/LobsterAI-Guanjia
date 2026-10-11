@@ -2309,6 +2309,8 @@ interface IElectronAPI {
       loadUrl: (url: string) => Promise<{ success: boolean }>;
       reload: (ignoreCache?: boolean) => Promise<{ success: boolean; error?: string }>;
       getNavigationState: () => Promise<{ url: string; title: string; canGoBack: boolean; canGoForward: boolean }>;
+      focusView: () => Promise<{ success: boolean }>;
+      onFocusNavigation: (callback: () => void) => () => void;
       clearAssistantSession: () => Promise<{ success: boolean; clearedCount: number }>;
       getContext: () => Promise<unknown>;
       executeAction: (payload: unknown) => Promise<unknown>;

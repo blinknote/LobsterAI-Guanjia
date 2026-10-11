@@ -96,6 +96,11 @@ export function registerGuanjiaIpcHandlers(options?: RegisterGuanjiaHandlersOpti
     }
   });
 
+  handle(GuanjiaIpcChannel.FocusView, async () => {
+    const focused = workspaceManager.focusView();
+    return { success: focused };
+  });
+
   handle(GuanjiaIpcChannel.GetClientModelConfig, async () => {
     try {
       const session = GuanjiaSession.getInstance();

@@ -696,6 +696,9 @@ const Sidebar: React.FC<SidebarProps> = ({
 
   return (
     <aside
+      id="sidebar"
+      role="navigation"
+      aria-label="系统导航菜单"
       data-skin-sidebar="true"
       className={`relative shrink-0 overflow-hidden bg-surface-raised ${
         isResizing ? '' : 'sidebar-transition'

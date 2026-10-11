@@ -239,6 +239,8 @@ export const GuanjiaIpcChannel = {
   GoBack: 'guanjia:workspace:go-back',
   GoForward: 'guanjia:workspace:go-forward',
   GetNavigationState: 'guanjia:workspace:get-nav-state',
+  FocusView: 'guanjia:workspace:focus-view',
+  FocusNavigation: 'guanjia:workspace:focus-navigation',
 
   // SSO 凭证
   SetSsoCredentials: 'guanjia:sso:set-credentials',
