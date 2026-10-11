@@ -208,7 +208,7 @@ describe('system_builtin provider resolution with guanjia', () => {
       provider_name: 'system_builtin',
       model_name: 'gemini-3.8-flash-high',
       display_name: '管家系统内置模型 (gemini-3.8-flash-high)',
-      api_base_url: 'https://cpa.qszy.me/v1',
+      api_base_url: 'https://guanjia.qszy.me/api/c/ai/v1',
       api_key: 'sk-test-guanjia-key',
       api_type: 'openai',
       hide_youdao_models: true,
@@ -219,7 +219,7 @@ describe('system_builtin provider resolution with guanjia', () => {
     expect(systemBuiltin).toBeDefined();
     expect(systemBuiltin).toMatchObject({
       providerName: 'system_builtin',
-      baseURL: 'https://cpa.qszy.me/v1',
+      baseURL: 'https://guanjia.qszy.me/api/c/ai/v1',
       apiKey: 'sk-test-guanjia-key',
       apiType: 'openai',
       models: [{
@@ -234,7 +234,7 @@ describe('system_builtin provider resolution with guanjia', () => {
     const raw = resolveRawApiConfig();
     expect(raw.config).toMatchObject({
       model: 'gemini-3.8-flash-high',
-      baseURL: 'https://cpa.qszy.me/v1',
+      baseURL: 'https://guanjia.qszy.me/api/c/ai/v1',
       apiKey: 'sk-test-guanjia-key',
       apiType: 'openai',
     });

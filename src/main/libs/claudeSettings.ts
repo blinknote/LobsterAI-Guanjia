@@ -542,12 +542,23 @@ function tryLobsteraiServerFallback(modelId?: string): MatchedProvider | null {
   };
 }
 
+function resolveGuanjiaRelayBaseUrl(apiBaseUrl?: string): string {
+  if (!apiBaseUrl) return 'https://guanjia.qszy.me/api/c/ai/v1';
+  const trimmed = apiBaseUrl.trim().replace(/\/+$/, '');
+  // If the server mistakenly returns an upstream aggregator URL (e.g. cpa.qszy.me or something lacking the relay path),
+  // always redirect to the secure Guanjia relay endpoint so the session token is sent to Guanjia, never upstream.
+  if (trimmed.includes('cpa.qszy.me') || !trimmed.includes('/api/c/ai/v1')) {
+    return 'https://guanjia.qszy.me/api/c/ai/v1';
+  }
+  return trimmed;
+}
+
 function resolveMatchedProvider(appConfig: AppConfig): { matched: MatchedProvider | null; error?: string } {
   if (isGuanjiaSystemModelActive()) {
     const guanjiaCfg = getCachedGuanjiaModelConfig();
     const modelId = guanjiaCfg?.model_name || 'gemini-3.8-flash-high';
     const displayName = guanjiaCfg?.display_name || `管家系统内置模型 (${modelId})`;
-    const baseURL = guanjiaCfg?.api_base_url || 'https://guanjia.qszy.me/api/c/ai/v1';
+    const baseURL = resolveGuanjiaRelayBaseUrl(guanjiaCfg?.api_base_url);
     const apiKey = getGuanjiaSessionToken() || guanjiaCfg?.api_key || 'sk-lobsterai-local';
     return {
       matched: {
@@ -845,7 +856,7 @@ export function resolveRawApiConfig(): ApiConfigResolution {
     const guanjiaCfg = getCachedGuanjiaModelConfig();
     const modelId = guanjiaCfg?.model_name || 'gemini-3.8-flash-high';
     const displayName = guanjiaCfg?.display_name || `管家系统内置模型 (${modelId})`;
-    const baseURL = guanjiaCfg?.api_base_url || 'https://guanjia.qszy.me/api/c/ai/v1';
+    const baseURL = resolveGuanjiaRelayBaseUrl(guanjiaCfg?.api_base_url);
     const apiKey = getGuanjiaSessionToken() || guanjiaCfg?.api_key || 'sk-lobsterai-local';
     return {
       config: {
@@ -1062,7 +1073,7 @@ export function resolveAllEnabledProviderConfigs(): ProviderRawConfig[] {
     const guanjiaCfg = getCachedGuanjiaModelConfig();
     const modelName = guanjiaCfg?.model_name || 'gemini-3.8-flash-high';
     const displayName = guanjiaCfg?.display_name || `管家系统内置模型 (${modelName})`;
-    const effectiveBaseUrl = guanjiaCfg?.api_base_url || 'https://guanjia.qszy.me/api/c/ai/v1';
+    const effectiveBaseUrl = resolveGuanjiaRelayBaseUrl(guanjiaCfg?.api_base_url);
     const effectiveApiKey = getGuanjiaSessionToken() || guanjiaCfg?.api_key || 'sk-lobsterai-local';
     result.push({
       providerName: 'system_builtin',
