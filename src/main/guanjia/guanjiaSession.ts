@@ -122,7 +122,7 @@ export class GuanjiaSession {
       client_ai_provider: 'system_builtin',
       provider_name: 'system_builtin',
       model_name: 'gemini-3.8-flash-high',
-      display_name: '管家系统内置模型 (gemini-3.8-flash-high)',
+      display_name: '智慧管家助手模型',
       balance: 0,
       hide_youdao_models: true,
       api_base_url: 'https://guanjia.qszy.me/api/c/ai/v1',

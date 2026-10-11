@@ -557,7 +557,7 @@ function resolveMatchedProvider(appConfig: AppConfig): { matched: MatchedProvide
   if (isGuanjiaSystemModelActive()) {
     const guanjiaCfg = getCachedGuanjiaModelConfig();
     const modelId = guanjiaCfg?.model_name || 'gemini-3.8-flash-high';
-    const displayName = guanjiaCfg?.display_name || `管家系统内置模型 (${modelId})`;
+    const displayName = guanjiaCfg?.display_name || '智慧管家助手模型';
     const baseURL = resolveGuanjiaRelayBaseUrl(guanjiaCfg?.api_base_url);
     const apiKey = getGuanjiaSessionToken() || guanjiaCfg?.api_key || 'sk-lobsterai-local';
     return {
@@ -855,7 +855,7 @@ export function resolveRawApiConfig(): ApiConfigResolution {
   if (isGuanjiaSystemModelActive()) {
     const guanjiaCfg = getCachedGuanjiaModelConfig();
     const modelId = guanjiaCfg?.model_name || 'gemini-3.8-flash-high';
-    const displayName = guanjiaCfg?.display_name || `管家系统内置模型 (${modelId})`;
+    const displayName = guanjiaCfg?.display_name || '智慧管家助手模型';
     const baseURL = resolveGuanjiaRelayBaseUrl(guanjiaCfg?.api_base_url);
     const apiKey = getGuanjiaSessionToken() || guanjiaCfg?.api_key || 'sk-lobsterai-local';
     return {
@@ -1072,7 +1072,7 @@ export function resolveAllEnabledProviderConfigs(): ProviderRawConfig[] {
   if (isGuanjiaSystemModelActive()) {
     const guanjiaCfg = getCachedGuanjiaModelConfig();
     const modelName = guanjiaCfg?.model_name || 'gemini-3.8-flash-high';
-    const displayName = guanjiaCfg?.display_name || `管家系统内置模型 (${modelName})`;
+    const displayName = guanjiaCfg?.display_name || '智慧管家助手模型';
     const effectiveBaseUrl = resolveGuanjiaRelayBaseUrl(guanjiaCfg?.api_base_url);
     const effectiveApiKey = getGuanjiaSessionToken() || guanjiaCfg?.api_key || 'sk-lobsterai-local';
     result.push({

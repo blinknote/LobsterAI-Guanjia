@@ -53,7 +53,7 @@ describe('setSelectedModel', () => {
 
     state = modelReducer(state, setSystemBuiltinModelOnly({
       model_name: 'gemini-3.8-flash-high',
-      display_name: '管家系统内置大模型 (gemini-3.8-flash-high)',
+      display_name: '智慧管家助手模型',
     }));
 
     expect(state.availableModels).toHaveLength(1);
@@ -76,7 +76,7 @@ describe('setSelectedModel', () => {
 
     state = modelReducer(state, setSystemBuiltinModelOnly({
       model_name: 'gemini-3.8-flash-high',
-      display_name: '管家系统内置大模型 (gemini-3.8-flash-high)',
+      display_name: '智慧管家助手模型',
     }));
 
     // Incoming server models should update backupServerModels, NOT availableModels

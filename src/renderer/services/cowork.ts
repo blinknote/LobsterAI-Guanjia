@@ -673,7 +673,7 @@ class CoworkService {
     if (!store.getState().model.systemBuiltinModel) {
       store.dispatch(setSystemBuiltinModelOnly({
         model_name: 'gemini-3.8-flash-high',
-        display_name: '管家系统内置大模型 (gemini-3.8-flash-high)',
+        display_name: '智慧管家助手模型',
       }));
     }
     try {
@@ -682,7 +682,7 @@ class CoworkService {
         if (cfg.data.hide_youdao_models && cfg.data.model_name) {
           store.dispatch(setSystemBuiltinModelOnly({
             model_name: cfg.data.model_name,
-            display_name: cfg.data.display_name || `管家系统内置大模型 (${cfg.data.model_name})`,
+            display_name: cfg.data.display_name || '智慧管家助手模型',
           }));
         } else if (cfg.data.hide_youdao_models === false) {
           if (store.getState().model.systemBuiltinModel || store.getState().model.backupServerModels) {

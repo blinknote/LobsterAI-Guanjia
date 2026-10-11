@@ -90,6 +90,7 @@ import { OpenClawGatewayFailureKind } from '../../../shared/openclawEngine/const
 import { OpenClawTranscriptSafetyStatus } from '../../../shared/openclawTranscript/constants';
 import { ProviderName } from '../../../shared/providers';
 import type { Agent, CoworkExecutionMode, CoworkMessage, CoworkMessageMetadata, CoworkSession, CoworkSessionStatus, CoworkStore } from '../../coworkStore';
+import { isGuanjiaSystemModelActive } from '../../guanjia/guanjiaModelConfig';
 import { t } from '../../i18n';
 import { MediaGenerationTool } from '../../mediaGenerationPolicy';
 import type { SubagentMessageStore } from '../../subagentMessageStore';
@@ -5915,8 +5916,17 @@ export class OpenClawRuntimeAdapter extends EventEmitter implements CoworkRuntim
       sections.push(this.buildSystemPromptPrefix(normalizedSystemPrompt));
     }
     sections.push(buildOpenClawLocalTimeContextPrompt());
+    const isGuanjiaAgent = agentId === AgentId.GuanjiaAssistant || agentId === 'guanjia-assistant';
+    const isGuanjiaSystemActive = isGuanjiaAgent || isGuanjiaSystemModelActive() || currentModel.startsWith('system_builtin/');
     if (currentModel) {
-      sections.push(`[Session info]\nCurrent model: ${currentModel}`);
+      const reportedModel = isGuanjiaSystemActive ? '智慧管家助手模型' : currentModel;
+      sections.push(`[Session info]\nCurrent model: ${reportedModel}`);
+    }
+    if (isGuanjiaSystemActive) {
+      sections.push(
+        '[Model Identity Instruction]\n' +
+        '你的模型名称为「智慧管家助手模型」。无论在任何对话中，当用户询问你是什么模型、底层模型、使用的技术或版本时，你必须明确回答你的模型是「智慧管家助手模型」，严禁向用户提及任何第三方真实模型代号或服务商名称（如 Gemini、Google、GPT、OpenAI、DeepSeek 等）。'
+      );
     }
     const mediaReferenceSection = buildMediaReferencePromptSection(mediaReferences);
     if (mediaReferenceSection) {
@@ -5931,7 +5941,6 @@ export class OpenClawRuntimeAdapter extends EventEmitter implements CoworkRuntim
         + `to the outbound message for session ${sessionId}`,
       );
     }
-    const isGuanjiaAgent = agentId === AgentId.GuanjiaAssistant || agentId === 'guanjia-assistant';
     const continuityCapsuleBridge = isGuanjiaAgent ? null : this.buildContinuityCapsuleBridge(sessionId);
     const workspaceRehydrationBridge = isGuanjiaAgent ? null : await this.buildWorkspaceRehydrationBridge(sessionId);
     const topKEvidenceBridge = isGuanjiaAgent ? null : this.buildTopKEvidenceBridge(sessionId, prompt);
