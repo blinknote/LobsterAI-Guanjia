@@ -114,6 +114,7 @@ export interface RegisterBusinessTokenResult {
 export interface DesktopAuthApi {
   getStatus: () => Promise<GuanjiaDesktopAuthStatus>;
   onStatusChanged: (callback: (status: GuanjiaDesktopAuthStatus) => void) => () => void;
+  onTriggerBind?: (callback: () => void) => () => void;
   bind: (params: GuanjiaDesktopAuthBindParams) => Promise<GuanjiaDesktopAuthBindResult>;
   unbind: (params: GuanjiaDesktopAuthUnbindParams) => Promise<GuanjiaDesktopAuthUnbindResult>;
   loginBound: () => Promise<GuanjiaDesktopAuthLoginResult>;

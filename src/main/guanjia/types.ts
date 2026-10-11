@@ -283,6 +283,7 @@ export const GuanjiaIpcChannel = {
   DesktopAuthGetStatus: 'guanjia:desktop-auth:get-status',
   DesktopAuthSubscribeStatus: 'guanjia:desktop-auth:subscribe-status',
   DesktopAuthStatusChanged: 'guanjia:desktop-auth:status-changed',
+  DesktopAuthTriggerBind: 'guanjia:desktop-auth:trigger-bind',
   DesktopAuthBind: 'guanjia:desktop-auth:bind',
   DesktopAuthUnbind: 'guanjia:desktop-auth:unbind',
   DesktopAuthLoginBound: 'guanjia:desktop-auth:login-bound',

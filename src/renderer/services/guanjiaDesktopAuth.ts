@@ -68,6 +68,7 @@ class GuanjiaDesktopAuthService {
   private status: GuanjiaDesktopAuthStatus = defaultStatus;
   private listeners = new Set<() => void>();
   private unsubscribeIpc: (() => void) | null = null;
+  private unsubscribeTriggerBind: (() => void) | null = null;
   private initPromise: Promise<GuanjiaDesktopAuthStatus> | null = null;
 
   constructor() {
@@ -80,6 +81,11 @@ class GuanjiaDesktopAuthService {
     if (api?.onStatusChanged) {
       this.unsubscribeIpc = api.onStatusChanged((nextStatus) => {
         this.updateStatus(nextStatus);
+      });
+    }
+    if (api?.onTriggerBind && !this.unsubscribeTriggerBind) {
+      this.unsubscribeTriggerBind = api.onTriggerBind(() => {
+        window.dispatchEvent(new CustomEvent('guanjia:open-bind'));
       });
     }
   }

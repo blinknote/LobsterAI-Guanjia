@@ -1654,6 +1654,11 @@ contextBridge.exposeInMainWorld('electron', {
         ipcRenderer.on(GuanjiaIpcChannel.DesktopAuthStatusChanged, handler);
         return () => ipcRenderer.removeListener(GuanjiaIpcChannel.DesktopAuthStatusChanged, handler);
       },
+      onTriggerBind: (callback: () => void) => {
+        const handler = () => callback();
+        ipcRenderer.on(GuanjiaIpcChannel.DesktopAuthTriggerBind, handler);
+        return () => ipcRenderer.removeListener(GuanjiaIpcChannel.DesktopAuthTriggerBind, handler);
+      },
       bind: (params: { employeeNo: string; password: string }) =>
         ipcRenderer.invoke(GuanjiaIpcChannel.DesktopAuthBind, params),
       unbind: (params: { password: string }) =>

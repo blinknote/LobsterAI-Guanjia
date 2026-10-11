@@ -209,10 +209,13 @@ export class GuanjiaSession {
     if (error instanceof Error && error.name === 'SessionExpired') { this.invalidate(error.message); return this.getSnapshot(); }
     return this.fail(generation, error);
   }
-  public async logout(): Promise<void> {
+  public async logout(options?: { suppressAutoLogin?: boolean }): Promise<void> {
+    const suppress = options?.suppressAutoLogin ?? true;
     try {
       const { GuanjiaDesktopAuthCoordinator } = await import('./guanjiaDesktopAuthCoordinator');
-      GuanjiaDesktopAuthCoordinator.getInstance().setLogoutSuppressed(true);
+      if (suppress) {
+        GuanjiaDesktopAuthCoordinator.getInstance().setLogoutSuppressed(true);
+      }
     } catch {
       // ignore
     }
@@ -226,9 +229,13 @@ export class GuanjiaSession {
     this.publish({ status: 'unauthenticated', generation, user: null, store: null });
     await manager.clearSessionCredentials(generation);
     if (!token) return;
-    const response = await fetch(new URL('/api/c/logout', manager.getDefaultUrl()), { method: 'POST', headers: { 'X-Token': token }, redirect: 'error', signal: AbortSignal.timeout(5000) });
-    const body = record(await response.json());
-    if (!response.ok || body?.success !== true) throw new Error('本地已退出，但服务端注销未确认，请重试');
+    try {
+      const response = await fetch(new URL('/api/c/logout', manager.getDefaultUrl()), { method: 'POST', headers: { 'X-Token': token }, redirect: 'error', signal: AbortSignal.timeout(5000) });
+      const body = record(await response.json());
+      if (!response.ok || body?.success !== true) console.warn('[GuanjiaSession] Remote logout not confirmed by server');
+    } catch (err) {
+      console.warn('[GuanjiaSession] Remote logout network error:', err);
+    }
   }
   public restore(): Promise<GuanjiaSessionSnapshot> {
     if (this.restorePromise) return this.restorePromise;

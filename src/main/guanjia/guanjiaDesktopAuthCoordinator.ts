@@ -78,6 +78,7 @@ export class GuanjiaDesktopAuthCoordinator {
   private attemptedRecoveryOwnerKeys = new Set<string>();
 
   private listeners = new Set<(status: GuanjiaDesktopAuthStatus) => void>();
+  private triggerBindListeners = new Set<() => void>();
 
   private officialTokenGetter: (() => string | null) | null = null;
   private officialUserGetter: (() => Record<string, unknown> | null) | null = null;
@@ -108,6 +109,23 @@ export class GuanjiaDesktopAuthCoordinator {
     return () => {
       this.listeners.delete(listener);
     };
+  }
+
+  public onTriggerBind(listener: () => void): () => void {
+    this.triggerBindListeners.add(listener);
+    return () => {
+      this.triggerBindListeners.delete(listener);
+    };
+  }
+
+  public notifyTriggerBind(): void {
+    for (const listener of this.triggerBindListeners) {
+      try {
+        listener();
+      } catch (err) {
+        console.error('[DesktopAuthCoordinator] TriggerBind listener error:', err);
+      }
+    }
   }
 
   private notifyStatusChanged(): void {
@@ -1287,6 +1305,12 @@ export class GuanjiaDesktopAuthCoordinator {
       return this.getStatusSnapshot();
     }
 
+    const isOwnerChanged = this.officialOwner !== null && this.officialOwner !== profile.userId;
+    if (isOwnerChanged && sessionService.getSnapshot().status === 'authenticated') {
+      void sessionService.logout({ suppressAutoLogin: false }).catch(() => {
+        sessionService.invalidate('官方账号已切换');
+      });
+    }
     this.officialOwner = profile.userId;
 
     // 2. 查询绑定状态
@@ -1326,31 +1350,31 @@ export class GuanjiaDesktopAuthCoordinator {
     this.lastError = undefined;
 
     // 3. 自动采用逻辑
-    if (allowAdoption && this.bindingState === 'bound' && !this.logoutSuppressed && this.bindingInfo) {
-      if (intent === 'startup') {
-        const currentGen = sessionService.getGeneration();
-        if (
-          !this.isStartupIntentActive ||
-          this.logoutSuppressed ||
-          capturedBusinessGen === null ||
-          currentGen !== capturedBusinessGen ||
-          (this.startupExpectedBusinessGeneration !== null && currentGen !== this.startupExpectedBusinessGeneration)
-        ) {
+    if (this.bindingState === 'bound') {
+      if (allowAdoption && !this.logoutSuppressed && this.bindingInfo) {
+        if (intent === 'startup') {
+          const currentGen = sessionService.getGeneration();
           if (
+            !this.isStartupIntentActive ||
+            this.logoutSuppressed ||
+            capturedBusinessGen === null ||
             currentGen !== capturedBusinessGen ||
             (this.startupExpectedBusinessGeneration !== null && currentGen !== this.startupExpectedBusinessGeneration)
           ) {
-            this.isStartupIntentActive = false;
+            if (
+              currentGen !== capturedBusinessGen ||
+              (this.startupExpectedBusinessGeneration !== null && currentGen !== this.startupExpectedBusinessGeneration)
+            ) {
+              this.isStartupIntentActive = false;
+            }
+            return this.getStatusSnapshot();
           }
+        }
+
+        const currentSnapshot = sessionService.getSnapshot();
+        if (currentSnapshot.status === 'restoring') {
           return this.getStatusSnapshot();
         }
-      }
-
-      const currentSnapshot = sessionService.getSnapshot();
-      if (currentSnapshot.status === 'restoring') {
-        return this.getStatusSnapshot();
-      }
-      const currentCreds = sessionService.getCredentials() as { source?: string } | null;
 
       const isSameEmployee =
         currentSnapshot.status === 'authenticated' &&
@@ -1364,8 +1388,8 @@ export class GuanjiaDesktopAuthCoordinator {
       if (isSameEmployee) {
         // 同员工保原状态，不重复换取
       } else if (intent === 'official_login') {
-        // 官方账号切换可撤销旧的 SSO scope；独立密码会话必须保留，直到新候选完成真实核验。
-        if (currentSnapshot.status === 'authenticated' && currentCreds?.source === 'sso') {
+          // 官方账号切换或重新登录：退出旧会话，换取新员工会话完成静默登录
+          if (currentSnapshot.status === 'authenticated') {
           sessionService.invalidate('官方账号已切换');
         }
         const preExchangeBusinessGen = sessionService.getGeneration();
@@ -1400,6 +1424,20 @@ export class GuanjiaDesktopAuthCoordinator {
           }
         }
       }
+      }
+    } else if (this.bindingState === 'unbound') {
+      // 未绑定管家账号：
+      // 1) 同步退出旧的管家会话（确保不残留上一个账号的管家登录）
+      const currentSnapshot = sessionService.getSnapshot();
+      if (currentSnapshot.status === 'authenticated') {
+        void sessionService.logout({ suppressAutoLogin: false }).catch(() => {
+          sessionService.invalidate('有道账号未绑定管家账号');
+        });
+      }
+      // 2) 重新登录有道账号后，触发绑定弹窗
+      if (intent === 'official_login') {
+        this.notifyTriggerBind();
+      }
     }
 
     if (this.officialGeneration !== capturedOfficialGen) {
@@ -1422,10 +1460,17 @@ export class GuanjiaDesktopAuthCoordinator {
 
     // 若官方用户变更，重置绑定状态
     const newUserId = officialUser && typeof officialUser.id === 'number' ? String(officialUser.id) : null;
+    const isOwnerChanged = this.officialOwner !== null && newUserId !== null && this.officialOwner !== newUserId;
     if (newUserId && this.officialOwner !== newUserId) {
       this.officialOwner = newUserId;
       this.bindingState = 'not_checked';
       this.bindingInfo = null;
+    }
+
+    if (isOwnerChanged) {
+      void GuanjiaSession.getInstance().logout({ suppressAutoLogin: false }).catch(() => {
+        GuanjiaSession.getInstance().invalidate('官方账号已切换');
+      });
     }
 
     void this.syncDesktopAuthSilent({ allowAdoption: true, intent: 'official_login' });
@@ -1453,9 +1498,14 @@ export class GuanjiaDesktopAuthCoordinator {
     this.bindingInfo = null;
     this.lastError = undefined;
     this.isStartupIntentActive = false;
+    this.logoutSuppressed = false;
 
-    // 1. 本地管家会话立即失效
-    GuanjiaSession.getInstance().invalidate('官方账号已退出');
+    // 1. 本地管家会话同步退出
+    try {
+      await GuanjiaSession.getInstance().logout({ suppressAutoLogin: false });
+    } catch {
+      GuanjiaSession.getInstance().invalidate('官方账号已退出');
+    }
 
     // 2. 撤销已登记的 ownedTokens 和 issuanceAttempts (仅成功远端撤销才移除本地登记)
     await this.revokeAllOwnedTokensAndAttempts();

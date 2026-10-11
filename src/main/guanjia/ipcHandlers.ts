@@ -133,6 +133,14 @@ export function registerGuanjiaIpcHandlers(options?: RegisterGuanjiaHandlersOpti
     }
   });
 
+  // 广播桌面专属账号绑定触发事件到主渲染窗口
+  coordinator.onTriggerBind(() => {
+    const targetWin = options?.getMainWindow ? options.getMainWindow() : BrowserWindow.getFocusedWindow();
+    if (targetWin && !targetWin.isDestroyed()) {
+      targetWin.webContents.send(GuanjiaIpcChannel.DesktopAuthTriggerBind);
+    }
+  });
+
   if (options?.getCoworkStore) {
     workspaceManager.setCoworkStoreGetter(options.getCoworkStore);
   }
