@@ -553,7 +553,28 @@ export function registerGuanjiaNativeAssistantHandlers(options: NativeAssistantR
   ipcMain.handle(Channel.ReportSessionEvent, async (event, params: ReportSessionEventParams) => {
     if (!hostCaller(event) || !record(params)) return { success: false, error: 'Unauthorized caller' };
     const service = GuanjiaSession.getInstance();
-    if (params.type === 'logout' || params.type === 'expired') service.invalidate('网页业务会话已失效');
+    if (params.type === 'logout') {
+      service.invalidate('网页业务会话已注销');
+    } else if (params.type === 'expired') {
+      const { GuanjiaDesktopAuthCoordinator } = await import('./guanjiaDesktopAuthCoordinator');
+      const coordinator = GuanjiaDesktopAuthCoordinator.getInstance();
+      if (
+        !coordinator.isLogoutSuppressed() &&
+        coordinator.getBindingState() === 'bound' &&
+        Boolean(coordinator.getOfficialToken())
+      ) {
+        try {
+          const adoptRes = await coordinator.exchangeAndAdopt({ forceRenew: true });
+          if (!adoptRes.success) {
+            service.invalidate('网页业务会话已失效');
+          }
+        } catch {
+          service.invalidate('网页业务会话已失效');
+        }
+      } else {
+        service.invalidate('网页业务会话已失效');
+      }
+    }
     else if (params.type === 'store-changed') {
       const isWorkspace = GuanjiaWorkspaceManager.getInstance().isGuanjiaWebContents(event.sender);
       await service.setStore(

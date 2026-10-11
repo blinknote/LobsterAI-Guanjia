@@ -216,6 +216,7 @@ export class GuanjiaSession {
       if (suppress) {
         GuanjiaDesktopAuthCoordinator.getInstance().setLogoutSuppressed(true);
       }
+      GuanjiaDesktopAuthCoordinator.getInstance().cancelProactiveRenewal();
     } catch {
       // ignore
     }

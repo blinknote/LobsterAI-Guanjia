@@ -321,8 +321,8 @@ jobs:
         with:
           name: Release ${{ github.ref_name }}
           files: |
-            artifacts/macos-build/*.dmg
-            artifacts/windows-build/*.exe
+            artifacts/**/*.dmg
+            artifacts/**/*.exe
           draft: false
           prerelease: ${{ contains(github.ref, '-beta') || contains(github.ref, '-alpha') || contains(github.ref, '-rc') }}
           generate_release_notes: true

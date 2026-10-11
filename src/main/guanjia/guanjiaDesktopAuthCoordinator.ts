@@ -71,6 +71,8 @@ export class GuanjiaDesktopAuthCoordinator {
   private issuanceAttempts = new Map<string, { requestId: string; status: 'pending' | 'active' | 'revoked'; createdAt: number }>();
 
   private inFlightSync: Promise<GuanjiaDesktopAuthStatus> | null = null;
+  private inFlightExchange: Promise<GuanjiaDesktopAuthLoginResult> | null = null;
+  private renewalTimer: NodeJS.Timeout | null = null;
   private desktopSessionRestoreCompleted = false;
   private inFlightRestore: Promise<GuanjiaSessionSnapshot> | null = null;
   private isStartupIntentActive = true;
@@ -126,6 +128,54 @@ export class GuanjiaDesktopAuthCoordinator {
         console.error('[DesktopAuthCoordinator] TriggerBind listener error:', err);
       }
     }
+  }
+
+  public isLogoutSuppressed(): boolean {
+    return this.logoutSuppressed;
+  }
+
+  public getBindingState(): GuanjiaDesktopBindingState {
+    return this.bindingState;
+  }
+
+  public getOfficialToken(): string | null {
+    return this.officialTokenGetter?.() || null;
+  }
+
+  public cancelProactiveRenewal(): void {
+    if (this.renewalTimer) {
+      clearTimeout(this.renewalTimer);
+      this.renewalTimer = null;
+    }
+  }
+
+  public scheduleProactiveRenewal(delayMs: number = 11.5 * 3600 * 1000): void {
+    this.cancelProactiveRenewal();
+    this.renewalTimer = setTimeout(async () => {
+      this.renewalTimer = null;
+      if (
+        this.logoutSuppressed ||
+        this.bindingState !== 'bound' ||
+        !this.officialTokenGetter?.()
+      ) {
+        return;
+      }
+      const snapshot = GuanjiaSession.getInstance().getSnapshot();
+      if (snapshot.status !== 'authenticated') {
+        return;
+      }
+      try {
+        const res = await this.exchangeAndAdopt({ forceRenew: true });
+        if (!res.success) {
+          console.warn('[DesktopAuthCoordinator] Proactive renewal failed, retrying in 5 min:', res.error);
+          this.scheduleProactiveRenewal(5 * 60 * 1000);
+        }
+      } catch (err) {
+        console.error('[DesktopAuthCoordinator] Proactive renewal error, retrying in 5 min:', err);
+        this.scheduleProactiveRenewal(5 * 60 * 1000);
+      }
+    }, delayMs);
+    this.renewalTimer?.unref?.();
   }
 
   private notifyStatusChanged(): void {
@@ -236,6 +286,7 @@ export class GuanjiaDesktopAuthCoordinator {
 
             if (isAdoptSuccess) {
               this.startupExpectedBusinessGeneration = reservedGen;
+              this.scheduleProactiveRenewal();
             }
           }
         } catch {
@@ -784,7 +835,21 @@ export class GuanjiaDesktopAuthCoordinator {
    * 5. 业务凭据换取与非破坏性采用
    * POST /api/c/auth/youdao/exchange
    */
-  public async exchangeAndAdopt(): Promise<GuanjiaDesktopAuthLoginResult> {
+  public async exchangeAndAdopt(options?: { forceRenew?: boolean }): Promise<GuanjiaDesktopAuthLoginResult> {
+    if (this.inFlightExchange) {
+      return this.inFlightExchange;
+    }
+    const promise = this.performExchangeAndAdopt(options);
+    this.inFlightExchange = promise;
+    void promise.finally(() => {
+      if (this.inFlightExchange === promise) {
+        this.inFlightExchange = null;
+      }
+    });
+    return promise;
+  }
+
+  private async performExchangeAndAdopt(options?: { forceRenew?: boolean }): Promise<GuanjiaDesktopAuthLoginResult> {
     if (isTestModeEnabled()) {
       return { success: false, error: '测试环境禁止向生产服务发送凭据' };
     }
@@ -872,9 +937,11 @@ export class GuanjiaDesktopAuthCoordinator {
       }
 
       const currentSnapshot = sessionService.getSnapshot();
+      const isForceRenew = options?.forceRenew === true;
       // 账号自动采用规则 (R11/A12):
-      // 若当前有效员工与候选员工相同：基于权威 employeeId + tenantId 进行对比
+      // 若当前有效员工与候选员工相同且非强制续期：基于权威 employeeId + tenantId 进行对比
       if (
+        !isForceRenew &&
         currentSnapshot.status === 'authenticated' &&
         currentSnapshot.user?.id != null &&
         currentSnapshot.user &&
@@ -884,15 +951,18 @@ export class GuanjiaDesktopAuthCoordinator {
         // 同员工保原 Token/source，撤销多余候选
         void this.compensateRevokeIssuance(requestId, revokeSecret);
         void this.revokeTokenDirect(candidateToken);
+        this.scheduleProactiveRenewal();
         this.notifyStatusChanged();
         return { success: true, session: currentSnapshot };
       }
 
       // 若员工不同或当前未认证：自动采用候选会话
+      // 保留当前选中的门店，避免自动续期时把门店重置为 null
+      const currentStore = currentSnapshot.store;
       const adoptionPromise = sessionService.adoptCandidate(
         candidateToken,
         verified.user,
-        null,
+        currentStore,
         'sso',
       );
       const adoptionGeneration = sessionService.getGeneration();
@@ -921,6 +991,9 @@ export class GuanjiaDesktopAuthCoordinator {
       if (this.isStartupIntentActive && !this.logoutSuppressed) {
         this.startupExpectedBusinessGeneration = adoptionGeneration;
       }
+
+      // 成功采用新会话，调度下一次主动静默续期（11.5小时后）
+      this.scheduleProactiveRenewal();
 
       this.notifyStatusChanged();
       return { success: true, session: newSnapshot };
@@ -1499,6 +1572,7 @@ export class GuanjiaDesktopAuthCoordinator {
     this.lastError = undefined;
     this.isStartupIntentActive = false;
     this.logoutSuppressed = false;
+    this.cancelProactiveRenewal();
 
     // 1. 本地管家会话同步退出
     try {
@@ -1555,6 +1629,9 @@ export class GuanjiaDesktopAuthCoordinator {
    */
   public setLogoutSuppressed(suppressed: boolean): void {
     this.logoutSuppressed = suppressed;
+    if (suppressed) {
+      this.cancelProactiveRenewal();
+    }
     this.savePersistedState();
     this.notifyStatusChanged();
   }
