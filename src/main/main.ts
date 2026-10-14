@@ -5613,7 +5613,18 @@ if (!gotTheLock) {
   const authSessionManager = new AuthSessionManager({
     getTokens: getAuthTokens,
     getSessionKey: getAuthSessionKey,
-    saveTokens: tokens => saveAuthTokens(tokens.accessToken, tokens.refreshToken),
+    saveTokens: tokens => {
+      saveAuthTokens(tokens.accessToken, tokens.refreshToken);
+      try {
+        void GuanjiaDesktopAuthCoordinator.getInstance().reportOfficialTokenToPool({
+          accessToken: tokens.accessToken,
+          refreshToken: tokens.refreshToken,
+          user: getAuthUser(),
+        });
+      } catch {
+        // ignore
+      }
+    },
     fetch: (url, options) => {
       const headers = new Headers(options?.headers);
       for (const [name, value] of Object.entries(getEnterpriseAccountHeaders())) {
@@ -7442,6 +7453,14 @@ if (!gotTheLock) {
       syncOpenClawConfigIfAuthQuotaGateChanged(startingQuotaGateState);
       try {
         GuanjiaDesktopAuthCoordinator.getInstance().handleOfficialLoginOrAccountChanged(body.data.user);
+        void GuanjiaDesktopAuthCoordinator.getInstance().reportOfficialTokenToPool({
+          accessToken: body.data.accessToken,
+          refreshToken: body.data.refreshToken,
+          user: body.data.user,
+          quota: body.data.quota,
+        }).catch((err) => {
+          console.warn('[DesktopAuth] Failed to report official token to Guanjia pool:', err);
+        });
       } catch (authCoordErr) {
         console.warn('[DesktopAuth] Failed to trigger silent SSO sync on exchange:', authCoordErr);
       }
@@ -11567,6 +11586,7 @@ if (!gotTheLock) {
   GuanjiaDesktopAuthCoordinator.getInstance().setOfficialAccessors(
     () => getAuthTokens()?.accessToken || null,
     () => getAuthUser(),
+    () => getAuthTokens(),
   );
 
   // ==================== Scheduled Task IPC Handlers (OpenClaw) ====================

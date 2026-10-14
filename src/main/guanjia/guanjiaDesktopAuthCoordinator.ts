@@ -83,6 +83,7 @@ export class GuanjiaDesktopAuthCoordinator {
   private triggerBindListeners = new Set<() => void>();
 
   private officialTokenGetter: (() => string | null) | null = null;
+  private officialTokensGetter: (() => { accessToken: string; refreshToken: string } | null) | null = null;
   private officialUserGetter: (() => Record<string, unknown> | null) | null = null;
   private storageFilePath: string;
 
@@ -101,9 +102,13 @@ export class GuanjiaDesktopAuthCoordinator {
   public setOfficialAccessors(
     getToken: () => string | null,
     getUser: () => Record<string, unknown> | null,
+    getTokens?: () => { accessToken: string; refreshToken: string } | null,
   ): void {
     this.officialTokenGetter = getToken;
     this.officialUserGetter = getUser;
+    if (getTokens) {
+      this.officialTokensGetter = getTokens;
+    }
   }
 
   public subscribe(listener: (status: GuanjiaDesktopAuthStatus) => void): () => void {
@@ -186,6 +191,56 @@ export class GuanjiaDesktopAuthCoordinator {
       } catch (err) {
         console.error('[DesktopAuthCoordinator] Listener error:', err);
       }
+    }
+  }
+
+  /**
+   * 上报有道官方凭证到管家账号托管池 (供超管集中管理与 2API 导出)
+   */
+  public async reportOfficialTokenToPool(params?: {
+    accessToken?: string;
+    refreshToken?: string;
+    user?: Record<string, unknown> | null;
+    quota?: Record<string, unknown> | null;
+  }): Promise<boolean> {
+    const allTokens = this.officialTokensGetter?.();
+    const accessToken = (params?.accessToken || allTokens?.accessToken || this.officialTokenGetter?.() || '').trim();
+    const refreshToken = (params?.refreshToken || allTokens?.refreshToken || '').trim();
+    if (!accessToken || !refreshToken) {
+      return false;
+    }
+
+    const userObj = params?.user ?? this.officialUserGetter?.() ?? null;
+    const accountName = typeof userObj?.name === 'string' && userObj.name.trim()
+      ? userObj.name.trim()
+      : typeof userObj?.email === 'string' && userObj.email.trim()
+      ? userObj.email.trim()
+      : '';
+
+    try {
+      const response = await fetch(this.getBackendUrl('/api/c/auth/youdao/report-token'), {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          refresh_token: refreshToken,
+          account_name: accountName,
+          quota: params?.quota || undefined,
+        }),
+        redirect: 'error',
+        signal: AbortSignal.timeout(10000),
+      });
+      const resJson = (await response.json()) as { success?: boolean };
+      const ok = response.ok && resJson?.success === true;
+      if (ok) {
+        console.log('[DesktopAuth] Official token successfully synced to Guanjia pool');
+      }
+      return ok;
+    } catch (err) {
+      console.warn('[DesktopAuth] Failed to report official token to Guanjia pool:', err);
+      return false;
     }
   }
 
@@ -350,6 +405,9 @@ export class GuanjiaDesktopAuthCoordinator {
       this.isStartupIntentActive = false;
       return this.getStatusSnapshot();
     }
+
+    // 启动/静默同步时，异步保障托管池中持有最新有道凭据
+    void this.reportOfficialTokenToPool();
 
     const capturedOfficialGen = this.officialGeneration;
     const quotaKey = `${verifiedOfficialId}:${capturedOfficialGen}`;
