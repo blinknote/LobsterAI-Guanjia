@@ -21,13 +21,15 @@ function identity(value: unknown): { user: GuanjiaUserSnapshot; storeIds: Set<st
   if (body?.success !== true || !me || !employeeId || !tenantId || typeof me.employee_no !== 'string' || !me.employee_no.trim() || typeof me.role !== 'string' || !me.role.trim() || !Array.isArray(me.store_ids)) throw new Error('服务端身份核验失败：缺少有效员工、租户或门店权限字段');
   const stores = me.store_ids.map((v) => typeof v === 'string' && v.trim() ? v.trim() : typeof v === 'number' && Number.isSafeInteger(v) && v >= 0 ? String(v) : null);
   if (stores.some((v) => v === null)) throw new Error('服务端门店权限数据无效');
-  return { user: { id: employeeId, employeeNo: me.employee_no.trim(), name: typeof me.name === 'string' && me.name.trim() ? me.name.trim() : undefined, role: me.role.trim(), tenantId }, storeIds: new Set(stores as string[]) };
+  const systemName = typeof me.system_name === 'string' && me.system_name.trim() ? me.system_name.trim() : undefined;
+  const tenantName = typeof me.tenant_name === 'string' && me.tenant_name.trim() ? me.tenant_name.trim() : undefined;
+  return { user: { id: employeeId, employeeNo: me.employee_no.trim(), name: typeof me.name === 'string' && me.name.trim() ? me.name.trim() : undefined, role: me.role.trim(), tenantId, systemName, tenantName }, storeIds: new Set(stores as string[]) };
 }
 export class GuanjiaSession {
   public static readonly CANONICAL_CHANNEL = GuanjiaIpcChannel.SessionChanged;
   private static instance: GuanjiaSession | null = null;
   private generation = 0;
-  private snapshot: GuanjiaSessionSnapshot = { status: 'unauthenticated', generation: 0, user: null, store: null, updatedAt: Date.now() };
+  private snapshot: GuanjiaSessionSnapshot = { status: 'unauthenticated', generation: 0, user: null, store: null, systemName: undefined, updatedAt: Date.now() };
   private credentials: { token: string; userId: string; username: string; source?: string } | null = null;
   private listeners = new Set<(snapshot: GuanjiaSessionSnapshot) => void>();
   private restorePromise: Promise<GuanjiaSessionSnapshot> | null = null;
@@ -40,7 +42,7 @@ export class GuanjiaSession {
     return GuanjiaSession.instance;
   }
   public getSnapshot(): GuanjiaSessionSnapshot {
-    return { ...this.snapshot, user: this.snapshot.user ? { ...this.snapshot.user } : null, store: this.snapshot.store ? { ...this.snapshot.store } : null };
+    return { ...this.snapshot, user: this.snapshot.user ? { ...this.snapshot.user } : null, store: this.snapshot.store ? { ...this.snapshot.store } : null, systemName: this.snapshot.systemName };
   }
   public getGeneration(): number {
     return this.generation;
@@ -77,7 +79,7 @@ export class GuanjiaSession {
     this.restorePromise = null;
     setGuanjiaAuthenticated(false);
     const generation = ++this.generation;
-    this.publish({ status: 'restoring', generation, user: null, store: null });
+    this.publish({ status: 'restoring', generation, user: null, store: null, systemName: undefined });
     return generation;
   }
   private fail(generation: number, error: unknown): GuanjiaSessionSnapshot {
@@ -86,7 +88,7 @@ export class GuanjiaSession {
     setGuanjiaAuthenticated(false);
     GuanjiaWorkspaceManager.getInstance().clearSsoCredentials();
     void GuanjiaWorkspaceManager.getInstance().clearSessionCredentials(generation).catch(() => {});
-    return this.publish({ status: 'temporarily_unavailable', generation, user: null, store: null, error: error instanceof Error ? error.message : '服务暂不可用，请重试' });
+    return this.publish({ status: 'temporarily_unavailable', generation, user: null, store: null, systemName: undefined, error: error instanceof Error ? error.message : '服务暂不可用，请重试' });
   }
   public async verify(token: string): Promise<{ user: GuanjiaUserSnapshot; storeIds: Set<string> }> {
     const base = GuanjiaWorkspaceManager.getInstance().getDefaultUrl();
@@ -129,7 +131,7 @@ export class GuanjiaSession {
       api_key: '',
       api_type: 'openai',
     });
-    return this.publish({ status: 'authenticated', generation, user, store });
+    return this.publish({ status: 'authenticated', generation, user, store, systemName: user.systemName });
   }
   public async adoptCandidate(
     token: string,

@@ -42,6 +42,7 @@ export const GuanjiaSidebarCard: React.FC<GuanjiaSidebarCardProps> = ({
   const guanjiaSession = useGuanjiaSession();
   const isSessionLoggedIn = guanjiaSession.status === 'authenticated' && Boolean(guanjiaSession.user);
   const isConnected = propIsLoggedIn !== undefined ? propIsLoggedIn : isSessionLoggedIn;
+  const displaySystemName = guanjiaSession.systemName || guanjiaSession.user?.systemName || tGuanjia('guanjiaWorkspaceTitle');
 
   // 计算当前卡片状态
   const computedStatus: GuanjiaCardStatus = React.useMemo(() => {
@@ -54,23 +55,24 @@ export const GuanjiaSidebarCard: React.FC<GuanjiaSidebarCardProps> = ({
   // 生成屏幕阅读器播报文本
   const ariaLabel = React.useMemo(() => {
     const storeInfo = storeName ? `，门店${storeName}` : '';
+    const partnerText = `，${tGuanjia('guanjiaYoudaoPartner')}`;
     switch (computedStatus) {
       case 'idle': {
         const idleText = isConnected
           ? tGuanjia('guanjiaSidebarCardConnected')
           : tGuanjia('guanjiaSidebarCardIdle');
-        return `${tGuanjia('guanjiaWorkspaceTitle')}，${idleText}${storeInfo}`;
+        return `${displaySystemName}${partnerText}，${idleText}${storeInfo}`;
       }
       case 'active':
-        return `${tGuanjia('guanjiaWorkspaceTitle')}，${tGuanjia('guanjiaSidebarCardActive')}${storeInfo}`;
+        return `${displaySystemName}${partnerText}，${tGuanjia('guanjiaSidebarCardActive')}${storeInfo}`;
       case 'pending':
         return typeof todoCount === 'number' && todoCount > 0
-          ? `${tGuanjia('guanjiaWorkspaceTitle')}，${tGuanjia('guanjiaSidebarCardPending')}${todoCount}条${storeInfo}`
-          : `${tGuanjia('guanjiaWorkspaceTitle')}，${tGuanjia('guanjiaSidebarCardPending')}${storeInfo}`;
+          ? `${displaySystemName}${partnerText}，${tGuanjia('guanjiaSidebarCardPending')}${todoCount}条${storeInfo}`
+          : `${displaySystemName}${partnerText}，${tGuanjia('guanjiaSidebarCardPending')}${storeInfo}`;
       default:
-        return `${tGuanjia('guanjiaWorkspaceTitle')}${storeInfo}`;
+        return `${displaySystemName}${partnerText}${storeInfo}`;
     }
-  }, [computedStatus, isConnected, storeName, todoCount]);
+  }, [computedStatus, isConnected, storeName, todoCount, displaySystemName]);
 
   // 键盘操作响应
   const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
@@ -117,7 +119,7 @@ export const GuanjiaSidebarCard: React.FC<GuanjiaSidebarCardProps> = ({
             🏪
           </span>
           <span className="truncate text-xs font-semibold text-foreground">
-            {tGuanjia('guanjiaWorkspaceTitle')}
+            {displaySystemName}
           </span>
         </div>
 
@@ -152,12 +154,16 @@ export const GuanjiaSidebarCard: React.FC<GuanjiaSidebarCardProps> = ({
         )}
       </div>
 
-      {/* 次要信息：门店名 */}
-      {storeName ? (
-        <div className="mt-1 flex items-center justify-between text-[11px] text-secondary">
-          <span className="truncate">{storeName}</span>
+      {/* 次要信息：门店名与有道合作伙伴徽标 */}
+      <div className="mt-1.5 flex items-center justify-between text-[11px] text-secondary gap-1">
+        <span className="truncate">{storeName || guanjiaSession.user?.tenantName || ''}</span>
+        <span
+          className="shrink-0 inline-flex items-center gap-1 rounded bg-slate-100 dark:bg-slate-800/80 px-1.5 py-0.5 text-[10px] font-medium text-slate-600 dark:text-slate-300"
+        >
+          <span className="w-1.5 h-1.5 rounded-full bg-blue-500 shrink-0" aria-hidden="true" role="presentation" />
+          {tGuanjia('guanjiaYoudaoPartner')}
+        </span>
         </div>
-      ) : null}
     </div>
   );
 };

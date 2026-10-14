@@ -113,6 +113,9 @@ export const guanjiaTranslations = {
     guanjiaDone: '完成',
     guanjiaAuthUnavailable: '认证服务暂不可用',
     guanjiaRetry: '重试',
+    guanjiaYoudaoPartner: '有道合作伙伴',
+    guanjiaYoudaoOfficialPartner: '网易有道官方战略合作伙伴',
+    guanjiaPartnerAuthorization: '官方授权',
   },
   en: {
     guanjiaWorkspaceTitle: 'Smart Butler',
@@ -226,6 +229,9 @@ export const guanjiaTranslations = {
     guanjiaDone: 'Done',
     guanjiaAuthUnavailable: 'Auth service temporarily unavailable',
     guanjiaRetry: 'Retry',
+    guanjiaYoudaoPartner: 'Youdao Partner',
+    guanjiaYoudaoOfficialPartner: 'NetEase Youdao Strategic Partner',
+    guanjiaPartnerAuthorization: 'Official Authorization',
   },
 } as const;
 

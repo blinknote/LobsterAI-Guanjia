@@ -22,7 +22,8 @@ import {
 import { agentService } from '../../services/agent';
 import { coworkService } from '../../services/cowork';
 import { buildCoworkCapabilitySelection } from '../../services/coworkCapabilitySelection';
-import { guanjiaSessionService } from '../../services/guanjiaSession';
+import { tGuanjia } from '../../services/guanjiaI18n';
+import { guanjiaSessionService, useGuanjiaSession } from '../../services/guanjiaSession';
 import { i18nService } from '../../services/i18n';
 import { quickActionService } from '../../services/quickAction';
 import { RootState } from '../../store';
@@ -114,6 +115,8 @@ const CoworkView: React.FC<CoworkViewProps> = ({
   onRespondToPermission,
 }) => {
   const dispatch = useDispatch();
+  const guanjiaSession = useGuanjiaSession();
+  const guanjiaSystemName = guanjiaSession.systemName || guanjiaSession.user?.systemName;
   const isMac = window.electron.platform === 'darwin';
   const isWindows = window.electron.platform === 'win32';
   const [isInitialized, setIsInitialized] = useState(false);
@@ -955,9 +958,14 @@ const CoworkView: React.FC<CoworkViewProps> = ({
                   className="mt-4 text-2xl font-semibold leading-[var(--lobster-leading-2xl)] tracking-normal text-foreground animate-fade-in-up"
                   style={{ animationDelay: '70ms', animationFillMode: 'both' }}
                 >
-                  {currentAgentId === AgentId.GuanjiaAssistant
-                    ? (i18nService.getLanguage() === 'zh' ? '智慧管家业务助手' : 'Smart Butler Assistant')
-                    : i18nService.t(resolveHomeGreetingKey())}
+                  {currentAgentId === AgentId.GuanjiaAssistant ? (
+                    <span className="inline-flex items-center gap-2">
+                      <span>{guanjiaSystemName || (i18nService.getLanguage() === 'zh' ? '智慧管家业务助手' : 'Smart Butler Assistant')}</span>
+                      <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20">
+                        {tGuanjia('guanjiaYoudaoPartner')}
+                      </span>
+                    </span>
+                  ) : i18nService.t(resolveHomeGreetingKey())}
                 </h2>
                 <p
                   className="mt-2 text-[length:var(--lobster-text-promptLarge)] font-normal leading-[var(--lobster-leading-promptLarge)] text-secondary animate-fade-in-up"

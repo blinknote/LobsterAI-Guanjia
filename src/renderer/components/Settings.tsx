@@ -34,6 +34,8 @@ import { apiService } from '../services/api';
 import { configService } from '../services/config';
 import { coworkService } from '../services/cowork';
 import { decryptSecret, decryptWithPassword, EncryptedPayload, encryptWithPassword, PasswordEncryptedPayload } from '../services/encryption';
+import { tGuanjia } from '../services/guanjiaI18n';
+import { useGuanjiaSession } from '../services/guanjiaSession';
 import { i18nService, LanguageType } from '../services/i18n';
 import { imService } from '../services/im';
 import { LogReporterAction, reportYdAnalyzer } from '../services/logReporter';
@@ -1390,6 +1392,8 @@ const Settings: React.FC<SettingsProps> = ({
   enterpriseConfig,
 }) => {
   const dispatch = useDispatch();
+  const guanjiaSession = useGuanjiaSession();
+  const guanjiaSystemName = guanjiaSession.systemName || guanjiaSession.user?.systemName;
   const {
     activeSkin,
     isAppearanceChanging,
@@ -5915,7 +5919,12 @@ const Settings: React.FC<SettingsProps> = ({
                 }
               }}
             />
-            <h3 className="text-lg font-semibold text-foreground">LobsterAI</h3>
+            <h3 className="text-lg font-semibold text-foreground flex items-center gap-2">
+              <span>{guanjiaSystemName || 'LobsterAI'}</span>
+              <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20">
+                {tGuanjia('guanjiaYoudaoPartner')}
+              </span>
+            </h3>
             <span className="text-xs text-secondary mt-1">v{appVersion}</span>
 
             {/* Info Card */}
@@ -5944,6 +5953,25 @@ const Settings: React.FC<SettingsProps> = ({
                   )}
                 </div>
               </div>
+              <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 px-4 py-3 border-b border-border">
+                <span className="shrink-0 text-sm text-foreground">{tGuanjia('guanjiaPartnerAuthorization')}</span>
+                <div className="flex min-w-0 flex-wrap items-center justify-end gap-2">
+                  <span className="text-sm font-medium text-blue-600 dark:text-blue-400">
+                    {tGuanjia('guanjiaYoudaoOfficialPartner')}
+                  </span>
+                </div>
+              </div>
+              {guanjiaSystemName && (
+                <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 px-4 py-3 border-b border-border">
+                  <span className="shrink-0 text-sm text-foreground">运营系统</span>
+                  <div className="flex min-w-0 flex-wrap items-center justify-end gap-2">
+                    <span className="text-sm text-secondary font-medium">{guanjiaSystemName}</span>
+                    {guanjiaSession.user?.tenantName && (
+                      <span className="text-xs text-secondary">({guanjiaSession.user.tenantName})</span>
+                    )}
+                  </div>
+                </div>
+              )}
               <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 px-4 py-3 border-b border-border">
                 <span className="shrink-0 text-sm text-foreground">{i18nService.t('aboutContactEmail')}</span>
                 <div className="flex min-w-0 flex-wrap items-center justify-end gap-2">

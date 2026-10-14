@@ -1,5 +1,7 @@
 import React, { useCallback, useEffect } from 'react';
 
+import { tGuanjia } from '../../services/guanjiaI18n';
+import { useGuanjiaSession } from '../../services/guanjiaSession';
 import SidebarTaskFilterButton from '../agentSidebar/SidebarTaskFilterButton';
 import SidebarTaskSearchButton from '../agentSidebar/SidebarTaskSearchButton';
 import ComposeIcon from '../icons/ComposeIcon';
@@ -41,6 +43,9 @@ const WindowsAppTitleBar: React.FC<WindowsAppTitleBarProps> = ({
   newChatLabel,
   updateBadge,
 }) => {
+  const guanjiaSession = useGuanjiaSession();
+  const displayTitle = guanjiaSession.systemName || guanjiaSession.user?.systemName;
+
   useEffect(() => {
     if (window.electron.platform !== 'win32') return;
 
@@ -85,7 +90,7 @@ const WindowsAppTitleBar: React.FC<WindowsAppTitleBarProps> = ({
             className="h-4 w-4 max-w-none shrink-0"
           />
           <span className={`${isSidebarCollapsed ? 'hidden' : 'min-w-0 truncate'} text-sm font-medium text-foreground`}>
-            LobsterAI
+            {displayTitle ? `${displayTitle} · ${tGuanjia('guanjiaYoudaoPartner')}` : `LobsterAI · ${tGuanjia('guanjiaYoudaoPartner')}`}
           </span>
         </div>
         {(onToggleSidebar || onSearch || showFilterIcon || onNewChat || updateBadge) && (

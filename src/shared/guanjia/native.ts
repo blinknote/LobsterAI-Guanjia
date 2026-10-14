@@ -96,6 +96,8 @@ export interface GuanjiaUserSnapshot {
   name?: string;
   role: string;
   tenantId?: string | number;
+  systemName?: string;
+  tenantName?: string;
 }
 
 export interface GuanjiaStoreSnapshot {
@@ -114,6 +116,7 @@ export interface GuanjiaSessionSnapshot {
   generation: number;
   user: GuanjiaUserSnapshot | null;
   store: GuanjiaStoreSnapshot | null;
+  systemName?: string;
   error?: string;
   updatedAt?: number;
 }
