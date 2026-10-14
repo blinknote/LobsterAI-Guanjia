@@ -317,15 +317,25 @@ jobs:
           path: artifacts
 
       - name: Publish Release
-        uses: softprops/action-gh-release@v1
-        with:
-          name: Release ${{ github.ref_name }}
-          files: |
-            artifacts/**/*.dmg
-            artifacts/**/*.exe
-          draft: false
-          prerelease: ${{ contains(github.ref, '-beta') || contains(github.ref, '-alpha') || contains(github.ref, '-rc') }}
-          generate_release_notes: true
+        shell: bash
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          shopt -s globstar nullglob
+          files=(artifacts/**/*.dmg artifacts/**/*.exe)
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "Error: No release assets found in artifacts/"
+            exit 1
+          fi
+          echo "Found release files to upload: ${files[*]}"
+
+          EXTRA_FLAGS=()
+          if [[ "${{ github.ref_name }}" =~ -(beta|alpha|rc) ]]; then
+            EXTRA_FLAGS+=("--prerelease")
+          fi
+
+          gh release create "${{ github.ref_name }}" "${files[@]}" \
+            --title "Release ${{ github.ref_name }}" \
+            --generate-notes \
+            "${EXTRA_FLAGS[@]}"
 
