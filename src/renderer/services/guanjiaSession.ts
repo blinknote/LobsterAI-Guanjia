@@ -155,6 +155,7 @@ export function useGuanjiaSession() {
     generation: snapshot.generation,
     user: snapshot.user,
     store: snapshot.store,
+    systemName: snapshot.systemName,
     error: snapshot.error,
     init,
     login,
