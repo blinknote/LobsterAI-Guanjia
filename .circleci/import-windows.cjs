@@ -14,8 +14,8 @@ const {
 const FIXED_UPDATE_BASE_URL = 'https://updates.duanyangdao.com';
 const REQUIRED_CHUNK_SIZE = 16 * 1024 * 1024; // strictly 16 MiB (16,777,216 bytes)
 const CONTROL_TIMEOUT_MS = 15 * 1000; // 15 seconds
-const CHUNK_TIMEOUT_MS = 90 * 1000; // 90 seconds
-const JOB_TIMEOUT_MS = 20 * 60 * 1000; // 20 minutes hard job limit
+const CHUNK_TIMEOUT_MS = 180 * 1000; // 180 seconds (3 minutes) for cross-border chunk uploads
+const JOB_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes hard job limit
 const MAX_RESPONSE_BODY_BYTES = 128 * 1024; // 128 KiB metadata response limit (design §4.1)
 const MAX_EXTRA_RETRIES = 2; // max 2 extra retries (3 attempts total)
 const UPLOAD_ID_REGEX = /^[a-zA-Z0-9_-]{1,128}$/;
