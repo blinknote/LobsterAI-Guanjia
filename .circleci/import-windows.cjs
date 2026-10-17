@@ -11,7 +11,7 @@ const {
   APPROVED_BRANCHES,
 } = require('./artifact-identity.cjs');
 
-const FIXED_UPDATE_BASE_URL = 'https://updates.a-j.app';
+const FIXED_UPDATE_BASE_URL = 'https://updates.duanyangdao.com';
 const REQUIRED_CHUNK_SIZE = 16 * 1024 * 1024; // strictly 16 MiB (16,777,216 bytes)
 const CONTROL_TIMEOUT_MS = 15 * 1000; // 15 seconds
 const CHUNK_TIMEOUT_MS = 90 * 1000; // 90 seconds

@@ -131,7 +131,7 @@ jobs:
       - name: Collect macOS Installer & Identity
         run: node .circleci/artifact-identity.cjs collect-macos
 
-      - name: Import macOS Dev Update to updates.a-j.app
+      - name: Import macOS Dev Update to updates.duanyangdao.com
         if: env.LOBSTERAI_UPDATES_IMPORT_TOKEN != ''
         timeout-minutes: 20
         run: node .circleci/import-windows.cjs artifacts/macos
@@ -283,8 +283,8 @@ jobs:
       - name: Collect Windows Installer & Identity
         run: node .circleci/artifact-identity.cjs collect
 
-      # 自动导入并推送到更新平台 updates.a-j.app
-      - name: Import Windows Dev Update to updates.a-j.app
+      # 自动导入并推送到更新平台 updates.duanyangdao.com
+      - name: Import Windows Dev Update to updates.duanyangdao.com
         if: env.LOBSTERAI_UPDATES_IMPORT_TOKEN != ''
         timeout-minutes: 20
         run: node .circleci/import-windows.cjs

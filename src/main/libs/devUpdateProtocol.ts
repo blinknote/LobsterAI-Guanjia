@@ -17,7 +17,7 @@ import {
 
 export { DEV_UPDATE_SCOPE, getDevUpdateScope };
 
-export const DEV_UPDATE_FEED_URL = 'https://updates.a-j.app';
+export const DEV_UPDATE_FEED_URL = 'https://updates.duanyangdao.com';
 export const DEV_UPDATE_CHANNEL_CHECK_PATH = '/api/v1/channel/check';
 export const MAX_METADATA_BYTES = 131072; // 128 KiB
 export const MAX_RELEASE_PAYLOAD_BYTES = 32768; // 32 KiB
