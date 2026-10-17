@@ -2652,7 +2652,7 @@ const App: React.FC = () => {
                   storeName={resolvedGuanjiaStoreName}
                   currentUser={resolvedGuanjiaUserName}
                   todoCount={guanjiaTodoCount}
-                  iframeUrl="https://guanjia.qszy.me/"
+                  iframeUrl="https://guanjia.duanyangdao.com/"
                   onStoreNameChange={setGuanjiaStoreNameOverride}
                   onTodoCountChange={setGuanjiaTodoCount}
                   openAssistantPayload={pendingOpenAssistantPayload}

@@ -543,12 +543,12 @@ function tryLobsteraiServerFallback(modelId?: string): MatchedProvider | null {
 }
 
 function resolveGuanjiaRelayBaseUrl(apiBaseUrl?: string): string {
-  if (!apiBaseUrl) return 'https://guanjia.qszy.me/api/c/ai/v1';
+  if (!apiBaseUrl) return 'https://guanjia.duanyangdao.com/api/c/ai/v1';
   const trimmed = apiBaseUrl.trim().replace(/\/+$/, '');
-  // If the server mistakenly returns an upstream aggregator URL (e.g. cpa.qszy.me or something lacking the relay path),
+  // If the server mistakenly returns an upstream aggregator URL or something lacking the relay path,
   // always redirect to the secure Guanjia relay endpoint so the session token is sent to Guanjia, never upstream.
-  if (trimmed.includes('cpa.qszy.me') || !trimmed.includes('/api/c/ai/v1')) {
-    return 'https://guanjia.qszy.me/api/c/ai/v1';
+  if (trimmed.includes('cpa.qszy.me') || trimmed.includes('guanjia.qszy.me') || !trimmed.includes('/api/c/ai/v1')) {
+    return 'https://guanjia.duanyangdao.com/api/c/ai/v1';
   }
   return trimmed;
 }

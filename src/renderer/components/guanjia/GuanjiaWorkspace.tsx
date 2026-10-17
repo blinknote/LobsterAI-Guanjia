@@ -68,7 +68,7 @@ export const GuanjiaWorkspace: React.FC<GuanjiaWorkspaceProps> = ({
   currentUser,
   currentPageName,
   todoCount,
-  iframeUrl = 'https://guanjia.qszy.me/',
+  iframeUrl = 'https://guanjia.duanyangdao.com/',
   isVisible = true,
   onStoreNameChange,
   onTodoCountChange,
@@ -348,7 +348,7 @@ export const GuanjiaWorkspace: React.FC<GuanjiaWorkspaceProps> = ({
         isAttachingRef.current = true;
         setAttachStatus('attaching');
         setAttachError(null);
-        ipcAttachView(bounds, iframeUrl || 'https://guanjia.qszy.me/')
+        ipcAttachView(bounds, iframeUrl || 'https://guanjia.duanyangdao.com/')
           .then((res) => {
             isAttachingRef.current = false;
             if (res.success) {

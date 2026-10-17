@@ -48,7 +48,7 @@ const electronMock = {
   WebContentsView: class {
     webContents = {
       isDestroyed: () => false,
-      getURL: () => 'https://guanjia.qszy.me/',
+      getURL: () => 'https://guanjia.duanyangdao.com/',
       getTitle: () => '智慧管家',
       loadURL: mock(() => {}),
       reload: mock(() => {}),

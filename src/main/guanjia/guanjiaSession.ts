@@ -127,7 +127,7 @@ export class GuanjiaSession {
       display_name: '智慧管家助手模型',
       balance: 0,
       hide_youdao_models: true,
-      api_base_url: 'https://guanjia.qszy.me/api/c/ai/v1',
+      api_base_url: 'https://guanjia.duanyangdao.com/api/c/ai/v1',
       api_key: '',
       api_type: 'openai',
     });

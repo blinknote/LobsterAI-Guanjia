@@ -420,7 +420,7 @@ export async function requestGuanjiaBusinessApi(
   }
 
   const workspaceManager = GuanjiaWorkspaceManager.getInstance();
-  const rawBaseUrl = workspaceManager.getDefaultUrl() || 'https://guanjia.qszy.me/';
+  const rawBaseUrl = workspaceManager.getDefaultUrl() || 'https://guanjia.duanyangdao.com/';
   let parsedBaseUrl: URL;
   try {
     parsedBaseUrl = new URL(rawBaseUrl);

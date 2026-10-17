@@ -13,7 +13,7 @@ import {
   GuanjiaWorkspaceContext,
 } from './types';
 
-export const DEFAULT_GUANJIA_URL = 'https://guanjia.qszy.me/';
+export const DEFAULT_GUANJIA_URL = 'https://guanjia.duanyangdao.com/';
 
 export class GuanjiaWorkspaceManager {
   private static instance: GuanjiaWorkspaceManager | null = null;

@@ -67,7 +67,7 @@ describe('server model metadata cache', () => {
       provider_name: 'system_builtin',
       model_name: 'gemini-3.8-flash-high',
       display_name: '智慧管家助手模型',
-      api_base_url: 'https://guanjia.qszy.me/api/c/ai/v1',
+      api_base_url: 'https://guanjia.duanyangdao.com/api/c/ai/v1',
       api_key: '',
       api_type: 'openai',
       hide_youdao_models: true,
@@ -76,7 +76,7 @@ describe('server model metadata cache', () => {
     const providers = resolveAllEnabledProviderConfigs();
     const systemBuiltin = providers.find((p) => p.providerName === 'system_builtin');
     expect(systemBuiltin).toBeDefined();
-    expect(systemBuiltin?.baseURL).toBe('https://guanjia.qszy.me/api/c/ai/v1');
+    expect(systemBuiltin?.baseURL).toBe('https://guanjia.duanyangdao.com/api/c/ai/v1');
     expect(systemBuiltin?.apiKey).toBe('sk-lobsterai-local');
 
     const apiKeys = resolveAllProviderApiKeys();
@@ -85,7 +85,7 @@ describe('server model metadata cache', () => {
     const raw = resolveRawApiConfig();
     expect(raw.config).toMatchObject({
       model: 'gemini-3.8-flash-high',
-      baseURL: 'https://guanjia.qszy.me/api/c/ai/v1',
+      baseURL: 'https://guanjia.duanyangdao.com/api/c/ai/v1',
       apiKey: 'sk-lobsterai-local',
       apiType: 'openai',
     });
@@ -208,7 +208,7 @@ describe('system_builtin provider resolution with guanjia', () => {
       provider_name: 'system_builtin',
       model_name: 'gemini-3.8-flash-high',
       display_name: '智慧管家助手模型',
-      api_base_url: 'https://guanjia.qszy.me/api/c/ai/v1',
+      api_base_url: 'https://guanjia.duanyangdao.com/api/c/ai/v1',
       api_key: 'sk-test-guanjia-key',
       api_type: 'openai',
       hide_youdao_models: true,
@@ -219,7 +219,7 @@ describe('system_builtin provider resolution with guanjia', () => {
     expect(systemBuiltin).toBeDefined();
     expect(systemBuiltin).toMatchObject({
       providerName: 'system_builtin',
-      baseURL: 'https://guanjia.qszy.me/api/c/ai/v1',
+      baseURL: 'https://guanjia.duanyangdao.com/api/c/ai/v1',
       apiKey: 'sk-test-guanjia-key',
       apiType: 'openai',
       models: [{
@@ -234,7 +234,7 @@ describe('system_builtin provider resolution with guanjia', () => {
     const raw = resolveRawApiConfig();
     expect(raw.config).toMatchObject({
       model: 'gemini-3.8-flash-high',
-      baseURL: 'https://guanjia.qszy.me/api/c/ai/v1',
+      baseURL: 'https://guanjia.duanyangdao.com/api/c/ai/v1',
       apiKey: 'sk-test-guanjia-key',
       apiType: 'openai',
     });

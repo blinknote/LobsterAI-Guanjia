@@ -134,28 +134,28 @@ describe('Guanjia Workspace Manager & Preload Security', () => {
 
 
   it('should have DEFAULT_GUANJIA_URL pointing to the production domain', () => {
-    expect(DEFAULT_GUANJIA_URL).toBe('https://guanjia.qszy.me/');
+    expect(DEFAULT_GUANJIA_URL).toBe('https://guanjia.duanyangdao.com/');
   });
 
   it('should support navigation configuration, reload and default url fallback', () => {
     const manager = GuanjiaWorkspaceManager.getInstance();
-    expect(manager.getDefaultUrl()).toBe('https://guanjia.qszy.me/');
+    expect(manager.getDefaultUrl()).toBe('https://guanjia.duanyangdao.com/');
 
     // 测试动态修改默认 URL
-    manager.setDefaultUrl('https://guanjia.qszy.me/dashboard');
-    expect(manager.getDefaultUrl()).toBe('https://guanjia.qszy.me/dashboard');
+    manager.setDefaultUrl('https://guanjia.duanyangdao.com/dashboard');
+    expect(manager.getDefaultUrl()).toBe('https://guanjia.duanyangdao.com/dashboard');
 
     // 恢复默认
     manager.setDefaultUrl(DEFAULT_GUANJIA_URL);
-    expect(manager.getDefaultUrl()).toBe('https://guanjia.qszy.me/');
+    expect(manager.getDefaultUrl()).toBe('https://guanjia.duanyangdao.com/');
 
     // 测试 loadUrl
     const view = manager.getOrCreateView();
     manager.loadUrl();
-    expect(view.webContents.loadURL).toHaveBeenCalledWith('https://guanjia.qszy.me/');
+    expect(view.webContents.loadURL).toHaveBeenCalledWith('https://guanjia.duanyangdao.com/');
 
-    manager.loadUrl('https://guanjia.qszy.me/rooms');
-    expect(view.webContents.loadURL).toHaveBeenCalledWith('https://guanjia.qszy.me/rooms');
+    manager.loadUrl('https://guanjia.duanyangdao.com/rooms');
+    expect(view.webContents.loadURL).toHaveBeenCalledWith('https://guanjia.duanyangdao.com/rooms');
 
     // 测试 reload
     manager.reload();
