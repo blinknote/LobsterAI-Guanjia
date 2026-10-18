@@ -34,6 +34,7 @@ if (cachedSsoCredentials && cachedSsoCredentials.token) {
           else window.sessionStorage.removeItem('guanjia_store_id');
           if (cachedSsoCredentials.storeCode) window.sessionStorage.setItem('guanjia_store_code', cachedSsoCredentials.storeCode);
           else window.sessionStorage.removeItem('guanjia_store_code');
+          window.dispatchEvent(new CustomEvent('guanjia:host-session-ready', { detail: { hostGeneration: 0 } }));
         }
       } catch {
         // Storage unavailable; no credential fallback.

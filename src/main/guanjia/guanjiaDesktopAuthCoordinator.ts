@@ -278,7 +278,6 @@ export class GuanjiaDesktopAuthCoordinator {
       // 若在启动恢复被调用前/微任务执行前业务代次已推进（非初始作用域，如已有手动登录尝试），跳过恢复
       if (
         !this.isStartupIntentActive ||
-        this.logoutSuppressed ||
         invokedBusinessGen !== 0 ||
         sessionService.getGeneration() !== invokedBusinessGen
       ) {
@@ -460,7 +459,8 @@ export class GuanjiaDesktopAuthCoordinator {
       if (!fs.existsSync(this.storageFilePath)) return;
       const raw = fs.readFileSync(this.storageFilePath, 'utf8');
       const data = JSON.parse(raw) as PersistedState;
-      this.logoutSuppressed = Boolean(data.logoutSuppressed);
+      // 新启动或重启时不应抑制静默登录，只要有道有效且已绑定管家，始终自动登录
+      this.logoutSuppressed = false;
 
       const canDecrypt = safeStorage.isEncryptionAvailable();
 
@@ -1380,7 +1380,7 @@ export class GuanjiaDesktopAuthCoordinator {
   }
 
   private async performSyncDesktopAuthSilent(
-    allowAdoption = true,
+    _allowAdoption = true,
     intent: 'official_login' | 'startup' | 'status_refresh' = 'startup',
   ): Promise<GuanjiaDesktopAuthStatus> {
     const officialToken = this.officialTokenGetter?.();
@@ -1490,79 +1490,32 @@ export class GuanjiaDesktopAuthCoordinator {
 
     // 3. 自动采用逻辑
     if (this.bindingState === 'bound') {
-      if (allowAdoption && !this.logoutSuppressed && this.bindingInfo) {
-        if (intent === 'startup') {
-          const currentGen = sessionService.getGeneration();
-          if (
-            !this.isStartupIntentActive ||
-            this.logoutSuppressed ||
-            capturedBusinessGen === null ||
-            currentGen !== capturedBusinessGen ||
-            (this.startupExpectedBusinessGeneration !== null && currentGen !== this.startupExpectedBusinessGeneration)
-          ) {
-            if (
-              currentGen !== capturedBusinessGen ||
-              (this.startupExpectedBusinessGeneration !== null && currentGen !== this.startupExpectedBusinessGeneration)
-            ) {
-              this.isStartupIntentActive = false;
-            }
-            return this.getStatusSnapshot();
-          }
-        }
-
-        const currentSnapshot = sessionService.getSnapshot();
-        if (currentSnapshot.status === 'restoring') {
-          return this.getStatusSnapshot();
-        }
+      const currentSnapshot = sessionService.getSnapshot();
+      if (currentSnapshot.status === 'restoring') {
+        return this.getStatusSnapshot();
+      }
 
       const isSameEmployee =
         currentSnapshot.status === 'authenticated' &&
         Boolean(currentSnapshot.user) &&
-        this.bindingInfo.employeeId != null &&
-        Boolean(this.bindingInfo.tenantId) &&
+        this.bindingInfo?.employeeId != null &&
+        Boolean(this.bindingInfo?.tenantId) &&
         currentSnapshot.user?.id != null &&
-        String(currentSnapshot.user.id) === String(this.bindingInfo.employeeId) &&
-        String(currentSnapshot.user.tenantId) === String(this.bindingInfo.tenantId);
+        String(currentSnapshot.user.id) === String(this.bindingInfo?.employeeId) &&
+        String(currentSnapshot.user.tenantId) === String(this.bindingInfo?.tenantId);
 
-      if (isSameEmployee) {
-        // 同员工保原状态，不重复换取
-      } else if (intent === 'official_login') {
-          // 官方账号切换或重新登录：退出旧会话，换取新员工会话完成静默登录
-          if (currentSnapshot.status === 'authenticated') {
-          sessionService.invalidate('官方账号已切换');
-        }
-        const preExchangeBusinessGen = sessionService.getGeneration();
+      if (!isSameEmployee) {
+        // 只要有道账号有效且已绑定管家账号，当前未登录或员工不符时，直接自动完成静默登录换取与采用，绝不要求用户手动点击
         if (this.officialGeneration === capturedOfficialGen) {
           const adoptRes = await this.exchangeAndAdopt();
           if (
             this.officialGeneration === capturedOfficialGen &&
-            sessionService.getGeneration() === preExchangeBusinessGen &&
-            !this.logoutSuppressed &&
             !adoptRes.success &&
             adoptRes.error
           ) {
             this.lastError = adoptRes.error;
           }
         }
-      } else {
-        if (
-          currentSnapshot.status !== 'authenticated' ||
-          !isSameEmployee
-        ) {
-          if (this.officialGeneration === capturedOfficialGen) {
-            const adoptRes = await this.exchangeAndAdopt();
-            if (
-              this.officialGeneration === capturedOfficialGen &&
-              !this.logoutSuppressed &&
-              (intent !== 'startup' || (capturedBusinessGen !== null && sessionService.getGeneration() === capturedBusinessGen)) &&
-              !adoptRes.success &&
-              adoptRes.error
-            ) {
-              this.lastError = adoptRes.error;
-            }
-          }
-        }
-      }
       }
     } else if (this.bindingState === 'unbound') {
       // 未绑定管家账号：

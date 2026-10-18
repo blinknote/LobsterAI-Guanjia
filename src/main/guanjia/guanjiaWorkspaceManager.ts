@@ -152,6 +152,14 @@ export class GuanjiaWorkspaceManager {
       }
     });
 
+    // DOM 就绪时自动补偿凭证注入，防止页面初次加载时出现未登录表单
+    this.view.webContents.on('dom-ready', () => {
+      const creds = this.currentSsoCredentials;
+      if (creds && creds.token) {
+        void this.injectSessionCredentials(creds).catch(() => {});
+      }
+    });
+
     return this.view;
   }
 
@@ -359,6 +367,21 @@ export class GuanjiaWorkspaceManager {
   ): Promise<void> {
     this.setSsoCredentials(credentials);
     const epoch = this.credentialEpoch;
+
+    // 同步将 guanjia_token 写入 partition Cookie，确保网络请求首包即具备登录态
+    try {
+      const ses = session.fromPartition(GUANJIA_WORKSPACE_PARTITION);
+      const targetOrigin = new URL(this.defaultUrl || DEFAULT_GUANJIA_URL).origin;
+      void ses.cookies.set({
+        url: targetOrigin,
+        name: 'guanjia_token',
+        value: credentials.token,
+        secure: true,
+        httpOnly: false,
+      }).catch(() => {});
+    } catch {
+      // 忽略 Cookie 写入非致命异常
+    }
 
     // 仅当处于可信来源时，注入到当前页面的 sessionStorage
     if (this.view && !this.view.webContents.isDestroyed()) {

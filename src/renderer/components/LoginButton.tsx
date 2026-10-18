@@ -931,6 +931,24 @@ const LoginButton: React.FC<LoginButtonProps> = ({
     };
   }, []);
 
+  // 核心自动化守卫：只要有道账号处于登录态，且检测到已绑定管家账号，而管家当前未登录时，立即自动触发静默登录，无需用户手动点击
+  const isAutoLoggingInRef = useRef(false);
+  useEffect(() => {
+    if (
+      isLoggedIn &&
+      desktopAuth.status.bindingState === 'bound' &&
+      !isGuanjiaLoggedIn &&
+      guanjiaSession.status !== 'restoring'
+    ) {
+      if (!isAutoLoggingInRef.current) {
+        isAutoLoggingInRef.current = true;
+        desktopAuth.loginBound().finally(() => {
+          isAutoLoggingInRef.current = false;
+        });
+      }
+    }
+  }, [isLoggedIn, desktopAuth, isGuanjiaLoggedIn, guanjiaSession.status]);
+
   useEffect(() => {
     const handleOfficialOpenLogin = () => {
       void authService.login();

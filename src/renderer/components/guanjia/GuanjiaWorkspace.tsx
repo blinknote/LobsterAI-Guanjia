@@ -473,6 +473,28 @@ export const GuanjiaWorkspace: React.FC<GuanjiaWorkspaceProps> = ({
     }
   }, []);
 
+  // 自动化守卫：检测到有道账号已登录且已绑定管家账号，但管家会话未登录时，直接自动静默登录，无需用户点击
+  const autoLoggingInRef = useRef(false);
+  useEffect(() => {
+    if (
+      desktopAuth.status.officialAuthenticated &&
+      desktopAuth.status.bindingState === 'bound' &&
+      !isAuthenticated &&
+      sessionStatus !== 'restoring'
+    ) {
+      if (!autoLoggingInRef.current) {
+        autoLoggingInRef.current = true;
+        desktopAuth.loginBound().finally(() => {
+          autoLoggingInRef.current = false;
+        });
+      }
+    }
+  }, [
+    desktopAuth,
+    isAuthenticated,
+    sessionStatus,
+  ]);
+
   // 清除本地助理会话
   const handleClearAssistantSession = async () => {
     try {
@@ -597,7 +619,7 @@ export const GuanjiaWorkspace: React.FC<GuanjiaWorkspaceProps> = ({
             aria-label={tGuanjia('guanjiaViewLabel')}
             className="relative flex h-full w-full flex-col overflow-hidden bg-background"
           >
-            {sessionStatus === 'restoring' ? (
+            {sessionStatus === 'restoring' || (desktopAuth.status.officialAuthenticated && desktopAuth.status.bindingState === 'bound' && !isAuthenticated) ? (
               <div
                 className="flex h-full w-full flex-col items-center justify-center gap-2 bg-background p-4"
                 role="status"

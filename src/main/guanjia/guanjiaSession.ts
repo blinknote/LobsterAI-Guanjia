@@ -208,9 +208,32 @@ export class GuanjiaSession {
     const generation = this.begin();
     let effectiveStore = store;
     if (!effectiveStore) {
-      effectiveStore = await this.resolveDefaultStore(token, user, homeStoreId, storeIds);
+      if (user.role === 'tenant_admin' || user.role === 'super_admin') {
+        effectiveStore = {
+          id: 0,
+          code: 'all',
+          name: user.tenantName ? `${user.tenantName}（连锁总部）` : '连锁总部',
+        };
+      } else if (homeStoreId) {
+        effectiveStore = { id: homeStoreId, code: '', name: '主属门店' };
+      } else if (storeIds && storeIds.size > 0) {
+        const firstId = Array.from(storeIds)[0];
+        if (firstId && firstId !== '*') {
+          effectiveStore = { id: firstId, code: '', name: '默认门店' };
+        }
+      }
     }
-    return this.commit(token, user, effectiveStore, generation, source, operationId);
+    const commitPromise = this.commit(token, user, effectiveStore, generation, source, operationId);
+    if (user.role !== 'tenant_admin' && user.role !== 'super_admin') {
+      void this.resolveDefaultStore(token, user, homeStoreId, storeIds).then((resolved) => {
+        if (resolved && (!effectiveStore || String(resolved.id) === String(effectiveStore.id))) {
+          if (this.credentials?.token === token && this.generation === generation && this.snapshot.status === 'authenticated') {
+            void this.setStore(resolved, { syncWorkspace: false });
+          }
+        }
+      }).catch(() => {});
+    }
+    return commitPromise;
   }
   public async login(payload: GuanjiaLoginPayload): Promise<GuanjiaSessionSnapshot> {
     const manager = GuanjiaWorkspaceManager.getInstance();
