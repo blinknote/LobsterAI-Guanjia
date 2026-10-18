@@ -250,6 +250,16 @@ async function runImport() {
         token
       );
 
+      // Concurrency limit or rate limit (429 or concurrency message) should retry with backoff
+      if (res.status === 429 || errorMsg.includes('Maximum concurrent imports reached')) {
+        if (initAttempts > MAX_EXTRA_RETRIES + 3) {
+          throw new Error(`Server concurrency limit reached (${res.status}): ${errorMsg}`);
+        }
+        console.warn(`[ImportWindows] Server concurrency limit reached (${res.status}: ${errorMsg}), retrying in 5s (attempt ${initAttempts})...`);
+        await safeSleep(5000);
+        continue;
+      }
+
       // Client errors (4xx) must fail immediately without retry
       if (res.status >= 400 && res.status < 500) {
         throw new Error(`Server rejected import creation (${res.status}): ${errorMsg}`);
