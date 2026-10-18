@@ -1239,8 +1239,10 @@ class CoworkService {
 
     if (isGuanjia) {
       const initialSnapshot = guanjiaSessionService.getSnapshot();
-      if (initialSnapshot.status !== 'authenticated' || !initialSnapshot.user?.tenantId || !initialSnapshot.store) {
-        const errorMsg = initialSnapshot.error || '请先登录并核验当前门店';
+      const isChainAdmin = initialSnapshot.user?.role === 'tenant_admin' || initialSnapshot.user?.role === 'super_admin';
+      const hasStore = initialSnapshot.store && initialSnapshot.store.id !== undefined && initialSnapshot.store.id !== null;
+      if (initialSnapshot.status !== 'authenticated' || !initialSnapshot.user?.tenantId || (!hasStore && !isChainAdmin)) {
+        const errorMsg = initialSnapshot.error || '请先登录智慧管家账号';
         window.dispatchEvent(new CustomEvent('app:showToast', { detail: errorMsg }));
         return { session: null, error: errorMsg };
       }
@@ -1250,8 +1252,8 @@ class CoworkService {
       const startResult = await guanjiaNativeService.start({
         initialMessage: options.prompt,
         assistantType: 'general',
-        storeId: initialSnapshot.store?.id ? String(initialSnapshot.store.id) : undefined,
-        storeCode: initialSnapshot.store?.code,
+        storeId: hasStore ? String(initialSnapshot.store!.id) : (isChainAdmin ? '0' : undefined),
+        storeCode: initialSnapshot.store?.code ?? (isChainAdmin ? 'all' : undefined),
       });
 
       const postStartSnapshot = guanjiaSessionService.getSnapshot();
@@ -1364,8 +1366,10 @@ class CoworkService {
       }
 
       const initialSnapshot = guanjiaSessionService.getSnapshot();
-      if (initialSnapshot.status !== 'authenticated' || !initialSnapshot.user?.tenantId || !initialSnapshot.store) {
-        const errorMsg = initialSnapshot.error || '请先登录并核验当前门店';
+      const isChainAdmin = initialSnapshot.user?.role === 'tenant_admin' || initialSnapshot.user?.role === 'super_admin';
+      const hasStore = initialSnapshot.store && initialSnapshot.store.id !== undefined && initialSnapshot.store.id !== null;
+      if (initialSnapshot.status !== 'authenticated' || !initialSnapshot.user?.tenantId || (!hasStore && !isChainAdmin)) {
+        const errorMsg = initialSnapshot.error || '请先登录智慧管家账号';
         window.dispatchEvent(new CustomEvent('app:showToast', { detail: errorMsg }));
         return false;
       }

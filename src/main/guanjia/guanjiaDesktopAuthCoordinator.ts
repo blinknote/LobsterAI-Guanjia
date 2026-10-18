@@ -322,6 +322,9 @@ export class GuanjiaDesktopAuthCoordinator {
               verified.user,
               null,
               source,
+              undefined,
+              verified.homeStoreId,
+              verified.storeIds,
             );
             const reservedGen = sessionService.getGeneration();
             const adoptedSnapshot = await adoptPromise;
@@ -1022,6 +1025,9 @@ export class GuanjiaDesktopAuthCoordinator {
         verified.user,
         currentStore,
         'sso',
+        undefined,
+        verified.homeStoreId,
+        verified.storeIds,
       );
       const adoptionGeneration = sessionService.getGeneration();
       const newSnapshot = await adoptionPromise;
@@ -1270,6 +1276,8 @@ export class GuanjiaDesktopAuthCoordinator {
         null,
         params.source,
         operationId,
+        verified.homeStoreId,
+        verified.storeIds,
       );
       const adoptionGeneration = sessionService.getGeneration();
       const adoptedSnapshot = await adoptionPromise;

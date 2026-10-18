@@ -636,7 +636,9 @@ export const GuanjiaNativeAssistant: React.FC<GuanjiaNativeAssistantProps> = ({
       const res = await guanjiaNativeService.start({
         assistantType: targetAssistantType,
         initialMessage: trimmed,
-        storeId: openAssistantPayload?.storeId || (guanjiaSession.store?.id ? String(guanjiaSession.store.id) : undefined),
+        storeId:
+          openAssistantPayload?.storeId ||
+          (guanjiaSession.store?.id !== undefined && guanjiaSession.store?.id !== null ? String(guanjiaSession.store.id) : undefined),
         storeCode: openAssistantPayload?.storeCode || guanjiaSession.store?.code,
         currentUrl: openAssistantPayload?.currentUrl,
         context,

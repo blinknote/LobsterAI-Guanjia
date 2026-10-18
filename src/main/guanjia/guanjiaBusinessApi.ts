@@ -387,7 +387,14 @@ export async function requestGuanjiaBusinessApi(
     });
   }
 
-  if (cleanPath !== '/api/c/ai/client-model-config' && (!snapshot.store || !snapshot.store.id || !String(snapshot.store.id).trim())) {
+  const isChainAdmin = snapshot.user?.role === 'super_admin' || snapshot.user?.role === 'tenant_admin';
+  const hasValidStore =
+    snapshot.store &&
+    snapshot.store.id !== undefined &&
+    snapshot.store.id !== null &&
+    String(snapshot.store.id).trim() !== '';
+
+  if (cleanPath !== '/api/c/ai/client-model-config' && !isChainAdmin && !hasValidStore) {
     throw new GuanjiaBusinessApiError('智慧管家当前未选择有效门店(store.id)，拒绝发起业务请求', {
       code: 'MISSING_STORE',
       requestId,
@@ -456,11 +463,15 @@ export async function requestGuanjiaBusinessApi(
     'X-Request-ID': requestId,
   };
 
-  if (snapshot.store?.id) {
+  if (hasValidStore) {
     headers['X-Store-Id'] = String(snapshot.store.id);
+  } else if (isChainAdmin) {
+    headers['X-Store-Id'] = '0';
   }
   if (snapshot.store?.code) {
     headers['X-Store-Code'] = String(snapshot.store.code);
+  } else if (isChainAdmin) {
+    headers['X-Store-Code'] = 'all';
   }
 
   let serializedBody: string | undefined;
