@@ -36,7 +36,7 @@ jobs:
       LOBSTERAI_UNSIGNED_BUILD: "1"
       CIRCLE_BRANCH: ${{ github.ref_type == 'tag' && 'main' || github.ref_name }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v4
         with:
           node-version: '24.x'
@@ -162,7 +162,7 @@ jobs:
       LOBSTERAI_UNSIGNED_BUILD: "1"
       CIRCLE_BRANCH: ${{ github.ref_type == 'tag' && 'main' || github.ref_name }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v4
         with:
           node-version: '24.x'
@@ -309,7 +309,7 @@ jobs:
       contents: write
     if: startsWith(github.ref, 'refs/tags/v')
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Download All Artifacts
         uses: actions/download-artifact@v4
