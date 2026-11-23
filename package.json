@@ -251,7 +251,7 @@
     "micromark-util-normalize-identifier": "^1.1.0",
     "nim-web-sdk-ng": "10.9.77-alpha.4",
     "npm": "^11.11.0",
-    "pdfjs-dist": "^4.10.38",
+    "pdfjs-dist": "^6.5.438",
     "pptx-preview": "^1.0.7",
     "qrcode.react": "^4.2.0",
     "react": "^18.2.0",
