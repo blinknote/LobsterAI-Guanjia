@@ -37,7 +37,7 @@ jobs:
       CIRCLE_BRANCH: ${{ github.ref_type == 'tag' && 'main' || github.ref_name }}
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: '24.x'
 
@@ -163,7 +163,7 @@ jobs:
       CIRCLE_BRANCH: ${{ github.ref_type == 'tag' && 'main' || github.ref_name }}
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: '24.x'
 
